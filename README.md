@@ -1,32 +1,40 @@
-# React + TypeScript + Vite
+# VibeBot
+Почувствовать команду. Сделать следующий шаг.
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Командный навигатор: добровольный чек-ин → агрегированный сигнал → предложение → договорённость → проверка пользы.
 
-Currently, two official plugins are available:
+## Что уже работает
+Стартовый интерактивный прототип: три шкалы чек-ина, вымышленный закрытый раунд из шести участников, карточка действия, подтверждение и личная демо-оценка пользы. Переключатели демонстрируют подавление статистики для четырёх участников и открытого раунда. Данные живут в памяти страницы; обновление сбрасывает действия. Сервер, общие аккаунты, хранение и ИИ пока не подключены. Прототип предназначен для демонстрации, не для сбора реальных чувствительных данных.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+## Запуск
+Нужен Node.js 24 и npm.
+```sh
+git clone https://github.com/augustteske/vibebot.git
+cd vibebot
+git switch develop
+npm ci
+npm run dev
+```
+Открыть адрес, который напечатает Vite.
+```sh
+npm test
+npm run build
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Команда и работа
+| Участник | Ветка | Основная зона |
+|---|---|---|
+| Август — тимлид | feat/august-core | Ядро, сервер, ИИ, общая сборка, выпуск |
+| Илиан | feat/ilian-checkin | Чек-ин, состояния раунда, интерфейс входа в пространство |
+| Арина | feat/arina-actions | Карточки, договорённости, благодарности |
+| Алиса | feat/alisa-insights-demo | Состояние команды, демо-сценарий, проверка и материалы питча |
+
+main — проверенная версия для показа. develop — интеграция. Рабочие ветки созданы от общей стартовой версии. PR направлять в develop; слияние и перенос в main делает Август. Защита через правила GitHub может зависеть от тарифа — см. актуальный статус в репозитории, договорённости описаны в AGENTS.md.
+
+- [План, сроки и нагрузка](docs/TEAM_PLAN.md)
+- [Контракты и границы изменений](docs/CONTRACTS.md)
+- [Концепция и критерии MVP](docs/PRODUCT.md)
+- [Питч и проверка](docs/PITCH.md)
+- [Задачи GitHub](https://github.com/augustteske/vibebot/issues)
+
+Начинать можно сразу: каждый улучшает существующий компонент в своей папке. Доступ к GitHub выдаётся по точному логину; имя в плане не означает, что приглашение уже отправлено.
