@@ -67,6 +67,18 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
           : store.telegram.issueLinkToken(actor, input)
         return json(res, bot ? 200 : 201, result)
       }
+      const periodRoute = url.pathname.match(/^\/api\/telegram\/bindings\/([a-f0-9-]+)\/(periods\/close|summary)$/)
+      if (periodRoute) {
+        if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
+        const closing = periodRoute[2] === 'periods/close'
+        if (req.method !== (closing ? 'POST' : 'GET')) throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
+        if (closing) checkBrowser(req)
+        const actor = store.authenticate(tokenFrom(req))
+        if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
+        return json(res, 200, closing
+          ? store.telegram.closePeriod(actor, periodRoute[1], await body(req, 'INVALID_INPUT'))
+          : store.telegram.summary(actor, periodRoute[1]))
+      }
       if (url.pathname.startsWith('/api/bot/') || url.pathname.startsWith('/api/telegram/')) {
         const route = url.pathname.match(/^\/api\/(bot\/v1|telegram)\/bindings\/([a-f0-9-]+)(?:\/(roster|company|consents|control|pause|events))?$/)
         const bot = route?.[1] === 'bot/v1'

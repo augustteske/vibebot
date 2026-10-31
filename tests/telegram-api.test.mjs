@@ -14,6 +14,7 @@ const credential = '1'.repeat(64)
 const bootstrapCredential = '3'.repeat(64)
 const credentialHash = createHash('sha256').update(credential).digest('hex')
 const policyVersion = 'synthetic-v1'
+const DAY = 86400000
 
 async function fixture(t, { enabled = true, seedLinks = true, seedBindings = true } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'vibee-telegram-test-'))
@@ -74,6 +75,10 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
   const bindingToken = (token = ownerToken, input = { requestId: randomUUID() }) => request('/telegram/binding-tokens',
     input, { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1' })
   const bind = (input, auth = bootstrapCredential) => request('/bot/v1/bindings', input, { Authorization: 'Bearer ' + auth })
+  const closePeriod = (input, token = ownerToken, bindingId = id) => request('/telegram/bindings/' + bindingId + '/periods/close',
+    input, { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1' })
+  const summary = (token = ownerToken, bindingId = id) => request('/telegram/bindings/' + bindingId + '/summary',
+    undefined, { Cookie: 'vibebot_session=' + token })
   const command = (expectedRevision, fields) => ({ requestId: randomUUID(), expectedRevision, ...fields })
   const status = async () => {
     const result = await bot('')
@@ -101,8 +106,8 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
     assert.equal(result.body.phase, 'active')
     return result.body
   }
-  return { db, id, otherBindingId, owner, people, tokens, foreignToken, request, web, bot, linkToken, link, bindingToken, bind, command, status,
-    mutate, decision, prepare, activate, time: () => clock, advance: ms => { clock += ms },
+  return { db, id, otherBindingId, owner, people, tokens, foreignToken, request, web, bot, linkToken, link, bindingToken, bind, closePeriod, summary, command, status,
+    mutate, decision, prepare, activate, time: () => clock, advance: ms => { clock += ms }, setTime: ms => { clock = ms },
     restart: async () => { await app.close(); await launch() } }
 }
 
@@ -113,6 +118,16 @@ const error = (result, status, code) => {
 const textEvent = (f, expectedRevision, fields = {}) => ({ eventId: randomUUID(), expectedRevision,
   chatId: '-100000000001', messageId: '42', senderId: '100000001',
   sentAt: new Date(f.time()).toISOString(), text: 'Synthetic allowed text', ...fields })
+const sendMany = async (f, revision, count, authors, firstMessageId, thanks = 0) => {
+  for (let i = 0; i < count; i++) {
+    const result = await f.bot('events', textEvent(f, revision, {
+      messageId: String(firstMessageId + i), senderId: String(100000001 + i % authors),
+      text: i < thanks ? 'Спасибо за помощь' : 'Synthetic routine update',
+    }))
+    assert.equal(result.status, 200, JSON.stringify(result))
+  }
+}
+const closeCurrent = (f, revision) => f.closePeriod({ requestId: randomUUID(), expectedRevision: revision, periodId: randomUUID() })
 
 test('SQLite: adding Telegram tables preserves existing workspace, member and check-in rows', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'vibee-telegram-legacy-'))
@@ -139,7 +154,7 @@ test('SQLite: adding Telegram tables preserves existing workspace, member and ch
   assert.equal(reopened.prepare('SELECT name FROM members WHERE id=?').get(memberId).name, 'Legacy member')
   assert.deepEqual({ ...reopened.prepare('SELECT energy,clarity,support FROM checkins WHERE round_id=?').get(roundId) },
     { energy: 2, clarity: 3, support: 4 })
-  assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 12)
+  assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 16)
   reopened.close()
 })
 
@@ -349,6 +364,85 @@ test('HTTP/SQLite: raw text expires at 15 minutes, metadata at 24 hours across r
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM checkins').get().n, 1)
 })
 
+test('HTTP/SQLite: four authors or 19 messages yield insufficient without numbers', async t => {
+  const f = await fixture(t)
+  const active = await f.activate()
+  f.setTime(Date.parse('2026-11-02T03:00:00.000Z'))
+  await sendMany(f, active.revision, 20, 4, 100)
+  const firstClose = { requestId: randomUUID(), expectedRevision: active.revision, periodId: randomUUID() }
+  assert.deepEqual(await f.closePeriod(firstClose), { status: 200, body: { status: 'insufficient' } })
+  assert.deepEqual(await f.closePeriod(firstClose), { status: 200, body: { status: 'insufficient' } })
+  error(await f.closePeriod({ ...firstClose, periodId: randomUUID() }), 409, 'EVENT_CONFLICT')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_closed_periods').get().n, 1)
+  assert.equal(f.db.prepare('SELECT metrics FROM telegram_closed_periods ORDER BY rowid DESC LIMIT 1').get().metrics, null)
+  f.advance(DAY)
+  await sendMany(f, active.revision, 19, 5, 200)
+  assert.deepEqual(await closeCurrent(f, active.revision), { status: 200, body: { status: 'insufficient' } })
+  assert.deepEqual((await f.summary()).body, { status: 'insufficient' })
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_period_authors').get().n, 0)
+})
+
+test('HTTP/SQLite: three synthetic closed dates publish only aggregate metrics and expire after seven days', async t => {
+  const f = await fixture(t)
+  const active = await f.activate()
+  const base = Date.parse('2026-11-02T03:00:00.000Z')
+  for (let day = 0; day < 2; day++) {
+    f.setTime(base + day * DAY)
+    await sendMany(f, active.revision, 20, 5, 300 + day * 100, 4)
+    assert.deepEqual(await closeCurrent(f, active.revision), { status: 200, body: { status: 'calibrating' } })
+  }
+  f.setTime(base + 2 * DAY - 3600000)
+  await sendMany(f, active.revision, 5, 5, 500, 4)
+  f.advance(3600000)
+  await f.restart() // The first five raw texts expired; only aggregate counters survive.
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_texts').get().n, 0)
+  await sendMany(f, active.revision, 15, 5, 505)
+  const published = await closeCurrent(f, active.revision)
+  assert.equal(published.status, 200)
+  assert.equal(published.body.status, 'published')
+  assert.equal(published.body.demo, true)
+  assert.deepEqual(published.body.metrics, {
+    outsideHoursPercent: 25, participationEvenness: 89.8, recognitionPercent: 20,
+  })
+  assert.equal(published.body.comparison, null)
+  assert.equal(JSON.stringify(published.body).includes('100000001'), false)
+  assert.deepEqual((await f.summary()).body, published.body)
+  await f.mutate('pause', { reason: 'manual' }, f.bot)
+  assert.deepEqual((await f.summary()).body, { status: 'paused' })
+  await f.mutate('control', { action: 'resume' })
+  assert.deepEqual((await f.summary()).body, { status: 'insufficient' })
+  f.advance(7 * DAY + 1)
+  await f.restart()
+  assert.deepEqual((await f.summary()).body, { status: 'insufficient' })
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_closed_periods').get().n, 0)
+})
+
+test('HTTP/SQLite: withdrawal, roster change and transport gap discard an open period', async t => {
+  const f = await fixture(t)
+  const active = await f.activate()
+  f.setTime(Date.parse('2026-11-02T03:00:00.000Z'))
+  await sendMany(f, active.revision, 1, 1, 600)
+  error(await f.closePeriod({ requestId: randomUUID(), expectedRevision: active.revision,
+    periodId: randomUUID() }, f.foreignToken), 404, 'NOT_FOUND')
+  error(await f.closePeriod({ requestId: randomUUID(), expectedRevision: active.revision,
+    periodId: randomUUID() }, f.tokens[1]), 403, 'FORBIDDEN')
+  await f.decision(0, 'withdrawn')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_open_periods').get().n, 0)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_texts').get().n, 0)
+  error(await closeCurrent(f, active.revision), 409, 'STALE_REVISION')
+  await f.decision(0)
+  const resumed = await f.mutate('control', { action: 'resume' })
+  await sendMany(f, resumed.body.revision, 1, 1, 601)
+  await f.mutate('pause', { reason: 'transport_gap' }, f.bot)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_open_periods').get().n, 0)
+  const resumedAgain = await f.mutate('control', { action: 'resume' })
+  error(await closeCurrent(f, resumedAgain.body.revision), 409, 'STALE_PERIOD')
+  await sendMany(f, resumedAgain.body.revision, 1, 1, 602)
+  await f.mutate('roster', { memberIds: f.people.map(person => person.id), verified: true })
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_open_periods').get().n, 0)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_closed_periods').get().n, 0)
+})
+
 test('HTTP/SQLite: all consent and explicit resume; withdrawal persists and old buttons fail', async t => {
   const f = await fixture(t)
   await f.prepare()
@@ -532,5 +626,5 @@ test('Telegram synthetic gate defaults off and unfinished summary routes remain 
   error(await f.bot('events', { text: 'synthetic text must not be stored' }), 503, 'UNAVAILABLE')
   error(await f.request('/telegram/link-tokens', { requestId: randomUUID() }), 503, 'UNAVAILABLE')
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_requests').get().n, 0)
-  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 12)
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 16)
 })
