@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { createApp } from '../server/app.mjs'
-import { templateRecommendationProvider } from '../server/recommendation-provider.mjs'
+import { templateRecommendationProvider, templateRecommendationContent } from '../server/recommendation-provider.mjs'
 import { createStore } from '../server/store.mjs'
 import { initialConsentState, transitionConsent } from '../src/core/telegram.ts'
 
@@ -551,6 +551,21 @@ test('HTTP/SQLite: recommendation provider receives aggregates and safely falls 
   const fallback = await f.recommendation(periodId)
   assert.deepEqual(fallback, normal)
   assert.equal(seen.length, 2)
+})
+
+test('recommendation provider rejects missing, blank, oversized and extra fields', () => {
+  const metrics = { outsideHoursPercent: 25, participationEvenness: 90, recognitionPercent: 20 }
+  const expected = templateRecommendationProvider.generate({ metrics })
+  const from = content => templateRecommendationContent({ generate: () => content }, metrics)
+  for (const field of ['observation', 'explanation', 'limitation', 'action']) {
+    const missing = { ...expected }; delete missing[field]
+    assert.deepEqual(from(missing), expected)
+    assert.deepEqual(from({ ...expected, [field]: '   ' }), expected)
+    assert.deepEqual(from({ ...expected, [field]: 'x'.repeat(501) }), expected)
+  }
+  assert.deepEqual(from({ ...expected, extra: 'unexpected' }), expected)
+  assert.deepEqual(from({ ...expected, action: 42 }), expected)
+  assert.deepEqual(from({ ...expected, action: 'x'.repeat(500) }).action, 'x'.repeat(500))
 })
 
 test('HTTP/SQLite: expired published card and action disappear after restart', async t => {
