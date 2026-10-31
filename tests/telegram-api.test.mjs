@@ -102,7 +102,7 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
     return result.body
   }
   return { db, id, otherBindingId, owner, people, tokens, foreignToken, request, web, bot, linkToken, link, bindingToken, bind, command, status,
-    mutate, decision, prepare, activate, advance: ms => { clock += ms },
+    mutate, decision, prepare, activate, time: () => clock, advance: ms => { clock += ms },
     restart: async () => { await app.close(); await launch() } }
 }
 
@@ -110,6 +110,9 @@ const error = (result, status, code) => {
   assert.equal(result.status, status, JSON.stringify(result.body))
   assert.equal(result.body.error.code, code)
 }
+const textEvent = (f, expectedRevision, fields = {}) => ({ eventId: randomUUID(), expectedRevision,
+  chatId: '-100000000001', messageId: '42', senderId: '100000001',
+  sentAt: new Date(f.time()).toISOString(), text: 'Synthetic allowed text', ...fields })
 
 test('SQLite: adding Telegram tables preserves existing workspace, member and check-in rows', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'vibee-telegram-legacy-'))
@@ -136,7 +139,7 @@ test('SQLite: adding Telegram tables preserves existing workspace, member and ch
   assert.equal(reopened.prepare('SELECT name FROM members WHERE id=?').get(memberId).name, 'Legacy member')
   assert.deepEqual({ ...reopened.prepare('SELECT energy,clarity,support FROM checkins WHERE round_id=?').get(roundId) },
     { energy: 2, clarity: 3, support: 4 })
-  assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 9)
+  assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 12)
   reopened.close()
 })
 
@@ -273,6 +276,77 @@ test('HTTP/SQLite: binding requires organizer identity, live token and unique ch
   await f.restart()
   error(await f.bind({ requestId: randomUUID(), token: expiring.body.token,
     chatId: '-100000000006', initiatorId: '100000002' }), 409, 'TOKEN_EXPIRED')
+})
+
+test('HTTP/SQLite: active consent admits one fresh text and deduplicates both Telegram keys', async t => {
+  const f = await fixture(t)
+  const active = await f.activate()
+  const input = textEvent(f, active.revision)
+  assert.deepEqual(await f.bot('events', input),
+    { status: 200, body: { eventId: input.eventId, result: 'accepted', revision: active.revision } })
+  assert.equal(f.db.prepare('SELECT text FROM telegram_texts WHERE binding_id=?').get(f.id).text, input.text)
+  assert.equal((await f.bot('events', input)).body.result, 'duplicate')
+  assert.equal((await f.bot('events', { ...input, eventId: randomUUID() })).body.result, 'duplicate')
+  error(await f.bot('events', { ...input, text: 'different' }), 409, 'EVENT_CONFLICT')
+  error(await f.bot('events', { ...input, eventId: randomUUID(), text: 'different' }), 409, 'EVENT_CONFLICT')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_texts').get().n, 1)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_message_ids').get().n, 1)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_event_ids').get().n, 2)
+})
+
+test('HTTP/SQLite: incomplete consent, wrong chat and invalid event never write text or state', async t => {
+  const f = await fixture(t)
+  const current = await f.status()
+  error(await f.bot('events', textEvent(f, current.revision)), 409, 'CONSENT_REQUIRED')
+  const active = await f.activate()
+  for (const fields of [
+    { chatId: '-100000000002' }, { expectedRevision: active.revision - 1 },
+    { sentAt: new Date(f.time() - 60001).toISOString() },
+    { sentAt: new Date(f.time() + 30001).toISOString() },
+    { text: 'x'.repeat(4097) }, { text: ' ' }, { workspaceId: f.owner.workspace_id },
+  ]) {
+    const result = await f.bot('events', textEvent(f, active.revision, fields))
+    assert.ok([400, 404, 409].includes(result.status), JSON.stringify(result))
+  }
+  error(await f.bot('events', textEvent(f, active.revision), f.otherBindingId), 404, 'NOT_FOUND')
+  error(await f.bot('events', textEvent(f, active.revision), f.id, bootstrapCredential), 401, 'BOT_AUTH_REQUIRED')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_texts').get().n, 0)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_event_ids').get().n, 0)
+  assert.deepEqual(await f.status(), active)
+})
+
+test('HTTP/SQLite: unknown sender pauses chat and withdrawal removes retained text', async t => {
+  const f = await fixture(t)
+  const active = await f.activate()
+  assert.equal((await f.bot('events', textEvent(f, active.revision))).body.result, 'accepted')
+  const unknown = await f.bot('events', textEvent(f, active.revision,
+    { eventId: randomUUID(), messageId: '43', senderId: '999999999' }))
+  assert.equal(unknown.body.result, 'paused')
+  assert.equal(unknown.body.revision, active.revision + 1)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_texts').get().n, 0)
+  error(await f.bot('events', textEvent(f, unknown.body.revision, { messageId: '44' })), 409, 'CONSENT_REQUIRED')
+  await f.prepare()
+  for (let i = 0; i < 6; i++) await f.decision(i)
+  const resumed = await f.mutate('control', { action: 'resume' })
+  assert.equal((await f.bot('events', textEvent(f, resumed.body.revision, { messageId: '45' }))).body.result, 'accepted')
+  await f.decision(0, 'withdrawn')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_texts').get().n, 0)
+})
+
+test('HTTP/SQLite: raw text expires at 15 minutes, metadata at 24 hours across restart', async t => {
+  const f = await fixture(t)
+  const active = await f.activate()
+  const input = textEvent(f, active.revision)
+  assert.equal((await f.bot('events', input)).body.result, 'accepted')
+  f.advance(900001)
+  await f.restart()
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_texts').get().n, 0)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_event_ids').get().n, 1)
+  f.advance(86400000)
+  await f.restart()
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_event_ids').get().n, 0)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_message_ids').get().n, 0)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM checkins').get().n, 1)
 })
 
 test('HTTP/SQLite: all consent and explicit resume; withdrawal persists and old buttons fail', async t => {
@@ -451,12 +525,12 @@ test('HTTP/SQLite: rejected requests cannot expire or change another binding', a
   assert.deepEqual(f.db.prepare('SELECT state,evidence_expires FROM telegram_bindings WHERE id=?').get(f.id), afterExpiry)
 })
 
-test('Telegram synthetic gate defaults off and text/bootstrap/summary routes remain absent', async t => {
+test('Telegram synthetic gate defaults off and unfinished summary routes remain absent', async t => {
   const f = await fixture(t, { enabled: false })
   error(await f.bot(''), 503, 'UNAVAILABLE')
   error(await f.web('control', f.command(1, { action: 'resume' })), 503, 'UNAVAILABLE')
-  error(await f.bot('events', { text: 'synthetic text must not be stored' }), 404, 'NOT_FOUND')
+  error(await f.bot('events', { text: 'synthetic text must not be stored' }), 503, 'UNAVAILABLE')
   error(await f.request('/telegram/link-tokens', { requestId: randomUUID() }), 503, 'UNAVAILABLE')
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_requests').get().n, 0)
-  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 9)
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 12)
 })
