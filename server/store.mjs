@@ -20,7 +20,7 @@ const templates = {
 }
 
 export function createStore({ path = ':memory:', secret, telegramBootstrapCredential, telegramSynthetic = false, now = Date.now,
-  recommendationProvider }) {
+  recommendationProvider, recommendationTimeoutMs }) {
   if (!secret || secret.length < 32) throw new Error('A persistent server secret of at least 32 characters is required')
   const db = new DatabaseSync(path)
   db.exec(`
@@ -61,7 +61,7 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
   }
 
   const telegram = createTelegramStore({ db, secret, bootstrapCredential: telegramBootstrapCredential, fail,
-    enabled: telegramSynthetic, now, recommendationProvider })
+    enabled: telegramSynthetic, now, recommendationProvider, recommendationTimeoutMs })
   return {
     telegram,
     close: () => db.close(),

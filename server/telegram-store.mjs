@@ -24,7 +24,7 @@ const canonical = value => JSON.stringify(value, (_, item) => item && !Array.isA
 // Uses the existing database/transaction boundary. No message storage or network I/O.
 // Bootstrap tokens and credential provisioning are deliberately outside this slice.
 export function createTelegramStore({ db, secret, bootstrapCredential, fail, enabled = false, now = Date.now,
-  recommendationProvider = templateRecommendationProvider }) {
+  recommendationProvider = templateRecommendationProvider, recommendationTimeoutMs = 3000 }) {
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS members_workspace_id ON members(workspace_id,id);
     CREATE TABLE IF NOT EXISTS telegram_bindings(
@@ -602,7 +602,9 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
         const { row, state, profile } = publishedPeriod(actor, id, periodId)
         return { metrics: JSON.parse(row.metrics), revision: state.revision, profileVersion: profile.version }
       })
-      const content = await recommendationProviderContent(recommendationProvider, snapshot.metrics)
+      const content = await recommendationProviderContent(recommendationProvider, snapshot.metrics,
+        Number.isSafeInteger(recommendationTimeoutMs) && recommendationTimeoutMs > 0
+          ? Math.min(recommendationTimeoutMs, 3000) : 3000)
       return tx(() => {
         const currentActor = reauthenticate()
         if (!currentActor) fail(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')

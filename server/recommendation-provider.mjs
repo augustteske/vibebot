@@ -13,10 +13,15 @@ export const templateRecommendationProvider = Object.freeze({
   },
 })
 
-export async function recommendationProviderContent(provider, metrics) {
+export async function recommendationProviderContent(provider, metrics, timeoutMs = 3000) {
   const context = { metrics: Object.freeze({ ...metrics }) }
+  let timer
   try {
-    const content = await provider.generate(context)
+    const providerResult = Promise.resolve().then(() => provider.generate(context))
+    const content = await Promise.race([
+      providerResult,
+      new Promise(resolve => { timer = setTimeout(() => resolve(null), timeoutMs) }),
+    ])
     if (content && typeof content === 'object' && !Array.isArray(content)
       && Object.keys(content).length === CARD_FIELDS.length
       && Object.keys(content).every(key => CARD_FIELDS.includes(key))
@@ -25,5 +30,6 @@ export async function recommendationProviderContent(provider, metrics) {
       return Object.fromEntries(CARD_FIELDS.map(key => [key, content[key]]))
     }
   } catch { /* A provider failure must not reveal partial or invented content. */ }
+  finally { clearTimeout(timer) }
   return null
 }

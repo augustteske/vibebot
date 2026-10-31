@@ -3,8 +3,9 @@ import { readFile } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
 import { AppError, createStore } from './store.mjs'
 
-export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookies = false, allowedOrigins = [], telegramBootstrapCredential, telegramSynthetic = false, now = Date.now, recommendationProvider }) {
-  const store = createStore({ path: dbPath, secret, telegramBootstrapCredential, telegramSynthetic, now, recommendationProvider })
+export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookies = false, allowedOrigins = [], telegramBootstrapCredential, telegramSynthetic = false, now = Date.now, recommendationProvider, recommendationTimeoutMs }) {
+  const store = createStore({ path: dbPath, secret, telegramBootstrapCredential, telegramSynthetic, now,
+    recommendationProvider, recommendationTimeoutMs })
   const cleanupTimer = setInterval(() => {
     try { store.telegram.cleanup() } catch { console.error('Vibee: Telegram cleanup failed') }
   }, 60000)

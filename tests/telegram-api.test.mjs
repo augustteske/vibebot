@@ -18,7 +18,8 @@ const policyVersion = 'synthetic-v1'
 const DAY = 86400000
 const demoIntervals = [1, 2, 3, 4, 5].map(day => ({ day, start: 540, end: 1080 }))
 
-async function fixture(t, { enabled = true, seedLinks = true, seedBindings = true, recommendationProvider } = {}) {
+async function fixture(t, { enabled = true, seedLinks = true, seedBindings = true,
+  recommendationProvider, recommendationTimeoutMs } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'vibee-telegram-test-'))
   const dbPath = join(dir, 'synthetic.sqlite')
   const store = createStore({ path: dbPath, secret })
@@ -58,7 +59,7 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
   let app, base
   const launch = async () => {
     app = createApp({ dbPath, secret, telegramBootstrapCredential: bootstrapCredential,
-      telegramSynthetic: enabled, now: () => clock, recommendationProvider })
+      telegramSynthetic: enabled, now: () => clock, recommendationProvider, recommendationTimeoutMs })
     await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve))
     base = 'http://127.0.0.1:' + app.server.address().port + '/api'
   }
@@ -638,6 +639,55 @@ test('HTTP/SQLite: rejected asynchronous provider falls back after state recheck
   assert.deepEqual({ observation: result.body.observation, explanation: result.body.explanation,
     limitation: result.body.limitation, action: result.body.action },
   templateRecommendationProvider.generate({ metrics: (await f.summary()).body.metrics }))
+})
+
+test('HTTP/SQLite: hung provider times out to the existing template', async t => {
+  const f = await fixture(t, { recommendationProvider: { generate: () => new Promise(() => {}) },
+    recommendationTimeoutMs: 25 })
+  const { periodId } = await publishForRecommendation(f)
+  const result = await f.recommendation(periodId)
+  assert.equal(result.status, 200)
+  assert.equal(result.body.source, 'template')
+  assert.equal(result.body.demo, true)
+  assert.deepEqual({ observation: result.body.observation, explanation: result.body.explanation,
+    limitation: result.body.limitation, action: result.body.action },
+  templateRecommendationProvider.generate({ metrics: (await f.summary()).body.metrics }))
+})
+
+test('HTTP/SQLite: late provider answer cannot replace a timed-out card', async t => {
+  const delayed = deferredRecommendationProvider()
+  const f = await fixture(t, { recommendationProvider: delayed.provider, recommendationTimeoutMs: 25 })
+  const { periodId } = await publishForRecommendation(f)
+  const pending = f.recommendation(periodId)
+  await delayed.started
+  const result = await pending
+  assert.equal(result.status, 200)
+  const issued = structuredClone(result.body)
+  delayed.resolve({ observation: 'Поздний ответ', explanation: 'Поздний ответ',
+    limitation: 'Поздний ответ', action: 'Поздний ответ' })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(result.body, issued)
+  assert.notEqual(result.body.observation, 'Поздний ответ')
+})
+
+test('late provider rejection after timeout is handled', async () => {
+  let reject
+  const pending = new Promise((resolve, fail) => { reject = fail })
+  assert.equal(await recommendationProviderContent({ generate: () => pending },
+    { outsideHoursPercent: 25, participationEvenness: 90, recognitionPercent: 20 }, 5), null)
+  reject(new Error('late synthetic failure'))
+  await new Promise(resolve => setImmediate(resolve))
+})
+
+test('HTTP/SQLite: consent withdrawal during timeout wait blocks fallback card', async t => {
+  const delayed = deferredRecommendationProvider()
+  const f = await fixture(t, { recommendationProvider: delayed.provider, recommendationTimeoutMs: 1000 })
+  const { periodId } = await publishForRecommendation(f)
+  const pending = f.recommendation(periodId)
+  await delayed.started
+  assert.equal((await f.decision(1, 'withdrawn')).status, 200)
+  error(await pending, 409, 'CONSENT_REQUIRED')
+  error(await f.recommendation(periodId), 409, 'CONSENT_REQUIRED')
 })
 
 test('HTTP/SQLite: expired published card and action disappear after restart', async t => {
