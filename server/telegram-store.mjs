@@ -20,6 +20,41 @@ const utcTime = value => {
 }
 const canonical = value => JSON.stringify(value, (_, item) => item && !Array.isArray(item) && typeof item === 'object'
   ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item)
+const roundOne = value => Math.round(value * 10) / 10
+const validCount = value => Number.isSafeInteger(value) && value >= 0
+
+function assertMetricCounts(numerator, totalMessages) {
+  if (!validCount(numerator) || !Number.isSafeInteger(totalMessages)
+    || totalMessages <= 0 || numerator > totalMessages) {
+    throw new RangeError('Metric counts must be non-negative integers with a positive total')
+  }
+}
+
+export function calculateOutsideHoursPercent(outsideMessageCount, totalMessageCount) {
+  assertMetricCounts(outsideMessageCount, totalMessageCount)
+  return roundOne(100 * outsideMessageCount / totalMessageCount)
+}
+
+export function calculateParticipationEvenness(authorMessageCounts, participantCount, totalMessageCount) {
+  if (!Array.isArray(authorMessageCounts) || !Number.isSafeInteger(participantCount)
+    || participantCount < 2 || authorMessageCounts.length > participantCount
+    || !Number.isSafeInteger(totalMessageCount) || totalMessageCount <= 0
+    || authorMessageCounts.some(count => !validCount(count))
+    || authorMessageCounts.reduce((sum, count) => sum + count, 0) !== totalMessageCount) {
+    throw new RangeError('Participation counts must match a positive total and participant count')
+  }
+  const entropy = authorMessageCounts.reduce((sum, count) => {
+    if (count === 0) return sum
+    const proportion = count / totalMessageCount
+    return sum - proportion * Math.log(proportion)
+  }, 0)
+  return roundOne(100 * entropy / Math.log(participantCount))
+}
+
+export function calculateRecognitionPercent(recognizedMessageCount, totalMessageCount) {
+  assertMetricCounts(recognizedMessageCount, totalMessageCount)
+  return roundOne(100 * recognizedMessageCount / totalMessageCount)
+}
 
 // Uses the existing database/transaction boundary. No message storage or network I/O.
 // Bootstrap tokens and credential provisioning are deliberately outside this slice.
@@ -196,7 +231,6 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
   const hasSchedule = profile => Boolean(profile.timeZone && profile.intervals.length)
   const recognition = text => Array.from(text.toLowerCase().matchAll(/\p{L}+/gu), match => match[0])
       .some(word => ['спасибо', 'благодарю', 'благодарим', 'thanks'].includes(word))
-  const roundOne = value => Math.round(value * 10) / 10
   const periodView = row => {
     if (row.status !== 'valid') return { status: 'insufficient' }
     const dates = one("SELECT COUNT(DISTINCT local_date) AS n FROM telegram_closed_periods WHERE binding_id=? AND profile_version=? AND revision=? AND status='valid' AND expires>?",
@@ -758,13 +792,13 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
         const valid = authors.length >= 5 && open.total >= 20 && now() - open.opened_at <= DAY
         let metrics = null
         if (valid) {
-          const entropy = authors.reduce((sum, row) => {
-            const p = row.count / open.total
-            return sum - p * Math.log(p)
-          }, 0)
-          metrics = { outsideHoursPercent: roundOne(100 * open.outside_count / open.total),
-            participationEvenness: roundOne(100 * entropy / Math.log(state.roster.length)),
-            recognitionPercent: roundOne(100 * open.recognition_count / open.total) }
+          const authorMessageCounts = authors.map(row => row.count)
+          metrics = {
+            outsideHoursPercent: calculateOutsideHoursPercent(open.outside_count, open.total),
+            participationEvenness: calculateParticipationEvenness(
+              authorMessageCounts, state.roster.length, open.total),
+            recognitionPercent: calculateRecognitionPercent(open.recognition_count, open.total),
+          }
         }
         const closedAt = now()
         run('INSERT INTO telegram_closed_periods VALUES(?,?,?,?,?,?,?,?,?,?)', id, input.periodId,
