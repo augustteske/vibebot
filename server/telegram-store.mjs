@@ -118,6 +118,15 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
       request_id TEXT NOT NULL, digest TEXT NOT NULL, response TEXT NOT NULL, expires INTEGER NOT NULL,
       PRIMARY KEY(workspace_id,member_id,request_id)
     );
+    CREATE TABLE IF NOT EXISTS telegram_chat_actions(
+      id TEXT PRIMARY KEY, binding_id TEXT NOT NULL REFERENCES telegram_bindings(id),
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id), period_id TEXT NOT NULL,
+      profile_version INTEGER NOT NULL, revision INTEGER NOT NULL,
+      recommendation_id TEXT NOT NULL, action TEXT NOT NULL,
+      actor_id TEXT NOT NULL, request_id TEXT NOT NULL, digest TEXT NOT NULL,
+      expires INTEGER NOT NULL,
+      UNIQUE(binding_id,period_id), UNIQUE(binding_id,actor_id,request_id)
+    );
   `)
   const one = (sql, ...args) => db.prepare(sql).get(...args)
   const run = (sql, ...args) => db.prepare(sql).run(...args)
@@ -140,6 +149,7 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
   const clearDerived = bindingId => {
     clearOpenPeriod(bindingId)
     run('DELETE FROM telegram_closed_periods WHERE binding_id=?', bindingId)
+    run('DELETE FROM telegram_chat_actions WHERE binding_id=?', bindingId)
   }
   const localParts = (millis, timeZone) => {
     const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
@@ -174,6 +184,33 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
       dataSource: 'chat', profileVersion: row.profile_version, metrics: JSON.parse(row.metrics),
       recognitionMethod: 'lexicon-v1', comparison: null }
   }
+  const publishedPeriod = (actor, id, periodId) => {
+    const binding = bindingFor(actor, id)
+    const state = JSON.parse(binding.state)
+    if (!canProcessChat(state) || (binding.evidence_expires !== null && binding.evidence_expires <= now())) {
+      fail(409, 'CONSENT_REQUIRED', 'Чат не активен')
+    }
+    const profile = profileFor(actor.workspace_id)
+    if (!hasSchedule(profile) || one('SELECT 1 FROM telegram_open_periods WHERE binding_id=?', id)) {
+      fail(409, 'STALE_PERIOD', 'Период не опубликован')
+    }
+    const row = one('SELECT * FROM telegram_closed_periods WHERE binding_id=? AND revision=? AND profile_version=? AND expires>? ORDER BY closed_at DESC,rowid DESC LIMIT 1',
+      id, state.revision, profile.version, now())
+    if (!row || row.period_id !== periodId || periodView(row).status !== 'published') {
+      fail(409, 'STALE_PERIOD', 'Период не опубликован')
+    }
+    return { row, state, profile }
+  }
+  const templateCard = (id, row) => {
+    const metrics = JSON.parse(row.metrics)
+    return { id: digest(`recommendation:${id}:${row.period_id}:${row.revision}:${row.profile_version}`),
+      periodId: row.period_id, profileVersion: row.profile_version,
+      dataSource: 'chat', source: 'template',
+      observation: `Вне рабочих интервалов отправлено ${metrics.outsideHoursPercent}% сообщений периода.`,
+      explanation: 'Возможно, часть обсуждений приходится на время вне согласованного расписания.',
+      limitation: 'Это доля сообщений, а не оценка нагрузки или благополучия участников; причины неизвестны.',
+      action: 'Обсудить с командой удобное время для рабочих сообщений.' }
+  }
   const expireBinding = binding => {
     if (binding.evidence_expires === null || binding.evidence_expires > now()) return binding
     const state = JSON.parse(binding.state)
@@ -195,6 +232,7 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
     run('DELETE FROM telegram_event_ids WHERE expires<=?', time)
     run('DELETE FROM telegram_message_ids WHERE expires<=?', time)
     run('DELETE FROM telegram_closed_periods WHERE expires<=?', time)
+    run('DELETE FROM telegram_chat_actions WHERE expires<=?', time)
     run('DELETE FROM telegram_close_requests WHERE expires<=?', time)
     run('DELETE FROM telegram_profile_requests WHERE expires<=?', time)
     for (const open of db.prepare('SELECT binding_id FROM telegram_open_periods WHERE opened_at<=?').all(time - DAY)) clearOpenPeriod(open.binding_id)
@@ -505,6 +543,47 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
         const closed = one('SELECT * FROM telegram_closed_periods WHERE binding_id=? AND revision=? AND profile_version=? AND expires>? ORDER BY closed_at DESC,rowid DESC LIMIT 1',
           id, state.revision, profile.version, now())
         return closed ? periodView(closed) : { status: 'insufficient' }
+      })
+    },
+    recommendation(actor, id, periodId) {
+      unavailable()
+      if (!uuid(periodId)) invalid()
+      return tx(() => {
+        const { row } = publishedPeriod(actor, id, periodId)
+        return templateCard(id, row)
+      })
+    },
+    confirmChatAction(actor, id, periodId, input) {
+      unavailable()
+      if (!input || Array.isArray(input) || typeof input !== 'object'
+        || Object.keys(input).length !== 5 || !uuid(input.requestId)
+        || !uuid(input.periodId) || input.periodId !== periodId || !revision(input.expectedRevision)
+        || typeof input.recommendationId !== 'string' || !/^[a-f0-9]{64}$/.test(input.recommendationId)
+        || typeof input.action !== 'string' || input.action !== input.action.trim()
+        || input.action.length < 1 || input.action.length > 500) invalid()
+      return tx(() => {
+        const { row, state } = publishedPeriod(actor, id, input.periodId)
+        if (input.expectedRevision !== state.revision) fail(409, 'STALE_REVISION', 'Версия изменилась')
+        const card = templateCard(id, row)
+        if (input.recommendationId !== card.id) fail(409, 'STALE_PERIOD', 'Карточка изменилась')
+        const requestDigest = digest(canonical({ operation: 'chatAction', input }))
+        const previous = one('SELECT * FROM telegram_chat_actions WHERE binding_id=? AND actor_id=? AND request_id=?',
+          id, actor.id, input.requestId)
+        if (previous) {
+          if (previous.digest !== requestDigest) fail(409, 'EVENT_CONFLICT', 'Идентификатор запроса уже использован')
+          return { id: previous.id, periodId: previous.period_id, profileVersion: previous.profile_version,
+            dataSource: 'chat', action: previous.action, confirmed: true }
+        }
+        if (one('SELECT 1 FROM telegram_chat_actions WHERE binding_id=? AND period_id=?', id, input.periodId)) {
+          fail(409, 'EVENT_CONFLICT', 'Шаг этого периода уже подтверждён')
+        }
+        const actionId = randomUUID()
+        run('INSERT INTO telegram_chat_actions VALUES(?,?,?,?,?,?,?,?,?,?,?,?)', actionId, id,
+          actor.workspace_id, input.periodId, row.profile_version, state.revision,
+          card.id, input.action, actor.id, input.requestId, requestDigest,
+          Math.min(row.expires, now() + CLOSED_TTL))
+        return { id: actionId, periodId: input.periodId, profileVersion: row.profile_version,
+          dataSource: 'chat', action: input.action, confirmed: true }
       })
     },
     closePeriod(actor, id, input) {

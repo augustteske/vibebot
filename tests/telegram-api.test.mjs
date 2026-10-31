@@ -86,6 +86,12 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
     input, { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1' })
   const summary = (token = ownerToken, bindingId = id) => request('/telegram/bindings/' + bindingId + '/summary',
     undefined, { Cookie: 'vibebot_session=' + token })
+  const recommendation = (periodId, token = ownerToken, bindingId = id) => request(
+    '/telegram/bindings/' + bindingId + '/periods/' + periodId + '/recommendation', undefined,
+    { Cookie: 'vibebot_session=' + token })
+  const confirmAction = (periodId, input, token = ownerToken, bindingId = id) => request(
+    '/telegram/bindings/' + bindingId + '/periods/' + periodId + '/action', input,
+    { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1' })
   const profile = (input, token = ownerToken) => request('/telegram/profile', input,
     { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1' })
   const setProfile = () => profile({ requestId: randomUUID(), expectedVersion: 0,
@@ -117,7 +123,7 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
     assert.equal(result.body.phase, 'active')
     return result.body
   }
-  return { db, id, otherBindingId, owner, people, tokens, foreignToken, foreignOwner, foreignPeople, request, web, bot, linkToken, link, bindingToken, bind, closePeriod, summary, profile, setProfile, command, status,
+  return { db, id, otherBindingId, owner, people, tokens, foreignToken, foreignOwner, foreignPeople, request, web, bot, linkToken, link, bindingToken, bind, closePeriod, summary, recommendation, confirmAction, profile, setProfile, command, status,
     mutate, decision, prepare, activate, time: () => clock, advance: ms => { clock += ms }, setTime: ms => { clock = ms },
     restart: async () => { await app.close(); await launch() } }
 }
@@ -140,6 +146,21 @@ const sendMany = async (f, revision, count, authors, firstMessageId, thanks = 0,
   }
 }
 const closeCurrent = (f, revision, token, bindingId) => f.closePeriod({ requestId: randomUUID(), expectedRevision: revision, periodId: randomUUID() }, token, bindingId)
+const publishForRecommendation = async f => {
+  const active = await f.activate()
+  assert.equal((await f.setProfile()).status, 200)
+  const base = Date.parse('2026-11-02T03:00:00.000Z')
+  let periodId
+  for (let day = 0; day < 3; day++) {
+    f.setTime(base + day * DAY)
+    await sendMany(f, active.revision, 20, 5, 3000 + day * 100, 4)
+    periodId = randomUUID()
+    const closed = await f.closePeriod({ requestId: randomUUID(), expectedRevision: active.revision, periodId })
+    assert.equal(closed.body.status, day === 2 ? 'published' : 'calibrating')
+    if (day < 2) error(await f.recommendation(periodId), 409, 'STALE_PERIOD')
+  }
+  return { periodId, revision: active.revision }
+}
 const activateForeign = async f => {
   const bindingId = randomUUID(), botCredential = '4'.repeat(64), chatId = '-100000000009'
   const state = transitionConsent(initialConsentState(), { type: 'bind', policyVersion }, 0)
@@ -196,7 +217,7 @@ test('SQLite: adding Telegram tables preserves existing workspace, member and ch
   assert.equal(reopened.prepare('SELECT name FROM members WHERE id=?').get(memberId).name, 'Legacy member')
   assert.deepEqual({ ...reopened.prepare('SELECT energy,clarity,support FROM checkins WHERE round_id=?').get(roundId) },
     { energy: 2, clarity: 3, support: 4 })
-  assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 18)
+  assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 19)
   reopened.close()
 })
 
@@ -459,6 +480,84 @@ test('HTTP/SQLite: three synthetic closed dates publish only aggregate metrics a
   await f.restart()
   assert.deepEqual((await f.summary()).body, { status: 'insufficient' })
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_closed_periods').get().n, 0)
+})
+
+test('HTTP/SQLite: template card and edited chat action are scoped, replayable, and revoked', async t => {
+  const f = await fixture(t)
+  const { periodId, revision } = await publishForRecommendation(f)
+  const earlier = f.db.prepare('SELECT period_id FROM telegram_closed_periods ORDER BY closed_at LIMIT 1').get().period_id
+  error(await f.recommendation(earlier), 409, 'STALE_PERIOD')
+  error(await f.recommendation(periodId, f.foreignToken), 404, 'NOT_FOUND')
+  error(await f.recommendation(periodId, f.tokens[1]), 403, 'FORBIDDEN')
+  error(await f.recommendation(periodId, ''), 401, 'SIGN_IN_REQUIRED')
+  const cardResult = await f.recommendation(periodId)
+  assert.equal(cardResult.status, 200)
+  const card = cardResult.body
+  assert.equal(card.periodId, periodId)
+  assert.equal(card.profileVersion, 1)
+  assert.equal(card.dataSource, 'chat')
+  assert.equal(card.source, 'template')
+  for (const field of ['observation', 'explanation', 'limitation', 'action']) assert.ok(card[field].length)
+  const input = { requestId: randomUUID(), expectedRevision: revision, periodId,
+    recommendationId: card.id, action: 'Обсудить удобное время на встрече.' }
+  error(await f.confirmAction(periodId, input, f.foreignToken), 404, 'NOT_FOUND')
+  error(await f.confirmAction(periodId, input, f.tokens[1]), 403, 'FORBIDDEN')
+  error(await f.confirmAction(periodId, input, ''), 401, 'SIGN_IN_REQUIRED')
+  error(await f.confirmAction(randomUUID(), input), 400, 'INVALID_INPUT')
+  error(await f.confirmAction(periodId, { ...input, expectedRevision: revision - 1 }), 409, 'STALE_REVISION')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_chat_actions').get().n, 0)
+  const accepted = await f.confirmAction(periodId, input)
+  assert.equal(accepted.status, 200)
+  assert.equal(accepted.body.action, input.action)
+  await f.restart()
+  assert.deepEqual(await f.confirmAction(periodId, input), accepted)
+  error(await f.confirmAction(periodId, { ...input, action: 'Другой шаг' }), 409, 'EVENT_CONFLICT')
+  error(await f.confirmAction(periodId, { ...input, requestId: randomUUID() }), 409, 'EVENT_CONFLICT')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_chat_actions').get().n, 1)
+  assert.equal((await f.decision(1, 'withdrawn')).status, 200)
+  error(await f.recommendation(periodId), 409, 'CONSENT_REQUIRED')
+  error(await f.confirmAction(periodId, input), 409, 'CONSENT_REQUIRED')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_chat_actions').get().n, 0)
+})
+
+test('HTTP/SQLite: expired published card and action disappear after restart', async t => {
+  const f = await fixture(t)
+  const { periodId, revision } = await publishForRecommendation(f)
+  const card = (await f.recommendation(periodId)).body
+  const input = { requestId: randomUUID(), expectedRevision: revision, periodId,
+    recommendationId: card.id, action: 'Согласовать время обсуждений.' }
+  assert.equal((await f.confirmAction(periodId, input)).status, 200)
+  f.advance(7 * DAY + 1)
+  await f.restart()
+  error(await f.recommendation(periodId), 409, 'STALE_PERIOD')
+  error(await f.confirmAction(periodId, input), 409, 'STALE_PERIOD')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_chat_actions').get().n, 0)
+})
+
+test('HTTP/SQLite: hidden and expired periods have no recommendation or chat action', async t => {
+  const f = await fixture(t)
+  const active = await f.activate()
+  await f.setProfile()
+  const unknownPeriod = randomUUID()
+  error(await f.recommendation(unknownPeriod), 409, 'STALE_PERIOD')
+  f.setTime(Date.parse('2026-11-02T03:00:00.000Z'))
+  await sendMany(f, active.revision, 19, 5, 5000)
+  const insufficientId = randomUUID()
+  assert.equal((await f.closePeriod({ requestId: randomUUID(), expectedRevision: active.revision, periodId: insufficientId })).body.status, 'insufficient')
+  error(await f.recommendation(insufficientId), 409, 'STALE_PERIOD')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_chat_actions').get().n, 0)
+})
+
+test('HTTP/SQLite: pause blocks a previously published card and confirmation', async t => {
+  const f = await fixture(t)
+  const { periodId, revision } = await publishForRecommendation(f)
+  const card = (await f.recommendation(periodId)).body
+  const paused = await f.mutate('pause', { reason: 'manual' }, f.bot)
+  assert.equal(paused.body.phase, 'paused')
+  error(await f.recommendation(periodId), 409, 'CONSENT_REQUIRED')
+  error(await f.confirmAction(periodId, { requestId: randomUUID(), expectedRevision: revision,
+    periodId, recommendationId: card.id, action: 'Обсудить график.' }), 409, 'CONSENT_REQUIRED')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_chat_actions').get().n, 0)
 })
 
 test('HTTP/SQLite: withdrawal, roster change and transport gap discard an open period', async t => {
@@ -765,6 +864,7 @@ test('Telegram synthetic gate defaults off and unfinished summary routes remain 
   error(await f.web('control', f.command(1, { action: 'resume' })), 503, 'UNAVAILABLE')
   error(await f.bot('events', { text: 'synthetic text must not be stored' }), 503, 'UNAVAILABLE')
   error(await f.request('/telegram/link-tokens', { requestId: randomUUID() }), 503, 'UNAVAILABLE')
+  error(await f.recommendation(randomUUID()), 503, 'UNAVAILABLE')
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_requests').get().n, 0)
-  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 18)
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 19)
 })

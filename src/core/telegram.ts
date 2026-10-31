@@ -103,6 +103,6 @@ export type CommunicationView =
       metrics: { outsideHoursPercent: number; participationEvenness: number; recognitionPercent: number };
       recognitionMethod: 'lexicon-v1'; comparison: null; demo?: boolean }
 export type CommunicationRecommendation = {
-  id: string; periodId: string; dataSource: 'chat'; source: 'ai' | 'template'
+  id: string; periodId: string; profileVersion: number; dataSource: 'chat'; source: 'ai' | 'template'
   observation: string; explanation: string; limitation: string; action: string
 }
