@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { createApp } from '../server/app.mjs'
+import { templateRecommendationProvider } from '../server/recommendation-provider.mjs'
 import { createStore } from '../server/store.mjs'
 import { initialConsentState, transitionConsent } from '../src/core/telegram.ts'
 
@@ -17,7 +18,7 @@ const policyVersion = 'synthetic-v1'
 const DAY = 86400000
 const demoIntervals = [1, 2, 3, 4, 5].map(day => ({ day, start: 540, end: 1080 }))
 
-async function fixture(t, { enabled = true, seedLinks = true, seedBindings = true } = {}) {
+async function fixture(t, { enabled = true, seedLinks = true, seedBindings = true, recommendationProvider } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'vibee-telegram-test-'))
   const dbPath = join(dir, 'synthetic.sqlite')
   const store = createStore({ path: dbPath, secret })
@@ -56,7 +57,8 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
   let clock = Date.now()
   let app, base
   const launch = async () => {
-    app = createApp({ dbPath, secret, telegramBootstrapCredential: bootstrapCredential, telegramSynthetic: enabled, now: () => clock })
+    app = createApp({ dbPath, secret, telegramBootstrapCredential: bootstrapCredential,
+      telegramSynthetic: enabled, now: () => clock, recommendationProvider })
     await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve))
     base = 'http://127.0.0.1:' + app.server.address().port + '/api'
   }
@@ -524,6 +526,31 @@ test('HTTP/SQLite: template card and edited chat action are scoped, replayable, 
   error(await f.recommendation(periodId), 409, 'CONSENT_REQUIRED')
   error(await f.confirmAction(periodId, input), 409, 'CONSENT_REQUIRED')
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_chat_actions').get().n, 0)
+})
+
+test('HTTP/SQLite: recommendation provider receives aggregates and safely falls back to the same template', async t => {
+  let failProvider = false
+  const seen = []
+  const provider = { generate(context) {
+    seen.push(context)
+    if (failProvider) throw new Error('synthetic provider failure')
+    return templateRecommendationProvider.generate(context)
+  } }
+  const f = await fixture(t, { recommendationProvider: provider })
+  const { periodId } = await publishForRecommendation(f)
+  assert.equal(seen.length, 0) // Hidden calibration never invokes the provider.
+  const normal = await f.recommendation(periodId)
+  assert.equal(normal.status, 200)
+  assert.equal(normal.body.source, 'template')
+  assert.equal(normal.body.demo, true)
+  assert.deepEqual(Object.keys(seen[0]), ['metrics'])
+  assert.deepEqual(Object.keys(seen[0].metrics).sort(),
+    ['outsideHoursPercent', 'participationEvenness', 'recognitionPercent'])
+  failProvider = true
+  await f.restart()
+  const fallback = await f.recommendation(periodId)
+  assert.deepEqual(fallback, normal)
+  assert.equal(seen.length, 2)
 })
 
 test('HTTP/SQLite: expired published card and action disappear after restart', async t => {

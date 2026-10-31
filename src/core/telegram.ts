@@ -104,5 +104,5 @@ export type CommunicationView =
       recognitionMethod: 'lexicon-v1'; comparison: null; demo?: boolean }
 export type CommunicationRecommendation = {
   id: string; periodId: string; profileVersion: number; dataSource: 'chat'; source: 'ai' | 'template'
-  observation: string; explanation: string; limitation: string; action: string
+  observation: string; explanation: string; limitation: string; action: string; demo?: boolean
 }

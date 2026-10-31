@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual, randomUUID } from 'node:crypto'
 import { canProcessChat, initialConsentState, transitionConsent } from '../src/core/telegram.ts'
+import { templateRecommendationProvider, templateRecommendationContent } from './recommendation-provider.mjs'
 
 const DAY = 86400000
 const LINK_TTL = 600000
@@ -22,7 +23,8 @@ const canonical = value => JSON.stringify(value, (_, item) => item && !Array.isA
 
 // Uses the existing database/transaction boundary. No message storage or network I/O.
 // Bootstrap tokens and credential provisioning are deliberately outside this slice.
-export function createTelegramStore({ db, secret, bootstrapCredential, fail, enabled = false, now = Date.now }) {
+export function createTelegramStore({ db, secret, bootstrapCredential, fail, enabled = false, now = Date.now,
+  recommendationProvider = templateRecommendationProvider }) {
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS members_workspace_id ON members(workspace_id,id);
     CREATE TABLE IF NOT EXISTS telegram_bindings(
@@ -234,11 +236,8 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
     const metrics = JSON.parse(row.metrics)
     return { id: digest(`recommendation:${id}:${row.period_id}:${row.revision}:${row.profile_version}`),
       periodId: row.period_id, profileVersion: row.profile_version,
-      dataSource: 'chat', source: 'template',
-      observation: `Вне рабочих интервалов отправлено ${metrics.outsideHoursPercent}% сообщений периода.`,
-      explanation: 'Возможно, часть обсуждений приходится на время вне согласованного расписания.',
-      limitation: 'Это доля сообщений, а не оценка нагрузки или благополучия участников; причины неизвестны.',
-      action: 'Обсудить с командой удобное время для рабочих сообщений.' }
+      dataSource: 'chat', source: 'template', demo: true,
+      ...templateRecommendationContent(recommendationProvider, metrics) }
   }
   const feedbackKinds = { interpretation: ['useful', 'incorrect', 'usual_joke'], outcome: ['helped', 'not_helped'] }
   const feedbackTarget = (id, row, kind) => {

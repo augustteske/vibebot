@@ -19,7 +19,8 @@ const templates = {
   recognition: { title: 'Замеченный вклад', body: 'Назовите конкретный поступок коллеги, который помог вам в работе.', reason: 'Добровольное упражнение, доступное при любом размере команды.' },
 }
 
-export function createStore({ path = ':memory:', secret, telegramBootstrapCredential, telegramSynthetic = false, now = Date.now }) {
+export function createStore({ path = ':memory:', secret, telegramBootstrapCredential, telegramSynthetic = false, now = Date.now,
+  recommendationProvider }) {
   if (!secret || secret.length < 32) throw new Error('A persistent server secret of at least 32 characters is required')
   const db = new DatabaseSync(path)
   db.exec(`
@@ -59,7 +60,8 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
     return kinds.map(kind => ({ id: kind, ...templates[kind], source: 'template' }))
   }
 
-  const telegram = createTelegramStore({ db, secret, bootstrapCredential: telegramBootstrapCredential, fail, enabled: telegramSynthetic, now })
+  const telegram = createTelegramStore({ db, secret, bootstrapCredential: telegramBootstrapCredential, fail,
+    enabled: telegramSynthetic, now, recommendationProvider })
   return {
     telegram,
     close: () => db.close(),
