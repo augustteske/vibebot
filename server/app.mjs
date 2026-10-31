@@ -3,8 +3,8 @@ import { readFile } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
 import { AppError, createStore } from './store.mjs'
 
-export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookies = false, allowedOrigins = [], telegramSynthetic = false, now = Date.now }) {
-  const store = createStore({ path: dbPath, secret, telegramSynthetic, now })
+export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookies = false, allowedOrigins = [], telegramBootstrapCredential, telegramSynthetic = false, now = Date.now }) {
+  const store = createStore({ path: dbPath, secret, telegramBootstrapCredential, telegramSynthetic, now })
   const cleanupTimer = setInterval(() => {
     try { store.telegram.cleanup() } catch { console.error('Vibee: Telegram cleanup failed') }
   }, 60000)
@@ -53,15 +53,18 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
       }
       if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true })
       if (!['GET', 'POST'].includes(req.method)) throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Метод не поддерживается')
-      if (url.pathname === '/api/telegram/link-tokens' || url.pathname === '/api/bot/v1/links') {
+      if (['/api/telegram/link-tokens', '/api/bot/v1/links', '/api/telegram/binding-tokens', '/api/bot/v1/bindings'].includes(url.pathname)) {
         if (req.method !== 'POST') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
         if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
-        const bot = url.pathname === '/api/bot/v1/links'
+        const bot = url.pathname.startsWith('/api/bot/')
         if (!bot) checkBrowser(req)
-        const actor = bot ? store.telegram.authenticate(req.headers.authorization) : store.authenticate(tokenFrom(req))
+        const actor = bot ? store.telegram.authenticateBootstrap(req.headers.authorization) : store.authenticate(tokenFrom(req))
         if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
-        const result = bot ? store.telegram.consumeLinkToken(actor, await body(req, 'INVALID_INPUT'))
-          : store.telegram.issueLinkToken(actor, await body(req, 'INVALID_INPUT'))
+        const input = await body(req, 'INVALID_INPUT')
+        const result = url.pathname === '/api/bot/v1/links' ? store.telegram.consumeLinkToken(actor, input)
+          : url.pathname === '/api/bot/v1/bindings' ? store.telegram.bind(actor, input)
+          : url.pathname === '/api/telegram/binding-tokens' ? store.telegram.issueBindingToken(actor, input)
+          : store.telegram.issueLinkToken(actor, input)
         return json(res, bot ? 200 : 201, result)
       }
       if (url.pathname.startsWith('/api/bot/') || url.pathname.startsWith('/api/telegram/')) {

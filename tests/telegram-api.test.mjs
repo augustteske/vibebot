@@ -11,10 +11,11 @@ import { initialConsentState, transitionConsent } from '../src/core/telegram.ts'
 
 const secret = 'synthetic-telegram-api-test-secret-not-for-production'
 const credential = '1'.repeat(64)
+const bootstrapCredential = '3'.repeat(64)
 const credentialHash = createHash('sha256').update(credential).digest('hex')
 const policyVersion = 'synthetic-v1'
 
-async function fixture(t, { enabled = true, seedLinks = true } = {}) {
+async function fixture(t, { enabled = true, seedLinks = true, seedBindings = true } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'vibee-telegram-test-'))
   const dbPath = join(dir, 'synthetic.sqlite')
   const store = createStore({ path: dbPath, secret })
@@ -36,18 +37,18 @@ async function fixture(t, { enabled = true, seedLinks = true } = {}) {
   const otherBindingId = randomUUID()
   const state = transitionConsent(initialConsentState(), { type: 'bind', policyVersion }, 0)
   // Trusted synthetic fixture only. This does NOT implement token exchange or prove Telegram identity.
-  for (const [bindingId, chatId] of [[id, '-100000000001'], [otherBindingId, '-100000000002']]) {
+  if (seedBindings) for (const [bindingId, chatId] of [[id, '-100000000001'], [otherBindingId, '-100000000002']]) {
     db.prepare('INSERT INTO telegram_bindings(id,workspace_id,chat_id,state) VALUES(?,?,?,?)')
       .run(bindingId, owner.workspace_id, chatId, JSON.stringify(state))
   }
   if (seedLinks) for (let i = 0; i < people.length; i++) {
     db.prepare('INSERT INTO telegram_links VALUES(?,?,?,?)').run(id, owner.workspace_id, people[i].id, String(100000001 + i))
   }
-  db.prepare('INSERT INTO telegram_credentials(token_hash,workspace_id,binding_id) VALUES(?,?,?)').run(credentialHash, owner.workspace_id, id)
+  if (seedBindings) db.prepare('INSERT INTO telegram_credentials(token_hash,workspace_id,binding_id) VALUES(?,?,?)').run(credentialHash, owner.workspace_id, id)
   let clock = Date.now()
   let app, base
   const launch = async () => {
-    app = createApp({ dbPath, secret, telegramSynthetic: enabled, now: () => clock })
+    app = createApp({ dbPath, secret, telegramBootstrapCredential: bootstrapCredential, telegramSynthetic: enabled, now: () => clock })
     await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve))
     base = 'http://127.0.0.1:' + app.server.address().port + '/api'
   }
@@ -69,7 +70,10 @@ async function fixture(t, { enabled = true, seedLinks = true } = {}) {
   const linkToken = (token = ownerToken, input = { requestId: randomUUID() }) => request(
     '/telegram/link-tokens', input, { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1' })
   const link = (token, telegramUserId, extra = {}) => request('/bot/v1/links',
-    { requestId: randomUUID(), token, telegramUserId, ...extra }, { Authorization: 'Bearer ' + credential })
+    { requestId: randomUUID(), token, telegramUserId, ...extra }, { Authorization: 'Bearer ' + bootstrapCredential })
+  const bindingToken = (token = ownerToken, input = { requestId: randomUUID() }) => request('/telegram/binding-tokens',
+    input, { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1' })
+  const bind = (input, auth = bootstrapCredential) => request('/bot/v1/bindings', input, { Authorization: 'Bearer ' + auth })
   const command = (expectedRevision, fields) => ({ requestId: randomUUID(), expectedRevision, ...fields })
   const status = async () => {
     const result = await bot('')
@@ -97,7 +101,7 @@ async function fixture(t, { enabled = true, seedLinks = true } = {}) {
     assert.equal(result.body.phase, 'active')
     return result.body
   }
-  return { db, id, otherBindingId, owner, people, tokens, foreignToken, request, web, bot, linkToken, link, command, status,
+  return { db, id, otherBindingId, owner, people, tokens, foreignToken, request, web, bot, linkToken, link, bindingToken, bind, command, status,
     mutate, decision, prepare, activate, advance: ms => { clock += ms },
     restart: async () => { await app.close(); await launch() } }
 }
@@ -132,7 +136,7 @@ test('SQLite: adding Telegram tables preserves existing workspace, member and ch
   assert.equal(reopened.prepare('SELECT name FROM members WHERE id=?').get(memberId).name, 'Legacy member')
   assert.deepEqual({ ...reopened.prepare('SELECT energy,clarity,support FROM checkins WHERE round_id=?').get(roundId) },
     { energy: 2, clarity: 3, support: 4 })
-  assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 5)
+  assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 9)
   reopened.close()
 })
 
@@ -157,10 +161,10 @@ test('HTTP/SQLite: lost link ACK replays after restart without saving the raw to
   const f = await fixture(t, { seedLinks: false })
   const issued = await f.linkToken(f.tokens[1])
   const input = { requestId: randomUUID(), token: issued.body.token, telegramUserId: '100000002' }
-  const post = body => f.request('/bot/v1/links', body, { Authorization: 'Bearer ' + credential })
+  const post = body => f.request('/bot/v1/links', body, { Authorization: 'Bearer ' + bootstrapCredential })
   const first = await post(input)
   assert.deepEqual(first, { status: 200, body: { linked: true } })
-  const journal = f.db.prepare('SELECT actor_key,digest,response FROM telegram_requests WHERE request_id=?').get(input.requestId)
+  const journal = f.db.prepare('SELECT actor_key,digest,response FROM telegram_identity_requests WHERE request_id=?').get(input.requestId)
   assert.deepEqual(JSON.parse(journal.response), { linked: true })
   assert.ok(Object.values(journal).every(value => !value.includes(issued.body.token)))
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_links WHERE binding_id=?').get(f.id).n, 1)
@@ -170,13 +174,13 @@ test('HTTP/SQLite: lost link ACK replays after restart without saving the raw to
   error(await post({ ...input, telegramUserId: '100000003' }), 409, 'EVENT_CONFLICT')
   error(await post({ ...input, token: 'f'.repeat(64) }), 409, 'EVENT_CONFLICT')
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_links WHERE binding_id=?').get(f.id).n, 1)
-  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_requests WHERE request_id=?').get(input.requestId).n, 1)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_identity_requests WHERE request_id=?').get(input.requestId).n, 1)
 })
 
 test('HTTP/SQLite: expired, foreign and conflicting links are rejected without consuming tokens', async t => {
   const f = await fixture(t, { seedLinks: false })
   const foreign = await f.linkToken(f.foreignToken)
-  error(await f.link(foreign.body.token, '100000009'), 404, 'NOT_FOUND')
+  assert.equal((await f.link(foreign.body.token, '100000009')).status, 200)
   const owner = await f.linkToken()
   assert.equal((await f.link(owner.body.token, '100000001')).status, 200)
   const sameMember = await f.linkToken()
@@ -207,6 +211,68 @@ test('HTTP/SQLite: link endpoints require a session or bot credential and reject
   error(await f.link(issued.body.token, '100000002', { memberId: f.people[0].id }), 400, 'INVALID_INPUT')
   error(await f.link(issued.body.token, '100000002', { workspaceId: f.owner.workspace_id }), 400, 'INVALID_INPUT')
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_links').get().n, 0)
+})
+
+test('HTTP/SQLite: binding ACK replay restores scoped credential without storing secrets', async t => {
+  const f = await fixture(t, { seedLinks: false, seedBindings: false })
+  const identityToken = await f.linkToken()
+  assert.equal((await f.link(identityToken.body.token, '100000001')).status, 200)
+  const issued = await f.bindingToken()
+  assert.equal(issued.status, 201)
+  const input = { requestId: randomUUID(), token: issued.body.token,
+    chatId: '-100000000003', initiatorId: '100000001' }
+  const first = await f.bind(input)
+  assert.equal(first.status, 200)
+  assert.equal(first.body.phase, 'awaiting_consents')
+  assert.match(first.body.credential, /^[a-f0-9]{64}$/)
+  const bindingId = first.body.bindingId
+  const journal = f.db.prepare('SELECT * FROM telegram_binding_requests WHERE request_id=?').get(input.requestId)
+  assert.ok(Object.values(journal).every(value => !String(value).includes(input.token) && !String(value).includes(first.body.credential)))
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_credentials WHERE token_hash=?')
+    .get(createHash('sha256').update(first.body.credential).digest('hex')).n, 1)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_credentials WHERE token_hash=?').get(first.body.credential).n, 0)
+  await f.restart()
+  assert.deepEqual(await f.bind(input), first)
+  error(await f.bind({ ...input, chatId: '-100000000004' }), 409, 'EVENT_CONFLICT')
+  error(await f.bind({ ...input, initiatorId: '100000002' }), 409, 'EVENT_CONFLICT')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_bindings WHERE chat_id=?').get(input.chatId).n, 1)
+  const scopedStatus = await f.bot('', undefined, bindingId, first.body.credential)
+  assert.equal(scopedStatus.status, 200)
+  error(await f.bot('', undefined, bindingId, bootstrapCredential), 401, 'BOT_AUTH_REQUIRED')
+  error(await f.bot('pause', f.command(first.body.revision, { reason: 'manual' }), bindingId, bootstrapCredential), 401, 'BOT_AUTH_REQUIRED')
+  error(await f.bind(input, first.body.credential), 401, 'BOT_AUTH_REQUIRED')
+  error(await f.request('/bot/v1/links', { requestId: randomUUID(), token: identityToken.body.token,
+    telegramUserId: '100000001' }, { Authorization: 'Bearer ' + first.body.credential }), 401, 'BOT_AUTH_REQUIRED')
+})
+
+test('HTTP/SQLite: binding requires organizer identity, live token and unique chat across teams', async t => {
+  const f = await fixture(t, { seedLinks: false, seedBindings: false })
+  error(await f.request('/telegram/binding-tokens', { requestId: randomUUID() }, { 'X-Vibee': '1' }), 401, 'SIGN_IN_REQUIRED')
+  error(await f.bindingToken(f.tokens[1]), 403, 'FORBIDDEN')
+  const issued = await f.bindingToken()
+  const input = { requestId: randomUUID(), token: issued.body.token,
+    chatId: '-100000000005', initiatorId: '100000001' }
+  error(await f.bind(input), 403, 'FORBIDDEN') // No verified web-to-Telegram identity yet.
+  const memberLink = await f.linkToken(f.tokens[1])
+  assert.equal((await f.link(memberLink.body.token, '100000001')).status, 200)
+  error(await f.bind(input), 403, 'FORBIDDEN') // Linked participant cannot act for organizer.
+  const ownerLink = await f.linkToken()
+  assert.equal((await f.link(ownerLink.body.token, '100000002')).status, 200)
+  error(await f.bind(input), 403, 'FORBIDDEN') // Initiator ID differs from organizer's verified ID.
+  const accepted = { ...input, initiatorId: '100000002' }
+  assert.equal((await f.bind(accepted)).status, 200)
+  error(await f.bind({ ...accepted, requestId: randomUUID() }), 409, 'TOKEN_EXPIRED')
+  const foreignLink = await f.linkToken(f.foreignToken)
+  assert.equal((await f.link(foreignLink.body.token, '100000009')).status, 200)
+  const foreignBinding = await f.bindingToken(f.foreignToken)
+  error(await f.bind({ requestId: randomUUID(), token: foreignBinding.body.token,
+    chatId: accepted.chatId, initiatorId: '100000009' }), 409, 'LINK_CONFLICT')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_bindings WHERE chat_id=?').get(accepted.chatId).n, 1)
+  const expiring = await f.bindingToken()
+  f.advance(600001)
+  await f.restart()
+  error(await f.bind({ requestId: randomUUID(), token: expiring.body.token,
+    chatId: '-100000000006', initiatorId: '100000002' }), 409, 'TOKEN_EXPIRED')
 })
 
 test('HTTP/SQLite: all consent and explicit resume; withdrawal persists and old buttons fail', async t => {
@@ -344,6 +410,7 @@ test('HTTP/SQLite: migration blocks resume; disconnect clears identity without d
   assert.deepEqual(JSON.parse(saved.state).roster, [])
   assert.deepEqual(JSON.parse(saved.state).decisions, {})
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_links WHERE binding_id=?').get(f.id).n, 0)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_identities WHERE workspace_id=?').get(f.owner.workspace_id).n, 0)
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM checkins').get().n, 1)
 })
 
@@ -391,5 +458,5 @@ test('Telegram synthetic gate defaults off and text/bootstrap/summary routes rem
   error(await f.bot('events', { text: 'synthetic text must not be stored' }), 404, 'NOT_FOUND')
   error(await f.request('/telegram/link-tokens', { requestId: randomUUID() }), 503, 'UNAVAILABLE')
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_requests').get().n, 0)
-  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 5)
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 9)
 })
