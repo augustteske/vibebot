@@ -36,6 +36,7 @@ class WrappedClient:
         self.posts = []
         self.offline = False
         self.lose_first_ack = False
+        self.lose_first_edit_pause_ack = False
 
     async def post(self, url, headers, json):
         self.posts.append(json.copy())
@@ -45,6 +46,9 @@ class WrappedClient:
         if self.lose_first_ack:
             self.lose_first_ack = False
             raise httpx.ReadTimeout("response lost after server commit")
+        if self.lose_first_edit_pause_ack and json.get("reason") == "message_edit":
+            self.lose_first_edit_pause_ack = False
+            raise httpx.ReadTimeout("edit pause response lost after server commit")
         return response
 
     async def get(self, url, headers):
@@ -88,6 +92,43 @@ class LocalApiTests(unittest.IsolatedAsyncioTestCase):
         with sqlite3.connect(self.config["dbPath"]) as db:
             self.assertEqual(db.execute("SELECT total FROM telegram_open_periods").fetchone()[0], 1)
         self.assertEqual(self.count("telegram_texts"), 1)
+
+    async def test_edit_pause_replays_lost_ack_and_blocks_text_until_manual_resume(self):
+        snapshot = ConsentSnapshot(chat_id=int(self.config["chatId"]), binding_id=self.config["bindingId"],
+            revision=self.config["revision"], roster_version=1, active=True,
+            roster=frozenset(), accepted_members=frozenset(), policy_version="synthetic-v1",
+            consent_policy_version="synthetic-v1", roster_verified=True, company_accepted=True)
+        with TemporaryDirectory() as directory:
+            marker = Path(directory) / "edit.json"
+            intake = TelegramIntake(snapshot, self.transport, PauseState(marker))
+            update = lambda message_id: {"update_type": "message", "message": {
+                "chat": {"id": snapshot.chat_id}, "from": {"id": 300000001, "is_bot": False},
+                "message_id": message_id, "date": int(datetime.now(timezone.utc).timestamp()),
+                "text": "Synthetic message"}}
+            self.assertEqual((await intake.process(update(1)))["result"], "accepted")
+            self.assertEqual(self.count("telegram_texts"), 1)
+            self.assertTrue(intake.stop_after_message_edit(snapshot.chat_id))
+            self.assertIsNone(await intake.process(update(2)))
+            self.wrapped.lose_first_edit_pause_ack = True
+            self.assertFalse(await intake.reconcile_pause())
+            self.assertEqual(PauseState(marker).stage, "needed")
+            self.assertIsNone(await intake.process(update(3)))
+            self.assertEqual(self.count("telegram_texts"), 0)
+            self.assertEqual(self.count("telegram_open_periods"), 0)
+            self.assertFalse(await intake.reconcile_pause())
+            edit_posts = [post for post in self.wrapped.posts if post.get("reason") == "message_edit"]
+            self.assertEqual(len(edit_posts), 2)
+            self.assertEqual(edit_posts[0], edit_posts[1])
+            self.assertEqual(PauseState(marker).stage, "awaiting_resume")
+            self.assertIsNone(await intake.process(update(4)))
+            pause_revision = PauseState(marker).pause_revision
+            resume = await self.client.post(self.config["baseUrl"] + "/api/telegram/bindings/"
+                + self.config["bindingId"] + "/control",
+                headers={"Cookie": "vibebot_session=" + self.config["ownerToken"], "X-Vibee": "1"},
+                json={"requestId": str(uuid4()), "expectedRevision": pause_revision, "action": "resume"})
+            self.assertEqual(resume.status_code, 200, resume.text)
+            self.assertTrue(await intake.reconcile_pause())
+            self.assertEqual((await intake.process(update(5)))["result"], "accepted")
 
     async def test_offline_gap_blocks_new_text_until_pause_and_manual_resume(self):
         snapshot = ConsentSnapshot(chat_id=int(self.config["chatId"]), binding_id=self.config["bindingId"],

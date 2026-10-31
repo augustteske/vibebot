@@ -95,10 +95,16 @@ class HttpTransport:
         raise DeliveryUncertainError("Vibee event delivery could not be confirmed")
 
     async def pause_transport_gap(self, expected_revision: int) -> BindingStatus:
+        return await self._pause(expected_revision, "transport_gap", str(uuid4()))
+
+    async def pause_message_edit(self, expected_revision: int, request_id: str) -> BindingStatus:
+        return await self._pause(expected_revision, "message_edit", request_id)
+
+    async def _pause(self, expected_revision: int, reason: str, request_id: str) -> BindingStatus:
         url = f"{self._base_url}/api/bot/v1/bindings/{self._binding_id}/pause"
         try:
             response = await self._client.post(url, headers=self._headers(), json={
-                "requestId": str(uuid4()), "expectedRevision": expected_revision, "reason": "transport_gap",
+                "requestId": request_id, "expectedRevision": expected_revision, "reason": reason,
             })
         except (httpx.TimeoutException, httpx.RequestError) as error:
             raise TransportError("Vibee pause request failed") from error

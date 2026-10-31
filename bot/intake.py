@@ -75,6 +75,9 @@ class TextTransport(Protocol):
     async def pause_transport_gap(self, expected_revision: int) -> BindingStatus:
         """Confirms that the server stopped the binding after uncertain delivery."""
 
+    async def pause_message_edit(self, expected_revision: int, request_id: str) -> BindingStatus:
+        """Confirms the scoped edit pause, replaying the same request after lost ACK."""
+
 
 class TelegramIntake:
     """Пропускает только новые текстовые события при полном согласии."""
@@ -94,9 +97,17 @@ class TelegramIntake:
         self._consent = replace(self._consent, active=False)
         self._pause_state.need_pause()
 
+    def stop_after_message_edit(self, chat_id: int) -> bool:
+        """Block a bound group immediately; never retain or forward the edited text."""
+        if chat_id != self._consent.chat_id:
+            return False
+        self._consent = replace(self._consent, active=False)
+        self._pause_state.need_pause("message_edit")
+        return True
+
     async def reconcile_pause(self) -> bool:
         """Confirm server pause first; later accept only a distinct manual resume revision."""
-        from .http_transport import TransportError
+        from .http_transport import StaleRevisionError, TransportError
 
         if self._pause_state.stage == "clear":
             return False
@@ -105,7 +116,15 @@ class TelegramIntake:
             if isinstance(status, dict):
                 return False
             if self._pause_state.stage == "needed":
-                if status.phase != "paused":
+                if self._pause_state.reason == "message_edit":
+                    self._pause_state.set_request_revision(status.revision)
+                    try:
+                        status = await self._transport.pause_message_edit(
+                            self._pause_state.request_revision, self._pause_state.request_id)
+                    except StaleRevisionError:
+                        self._pause_state.retry_message_edit()
+                        return False
+                elif status.phase != "paused":
                     status = await self._transport.pause_transport_gap(status.revision)
                 self._pause_state.confirmed(status.revision)
                 return False

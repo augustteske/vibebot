@@ -67,6 +67,13 @@ def create_dispatcher(intake: TelegramIntake | None = None) -> Dispatcher:
             await intake.reconcile_pause()
             logging.getLogger(__name__).warning("Telegram intake paused after delivery failure; pause the binding on the server before resuming")
 
+    @dispatcher.edited_message()
+    async def intake_edit(message: Message) -> None:
+        if intake is None or message.chat.type == "private":
+            return
+        if intake.stop_after_message_edit(message.chat.id):
+            await intake.reconcile_pause()
+
     @dispatcher.callback_query(F.data.startswith("consent:") | F.data.startswith("score:"))
     async def callback(event: CallbackQuery):
         if not isinstance(event.message, Message) or event.message.chat.type != "private":

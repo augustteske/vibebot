@@ -2,12 +2,14 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 
 import httpx
 
 from bot.http_transport import DeliveryUncertainError, HttpTransport, PausedError, StaleRevisionError, TransportError
 from bot.intake import BindingStatus, CommunicationView, ConsentSnapshot, TelegramIntake
 from bot.pause_state import PauseState
+from bot.__main__ import create_dispatcher
 
 
 FIXED_NOW = lambda: datetime(2026, 10, 31, 8, tzinfo=timezone.utc)
@@ -26,6 +28,7 @@ class FakeTransport:
         self.status_requests = []
         self.summary_requests = []
         self.pause_requests = []
+        self.edit_pause_requests = []
 
     async def send_text(self, event):
         self.events.append(event.copy())
@@ -48,6 +51,11 @@ class FakeTransport:
 
     async def pause_transport_gap(self, expected_revision):
         self.pause_requests.append(expected_revision)
+        self.status = BindingStatus("paused", expected_revision + 1, self.status.policyVersion, self.status.rosterVersion)
+        return self.status
+
+    async def pause_message_edit(self, expected_revision, request_id):
+        self.edit_pause_requests.append((expected_revision, request_id))
         self.status = BindingStatus("paused", expected_revision + 1, self.status.policyVersion, self.status.rosterVersion)
         return self.status
 
@@ -108,6 +116,47 @@ def telegram_update(**changes):
 
 
 class IntakeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_edited_message_handler_pauses_only_bound_group_without_forwarding_text(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "pause.json"
+            transport = FakeTransport(status=BindingStatus("active", 9, "policy-2", 4))
+            intake = TelegramIntake(full_consent(), transport, PauseState(path))
+            dispatcher, _ = create_dispatcher(intake)
+            self.assertIn("edited_message", dispatcher.resolve_used_update_types())
+            handler = dispatcher.edited_message.handlers[0].callback
+            message = lambda chat_id, kind="supergroup": SimpleNamespace(
+                chat=SimpleNamespace(id=chat_id, type=kind), text="edited secret")
+            await handler(message(-999))
+            await handler(message(-100123, "private"))
+            self.assertEqual(transport.edit_pause_requests, [])
+            await handler(message(-100123))
+            self.assertEqual(len(transport.edit_pause_requests), 1)
+            self.assertEqual(PauseState(path).stage, "awaiting_resume")
+            self.assertNotIn("edited secret", path.read_text(encoding="utf-8"))
+            self.assertEqual(transport.events, [])
+            self.assertIsNone(await intake.process(telegram_update(message_id=8)))
+            self.assertFalse(await intake.reconcile_pause())
+            transport.status = BindingStatus("active", 11, "policy-2", 4)
+            self.assertTrue(await intake.reconcile_pause())
+            self.assertEqual((await intake.process(telegram_update(message_id=9)))["result"], "accepted")
+
+    async def test_edit_pause_marker_survives_network_failure_and_restart(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "pause.json"
+            transport = FakeTransport(status=TransportError("offline"))
+            intake = TelegramIntake(full_consent(), transport, PauseState(path))
+            self.assertTrue(intake.stop_after_message_edit(-100123))
+            self.assertFalse(await intake.reconcile_pause())
+            self.assertEqual(PauseState(path).reason, "message_edit")
+            self.assertIsNone(await intake.process(telegram_update()))
+            restored = TelegramIntake(full_consent(), transport, PauseState(path))
+            self.assertIsNone(await restored.process(telegram_update(message_id=8)))
+            transport.status = BindingStatus("active", 9, "policy-2", 4)
+            self.assertFalse(await restored.reconcile_pause())
+            self.assertEqual(PauseState(path).stage, "awaiting_resume")
+            self.assertEqual(len(transport.edit_pause_requests), 1)
+            self.assertIsNone(await restored.process(telegram_update(message_id=9)))
+
     async def test_gap_marker_blocks_until_server_pause_and_distinct_manual_resume(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "pause.json"
