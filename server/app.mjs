@@ -100,6 +100,20 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
           ? store.telegram.confirmChatAction(actor, recommendationRoute[1], recommendationRoute[2], await body(req, 'INVALID_INPUT'))
           : store.telegram.recommendation(actor, recommendationRoute[1], recommendationRoute[2]))
       }
+      const chatFeedbackRoute = url.pathname.match(/^\/api\/telegram\/bindings\/([a-f0-9-]+)\/periods\/([a-f0-9-]+)\/feedback\/(interpretation|outcome)(\/close)?$/)
+      if (chatFeedbackRoute) {
+        if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
+        if (chatFeedbackRoute[4] && req.method !== 'POST') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
+        if (req.method === 'POST') checkBrowser(req)
+        const actor = store.authenticate(tokenFrom(req))
+        if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
+        const [bindingId, periodId, kind] = chatFeedbackRoute.slice(1, 4)
+        return json(res, 200, chatFeedbackRoute[4]
+          ? store.telegram.closeChatFeedback(actor, bindingId, periodId, kind, await body(req, 'INVALID_INPUT'))
+          : req.method === 'POST'
+            ? store.telegram.submitChatFeedback(actor, bindingId, periodId, kind, await body(req, 'INVALID_INPUT'))
+            : store.telegram.chatFeedback(actor, bindingId, periodId, kind))
+      }
       if (url.pathname.startsWith('/api/bot/') || url.pathname.startsWith('/api/telegram/')) {
         const route = url.pathname.match(/^\/api\/(bot\/v1|telegram)\/bindings\/([a-f0-9-]+)(?:\/(roster|company|consents|control|pause|events))?$/)
         const bot = route?.[1] === 'bot/v1'

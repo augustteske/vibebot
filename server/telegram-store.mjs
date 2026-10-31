@@ -127,6 +127,24 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
       expires INTEGER NOT NULL,
       UNIQUE(binding_id,period_id), UNIQUE(binding_id,actor_id,request_id)
     );
+    CREATE TABLE IF NOT EXISTS telegram_feedback_collections(
+      binding_id TEXT NOT NULL REFERENCES telegram_bindings(id), period_id TEXT NOT NULL,
+      kind TEXT NOT NULL, profile_version INTEGER NOT NULL, revision INTEGER NOT NULL,
+      closed INTEGER NOT NULL DEFAULT 0, counts TEXT,
+      close_request_id TEXT, close_digest TEXT, expires INTEGER NOT NULL,
+      PRIMARY KEY(binding_id,period_id,kind)
+    );
+    CREATE TABLE IF NOT EXISTS telegram_feedback_votes(
+      binding_id TEXT NOT NULL, period_id TEXT NOT NULL, kind TEXT NOT NULL,
+      member_id TEXT NOT NULL, value TEXT NOT NULL,
+      PRIMARY KEY(binding_id,period_id,kind,member_id)
+    );
+    CREATE TABLE IF NOT EXISTS telegram_feedback_requests(
+      binding_id TEXT NOT NULL, period_id TEXT NOT NULL, kind TEXT NOT NULL,
+      member_id TEXT NOT NULL, request_id TEXT NOT NULL, digest TEXT NOT NULL,
+      expires INTEGER NOT NULL,
+      PRIMARY KEY(binding_id,period_id,kind,member_id,request_id)
+    );
   `)
   const one = (sql, ...args) => db.prepare(sql).get(...args)
   const run = (sql, ...args) => db.prepare(sql).run(...args)
@@ -150,6 +168,9 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
     clearOpenPeriod(bindingId)
     run('DELETE FROM telegram_closed_periods WHERE binding_id=?', bindingId)
     run('DELETE FROM telegram_chat_actions WHERE binding_id=?', bindingId)
+    run('DELETE FROM telegram_feedback_votes WHERE binding_id=?', bindingId)
+    run('DELETE FROM telegram_feedback_requests WHERE binding_id=?', bindingId)
+    run('DELETE FROM telegram_feedback_collections WHERE binding_id=?', bindingId)
   }
   const localParts = (millis, timeZone) => {
     const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
@@ -184,9 +205,17 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
       dataSource: 'chat', profileVersion: row.profile_version, metrics: JSON.parse(row.metrics),
       recognitionMethod: 'lexicon-v1', comparison: null }
   }
-  const publishedPeriod = (actor, id, periodId) => {
-    const binding = bindingFor(actor, id)
+  const publishedPeriod = (actor, id, periodId, linkedMember = false) => {
+    const binding = linkedMember
+      ? one('SELECT * FROM telegram_bindings WHERE id=? AND workspace_id=?', id, actor.workspace_id)
+      : bindingFor(actor, id)
+    if (!binding) fail(404, 'NOT_FOUND', 'Привязка не найдена')
     const state = JSON.parse(binding.state)
+    if (linkedMember && (actor.kind || !state.roster.includes(actor.id)
+      || state.decisions[actor.id] !== 'accepted'
+      || !one('SELECT 1 FROM telegram_links WHERE binding_id=? AND workspace_id=? AND member_id=?', id, actor.workspace_id, actor.id))) {
+      fail(403, 'FORBIDDEN', 'Нужна подтверждённая связь участника')
+    }
     if (!canProcessChat(state) || (binding.evidence_expires !== null && binding.evidence_expires <= now())) {
       fail(409, 'CONSENT_REQUIRED', 'Чат не активен')
     }
@@ -211,6 +240,21 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
       limitation: 'Это доля сообщений, а не оценка нагрузки или благополучия участников; причины неизвестны.',
       action: 'Обсудить с командой удобное время для рабочих сообщений.' }
   }
+  const feedbackKinds = { interpretation: ['useful', 'incorrect', 'usual_joke'], outcome: ['helped', 'not_helped'] }
+  const feedbackTarget = (id, row, kind) => {
+    if (!Object.hasOwn(feedbackKinds, kind)) invalid()
+    if (kind === 'interpretation') return templateCard(id, row).id
+    const action = one('SELECT id FROM telegram_chat_actions WHERE binding_id=? AND period_id=? AND expires>?',
+      id, row.period_id, now())
+    if (!action) fail(409, 'STALE_PERIOD', 'Шаг ещё не подтверждён')
+    return action.id
+  }
+  const feedbackView = (kind, collection) => {
+    if (!collection?.closed) return { status: 'collecting' }
+    if (!collection.counts) return { status: 'insufficient' }
+    const counts = JSON.parse(collection.counts)
+    return { status: 'published', demo: true, kind, total: Object.values(counts).reduce((a, b) => a + b, 0), counts }
+  }
   const expireBinding = binding => {
     if (binding.evidence_expires === null || binding.evidence_expires > now()) return binding
     const state = JSON.parse(binding.state)
@@ -233,6 +277,9 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
     run('DELETE FROM telegram_message_ids WHERE expires<=?', time)
     run('DELETE FROM telegram_closed_periods WHERE expires<=?', time)
     run('DELETE FROM telegram_chat_actions WHERE expires<=?', time)
+    run('DELETE FROM telegram_feedback_votes WHERE (binding_id,period_id,kind) IN (SELECT binding_id,period_id,kind FROM telegram_feedback_collections WHERE expires<=?)', time)
+    run('DELETE FROM telegram_feedback_collections WHERE expires<=?', time)
+    run('DELETE FROM telegram_feedback_requests WHERE expires<=?', time)
     run('DELETE FROM telegram_close_requests WHERE expires<=?', time)
     run('DELETE FROM telegram_profile_requests WHERE expires<=?', time)
     for (const open of db.prepare('SELECT binding_id FROM telegram_open_periods WHERE opened_at<=?').all(time - DAY)) clearOpenPeriod(open.binding_id)
@@ -584,6 +631,80 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
           Math.min(row.expires, now() + CLOSED_TTL))
         return { id: actionId, periodId: input.periodId, profileVersion: row.profile_version,
           dataSource: 'chat', action: input.action, confirmed: true }
+      })
+    },
+    submitChatFeedback(actor, id, periodId, kind, input) {
+      unavailable()
+      if (!Object.hasOwn(feedbackKinds, kind) || !uuid(periodId) || !input || Array.isArray(input)
+        || typeof input !== 'object' || Object.keys(input).length !== 4
+        || !uuid(input.requestId) || !revision(input.expectedRevision)
+        || typeof input.value !== 'string' || !feedbackKinds[kind].includes(input.value)
+        || typeof input[kind === 'interpretation' ? 'recommendationId' : 'actionId'] !== 'string'
+        || Object.keys(input).some(key => !['requestId', 'expectedRevision', 'value',
+          kind === 'interpretation' ? 'recommendationId' : 'actionId'].includes(key))) invalid()
+      return tx(() => {
+        const { row, state } = publishedPeriod(actor, id, periodId, true)
+        if (input.expectedRevision !== state.revision) fail(409, 'STALE_REVISION', 'Версия изменилась')
+        const targetId = feedbackTarget(id, row, kind)
+        if (input[kind === 'interpretation' ? 'recommendationId' : 'actionId'] !== targetId) {
+          fail(409, 'STALE_PERIOD', 'Цель отзыва изменилась')
+        }
+        const requestDigest = digest(canonical({ kind, periodId, input }))
+        const previous = one('SELECT digest FROM telegram_feedback_requests WHERE binding_id=? AND period_id=? AND kind=? AND member_id=? AND request_id=?',
+          id, periodId, kind, actor.id, input.requestId)
+        if (previous) {
+          if (previous.digest !== requestDigest) fail(409, 'EVENT_CONFLICT', 'Идентификатор запроса уже использован')
+          return { accepted: true }
+        }
+        const collection = one('SELECT closed FROM telegram_feedback_collections WHERE binding_id=? AND period_id=? AND kind=?', id, periodId, kind)
+        if (collection?.closed) fail(409, 'FEEDBACK_CLOSED', 'Сбор отзывов закрыт')
+        if (one('SELECT 1 FROM telegram_feedback_votes WHERE binding_id=? AND period_id=? AND kind=? AND member_id=?', id, periodId, kind, actor.id)) {
+          fail(409, 'EVENT_CONFLICT', 'Отзыв уже принят')
+        }
+        if (!collection) run('INSERT INTO telegram_feedback_collections(binding_id,period_id,kind,profile_version,revision,expires) VALUES(?,?,?,?,?,?)',
+          id, periodId, kind, row.profile_version, row.revision, row.expires)
+        run('INSERT INTO telegram_feedback_votes VALUES(?,?,?,?,?)', id, periodId, kind, actor.id, input.value)
+        run('INSERT INTO telegram_feedback_requests VALUES(?,?,?,?,?,?,?)', id, periodId, kind, actor.id,
+          input.requestId, requestDigest, Math.min(row.expires, now() + DAY))
+        return { accepted: true }
+      })
+    },
+    chatFeedback(actor, id, periodId, kind) {
+      unavailable()
+      if (!uuid(periodId) || !Object.hasOwn(feedbackKinds, kind)) invalid()
+      return tx(() => {
+        const { row } = publishedPeriod(actor, id, periodId)
+        feedbackTarget(id, row, kind)
+        const collection = one('SELECT * FROM telegram_feedback_collections WHERE binding_id=? AND period_id=? AND kind=?', id, periodId, kind)
+        return feedbackView(kind, collection)
+      })
+    },
+    closeChatFeedback(actor, id, periodId, kind, input) {
+      unavailable()
+      if (!uuid(periodId) || !Object.hasOwn(feedbackKinds, kind) || !input || Array.isArray(input)
+        || typeof input !== 'object' || Object.keys(input).length !== 2
+        || !uuid(input.requestId) || !revision(input.expectedRevision)) invalid()
+      return tx(() => {
+        const { row, state } = publishedPeriod(actor, id, periodId)
+        if (input.expectedRevision !== state.revision) fail(409, 'STALE_REVISION', 'Версия изменилась')
+        feedbackTarget(id, row, kind)
+        const requestDigest = digest(canonical({ kind, periodId, input, operation: 'closeFeedback' }))
+        const collection = one('SELECT * FROM telegram_feedback_collections WHERE binding_id=? AND period_id=? AND kind=?', id, periodId, kind)
+        if (collection?.closed) {
+          if (collection.close_request_id !== input.requestId || collection.close_digest !== requestDigest) {
+            fail(409, 'FEEDBACK_CLOSED', 'Сбор отзывов закрыт')
+          }
+          return feedbackView(kind, collection)
+        }
+        const votes = db.prepare('SELECT value,COUNT(*) AS n FROM telegram_feedback_votes WHERE binding_id=? AND period_id=? AND kind=? GROUP BY value').all(id, periodId, kind)
+        const total = votes.reduce((sum, vote) => sum + vote.n, 0)
+        const counts = total >= 5 ? Object.fromEntries(feedbackKinds[kind].map(value => [value, votes.find(vote => vote.value === value)?.n ?? 0])) : null
+        if (!collection) run('INSERT INTO telegram_feedback_collections(binding_id,period_id,kind,profile_version,revision,expires) VALUES(?,?,?,?,?,?)',
+          id, periodId, kind, row.profile_version, row.revision, row.expires)
+        run('UPDATE telegram_feedback_collections SET closed=1,counts=?,close_request_id=?,close_digest=? WHERE binding_id=? AND period_id=? AND kind=?',
+          counts && JSON.stringify(counts), input.requestId, requestDigest, id, periodId, kind)
+        run('DELETE FROM telegram_feedback_votes WHERE binding_id=? AND period_id=? AND kind=?', id, periodId, kind)
+        return counts ? { status: 'published', demo: true, kind, total, counts } : { status: 'insufficient' }
       })
     },
     closePeriod(actor, id, input) {

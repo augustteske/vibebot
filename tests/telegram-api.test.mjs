@@ -92,6 +92,12 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
   const confirmAction = (periodId, input, token = ownerToken, bindingId = id) => request(
     '/telegram/bindings/' + bindingId + '/periods/' + periodId + '/action', input,
     { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1' })
+  const chatFeedback = (periodId, kind, input, token = ownerToken, bindingId = id) => request(
+    '/telegram/bindings/' + bindingId + '/periods/' + periodId + '/feedback/' + kind,
+    input, { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1' })
+  const closeChatFeedback = (periodId, kind, input, token = ownerToken, bindingId = id) => request(
+    '/telegram/bindings/' + bindingId + '/periods/' + periodId + '/feedback/' + kind + '/close',
+    input, { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1' })
   const profile = (input, token = ownerToken) => request('/telegram/profile', input,
     { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1' })
   const setProfile = () => profile({ requestId: randomUUID(), expectedVersion: 0,
@@ -123,7 +129,7 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
     assert.equal(result.body.phase, 'active')
     return result.body
   }
-  return { db, id, otherBindingId, owner, people, tokens, foreignToken, foreignOwner, foreignPeople, request, web, bot, linkToken, link, bindingToken, bind, closePeriod, summary, recommendation, confirmAction, profile, setProfile, command, status,
+  return { db, id, otherBindingId, owner, people, tokens, foreignToken, foreignOwner, foreignPeople, request, web, bot, linkToken, link, bindingToken, bind, closePeriod, summary, recommendation, confirmAction, chatFeedback, closeChatFeedback, profile, setProfile, command, status,
     mutate, decision, prepare, activate, time: () => clock, advance: ms => { clock += ms }, setTime: ms => { clock = ms },
     restart: async () => { await app.close(); await launch() } }
 }
@@ -217,7 +223,7 @@ test('SQLite: adding Telegram tables preserves existing workspace, member and ch
   assert.equal(reopened.prepare('SELECT name FROM members WHERE id=?').get(memberId).name, 'Legacy member')
   assert.deepEqual({ ...reopened.prepare('SELECT energy,clarity,support FROM checkins WHERE round_id=?').get(roundId) },
     { energy: 2, clarity: 3, support: 4 })
-  assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 19)
+  assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 22)
   reopened.close()
 })
 
@@ -560,6 +566,79 @@ test('HTTP/SQLite: pause blocks a previously published card and confirmation', a
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_chat_actions').get().n, 0)
 })
 
+test('HTTP/SQLite: four interpretation votes stay hidden and are deleted on close', async t => {
+  const f = await fixture(t)
+  const { periodId, revision } = await publishForRecommendation(f)
+  const card = (await f.recommendation(periodId)).body
+  const input = { requestId: randomUUID(), expectedRevision: revision,
+    recommendationId: card.id, value: 'useful' }
+  error(await f.chatFeedback(periodId, 'interpretation', input, f.foreignToken), 404, 'NOT_FOUND')
+  error(await f.chatFeedback(periodId, 'interpretation', input, ''), 401, 'SIGN_IN_REQUIRED')
+  for (let i = 1; i <= 4; i++) {
+    assert.deepEqual(await f.chatFeedback(periodId, 'interpretation', { ...input, requestId: randomUUID() }, f.tokens[i]),
+      { status: 200, body: { accepted: true } })
+  }
+  assert.deepEqual((await f.chatFeedback(periodId, 'interpretation', undefined)).body, { status: 'collecting' })
+  error(await f.chatFeedback(periodId, 'interpretation', undefined, f.tokens[1]), 403, 'FORBIDDEN')
+  const closeInput = { requestId: randomUUID(), expectedRevision: revision }
+  assert.deepEqual((await f.closeChatFeedback(periodId, 'interpretation', closeInput)).body, { status: 'insufficient' })
+  assert.deepEqual((await f.chatFeedback(periodId, 'interpretation', undefined)).body, { status: 'insufficient' })
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_feedback_votes').get().n, 0)
+  error(await f.chatFeedback(periodId, 'interpretation', input, f.tokens[5]), 409, 'FEEDBACK_CLOSED')
+  await f.restart()
+  assert.deepEqual((await f.closeChatFeedback(periodId, 'interpretation', closeInput)).body, { status: 'insufficient' })
+  error(await f.closeChatFeedback(periodId, 'interpretation', { requestId: randomUUID(), expectedRevision: revision }), 409, 'FEEDBACK_CLOSED')
+})
+
+test('HTTP/SQLite: five outcome votes publish only aggregate and withdrawal clears it', async t => {
+  const f = await fixture(t)
+  const { periodId, revision } = await publishForRecommendation(f)
+  const card = (await f.recommendation(periodId)).body
+  const action = (await f.confirmAction(periodId, { requestId: randomUUID(), expectedRevision: revision,
+    periodId, recommendationId: card.id, action: 'Проверить удобное время.' })).body
+  const feedback = { requestId: randomUUID(), expectedRevision: revision, actionId: action.id, value: 'helped' }
+  error(await f.chatFeedback(randomUUID(), 'outcome', feedback, f.tokens[1]), 409, 'STALE_PERIOD')
+  error(await f.chatFeedback(periodId, 'outcome', { ...feedback, actionId: randomUUID() }, f.tokens[1]), 409, 'STALE_PERIOD')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_feedback_votes').get().n, 0)
+  assert.deepEqual(await f.chatFeedback(periodId, 'outcome', feedback, f.tokens[1]),
+    { status: 200, body: { accepted: true } })
+  await f.restart()
+  assert.deepEqual(await f.chatFeedback(periodId, 'outcome', feedback, f.tokens[1]),
+    { status: 200, body: { accepted: true } })
+  error(await f.chatFeedback(periodId, 'outcome', { ...feedback, value: 'not_helped' }, f.tokens[1]), 409, 'EVENT_CONFLICT')
+  error(await f.chatFeedback(periodId, 'outcome', { ...feedback, requestId: randomUUID() }, f.tokens[1]), 409, 'EVENT_CONFLICT')
+  error(await f.chatFeedback(periodId, 'outcome', feedback, f.foreignToken), 404, 'NOT_FOUND')
+  error(await f.closeChatFeedback(periodId, 'outcome', { requestId: randomUUID(), expectedRevision: revision }, f.foreignToken), 404, 'NOT_FOUND')
+  for (const i of [0, 2, 3, 4]) {
+    assert.equal((await f.chatFeedback(periodId, 'outcome', { ...feedback,
+      requestId: randomUUID(), value: i === 4 ? 'not_helped' : 'helped' }, f.tokens[i])).status, 200)
+  }
+  assert.deepEqual((await f.chatFeedback(periodId, 'outcome', undefined)).body, { status: 'collecting' })
+  const closeInput = { requestId: randomUUID(), expectedRevision: revision }
+  assert.deepEqual((await f.closeChatFeedback(periodId, 'outcome', closeInput)).body,
+    { status: 'published', demo: true, kind: 'outcome', total: 5, counts: { helped: 4, not_helped: 1 } })
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_feedback_votes').get().n, 0)
+  assert.deepEqual((await f.chatFeedback(periodId, 'outcome', undefined)).body,
+    { status: 'published', demo: true, kind: 'outcome', total: 5, counts: { helped: 4, not_helped: 1 } })
+  await f.restart()
+  assert.deepEqual(await f.chatFeedback(periodId, 'outcome', feedback, f.tokens[1]),
+    { status: 200, body: { accepted: true } })
+  error(await f.chatFeedback(periodId, 'outcome', { ...feedback, requestId: randomUUID() }, f.tokens[5]), 409, 'FEEDBACK_CLOSED')
+  for (let i = 0; i < 5; i++) {
+    assert.equal((await f.chatFeedback(periodId, 'interpretation', { requestId: randomUUID(),
+      expectedRevision: revision, recommendationId: card.id,
+      value: i === 4 ? 'usual_joke' : 'useful' }, f.tokens[i])).status, 200)
+  }
+  assert.deepEqual((await f.closeChatFeedback(periodId, 'interpretation', { requestId: randomUUID(), expectedRevision: revision })).body,
+    { status: 'published', demo: true, kind: 'interpretation', total: 5,
+      counts: { useful: 4, incorrect: 0, usual_joke: 1 } })
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_feedback_votes').get().n, 0)
+  assert.equal((await f.decision(2, 'withdrawn')).status, 200)
+  error(await f.chatFeedback(periodId, 'outcome', undefined), 409, 'CONSENT_REQUIRED')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_feedback_collections').get().n, 0)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_feedback_requests').get().n, 0)
+})
+
 test('HTTP/SQLite: withdrawal, roster change and transport gap discard an open period', async t => {
   const f = await fixture(t)
   const active = await f.activate()
@@ -865,6 +944,7 @@ test('Telegram synthetic gate defaults off and unfinished summary routes remain 
   error(await f.bot('events', { text: 'synthetic text must not be stored' }), 503, 'UNAVAILABLE')
   error(await f.request('/telegram/link-tokens', { requestId: randomUUID() }), 503, 'UNAVAILABLE')
   error(await f.recommendation(randomUUID()), 503, 'UNAVAILABLE')
+  error(await f.chatFeedback(randomUUID(), 'interpretation', undefined), 503, 'UNAVAILABLE')
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_requests').get().n, 0)
-  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 19)
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 22)
 })
