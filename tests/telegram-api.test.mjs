@@ -820,6 +820,91 @@ test('HTTP/SQLite: five outcome votes publish only aggregate and withdrawal clea
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_feedback_requests').get().n, 0)
 })
 
+test('HTTP/SQLite: synthetic full cycle demonstrates consent, metrics, action, feedback and withdrawal', async t => {
+  const f = await fixture(t)
+  const active = await f.activate()
+  assert.equal((await f.setProfile()).status, 200)
+  t.diagnostic('Согласие: компания и все 6 вымышленных участников подтвердили сбор; контур активен.')
+
+  const base = Date.parse('2026-11-02T03:00:00.000Z')
+  f.setTime(base - DAY)
+  await sendMany(f, active.revision, 19, 5, 100)
+  assert.deepEqual(await closeCurrent(f, active.revision), { status: 200, body: { status: 'insufficient' } })
+  t.diagnostic('Нехватка данных: закрытый период с 19 сообщениями скрыт, показатели не опубликованы.')
+
+  for (let day = 0; day < 2; day++) {
+    f.setTime(base + day * DAY)
+    await sendMany(f, active.revision, 20, 5, 200 + day * 100, 4)
+    assert.deepEqual(await closeCurrent(f, active.revision), { status: 200, body: { status: 'calibrating' } })
+  }
+
+  f.setTime(base + 2 * DAY - 3600000)
+  await sendMany(f, active.revision, 5, 5, 400, 4)
+  f.advance(3600000)
+  await sendMany(f, active.revision, 15, 5, 405)
+  const closed = await closeCurrent(f, active.revision)
+  assert.equal(closed.body.status, 'published')
+  assert.equal(closed.body.demo, true)
+  assert.deepEqual(closed.body.metrics, {
+    outsideHoursPercent: 25,
+    participationEvenness: 89.8,
+    recognitionPercent: 20,
+  })
+  assert.equal(closed.body.comparison, null)
+  const periodId = closed.body.period.id
+  t.diagnostic('Закрытый период: опубликованы только агрегаты — вне графика 25%, равномерность участия 89.8%, благодарность 20%.')
+
+  const card = (await f.recommendation(periodId)).body
+  assert.equal(card.source, 'template')
+  assert.equal(card.demo, true)
+  t.diagnostic('Рекомендация: выдана шаблонная карточка (внешний ИИ не вызывается).')
+
+  const action = (await f.confirmAction(periodId, {
+    requestId: randomUUID(),
+    expectedRevision: active.revision,
+    periodId,
+    recommendationId: card.id,
+    action: 'Обсудить удобное время встречи на следующей командной встрече.',
+  })).body
+  assert.equal(action.confirmed, true)
+
+  for (let i = 0; i < 5; i++) {
+    assert.equal((await f.chatFeedback(periodId, 'interpretation', {
+      requestId: randomUUID(),
+      expectedRevision: active.revision,
+      recommendationId: card.id,
+      value: i === 4 ? 'usual_joke' : 'useful',
+    }, f.tokens[i])).status, 200)
+    assert.equal((await f.chatFeedback(periodId, 'outcome', {
+      requestId: randomUUID(),
+      expectedRevision: active.revision,
+      actionId: action.id,
+      value: i === 4 ? 'not_helped' : 'helped',
+    }, f.tokens[i])).status, 200)
+  }
+
+  const interpretation = await f.closeChatFeedback(periodId, 'interpretation', {
+    requestId: randomUUID(), expectedRevision: active.revision,
+  })
+  assert.deepEqual(interpretation.body, {
+    status: 'published', demo: true, kind: 'interpretation', total: 5,
+    counts: { useful: 4, incorrect: 0, usual_joke: 1 },
+  })
+  const outcome = await f.closeChatFeedback(periodId, 'outcome', {
+    requestId: randomUUID(), expectedRevision: active.revision,
+  })
+  assert.deepEqual(outcome.body, {
+    status: 'published', demo: true, kind: 'outcome', total: 5,
+    counts: { helped: 4, not_helped: 1 },
+  })
+  t.diagnostic('Обратная связь: интерпретация useful/usual_joke и результат helped/not_helped опубликованы агрегатами.')
+
+  assert.equal((await f.decision(5, 'withdrawn')).status, 200)
+  assert.equal((await f.status()).phase, 'paused')
+  assert.deepEqual((await f.summary()).body, { status: 'paused' })
+  t.diagnostic('Отзыв согласия: сбор приостановлен, сводка больше не доступна.')
+})
+
 test('HTTP/SQLite: withdrawal, roster change and transport gap discard an open period', async t => {
   const f = await fixture(t)
   const active = await f.activate()
