@@ -20,8 +20,7 @@ verify:
       - .npm/
   script:
     - npm ci --cache .npm --prefer-offline
-    - npm test
-    - npm run build
+    - npm run check
   artifacts:
     paths:
       - dist/

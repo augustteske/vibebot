@@ -1,5 +1,5 @@
 # Правила проекта VibeBot
-Эти правила относятся к людям и coding assistants. С 31 октября команда выбрала GitLab; PR в этих правилах означает также merge request. Перенос ожидает точного адреса, см. docs/GITLAB_MIGRATION.md.
+Эти правила относятся к людям и coding assistants. С 31 октября команда выбрала GitLab; PR в этих правилах означает также merge request. Репозиторий перенесён: https://gitlab.com/shertwg-group1/vibebot; см. docs/GITLAB_MIGRATION.md. Стартовые задания участников — docs/onboarding/.
 
 ## Ветки и ревью
 - main — проверенная демонстрационная версия. develop — интеграционная.

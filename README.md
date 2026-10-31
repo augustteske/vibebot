@@ -63,3 +63,6 @@ main — проверенный показ, develop — интеграция, р
 - [Концепция](docs/PRODUCT.md)
 - [Питч](docs/PITCH.md)
 - [Проверки серверной итерации](docs/ITERATION_2026-10-31.md)
+
+## Начало работы участников
+Самостоятельные файлы для новых чатов с ИИ: [docs/onboarding](docs/onboarding/README.md). Проверка среды: npm run doctor. Все проверки: npm run check. Node.js 24 обязателен.
