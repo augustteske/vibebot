@@ -3,12 +3,22 @@ import { readFile } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
 import { AppError, createStore } from './store.mjs'
 
-export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookies = false, allowedOrigins = [] }) {
-  const store = createStore({ path: dbPath, secret })
+export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookies = false, allowedOrigins = [], telegramSynthetic = false, now = Date.now }) {
+  const store = createStore({ path: dbPath, secret, telegramSynthetic, now })
+  const cleanupTimer = setInterval(() => {
+    try { store.telegram.cleanup() } catch { console.error('Vibee: Telegram cleanup failed') }
+  }, 60000)
+  cleanupTimer.unref()
   const cookie = token => 'vibebot_session=' + token + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=' + (token ? 604800 : 0) + (secureCookies ? '; Secure' : '')
   const tokenFrom = req => (req.headers.cookie ?? '').split(';').map(s => s.trim()).find(s => s.startsWith('vibebot_session='))?.slice(16)
   const json = (res, status, data) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)) }
-  async function body(req) {
+  const checkBrowser = req => {
+    if (req.headers['x-vibee'] !== '1' && req.headers['x-vibebot'] !== '1') throw new AppError(403, 'REQUEST_REJECTED', 'Обновите страницу и повторите действие')
+    const origin = req.headers.origin
+    const sameOrigin = (secureCookies ? 'https://' : 'http://') + req.headers.host
+    if (origin && origin !== sameOrigin && !allowedOrigins.includes(origin)) throw new AppError(403, 'ORIGIN_REJECTED', 'Запрос с другого сайта запрещён')
+  }
+  async function body(req, invalidCode = 'INVALID_JSON') {
     if (!req.headers['content-type']?.startsWith('application/json')) throw new AppError(415, 'JSON_REQUIRED', 'Нужен запрос JSON')
     let size = 0
     const chunks = []
@@ -21,7 +31,7 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
       const value = JSON.parse(Buffer.concat(chunks).toString('utf8'))
       if (!value || Array.isArray(value) || typeof value !== 'object') throw new Error()
       return value
-    } catch { throw new AppError(400, 'INVALID_JSON', 'Не удалось прочитать запрос') }
+    } catch { throw new AppError(400, invalidCode, 'Не удалось прочитать запрос') }
   }
   const server = createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store')
@@ -43,12 +53,35 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
       }
       if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true })
       if (!['GET', 'POST'].includes(req.method)) throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Метод не поддерживается')
-      if (req.method === 'POST') {
-        if (req.headers['x-vibee'] !== '1' && req.headers['x-vibebot'] !== '1') throw new AppError(403, 'REQUEST_REJECTED', 'Обновите страницу и повторите действие')
-        const origin = req.headers.origin
-        const sameOrigin = (secureCookies ? 'https://' : 'http://') + req.headers.host
-        if (origin && origin !== sameOrigin && !allowedOrigins.includes(origin)) throw new AppError(403, 'ORIGIN_REJECTED', 'Запрос с другого сайта запрещён')
+      if (url.pathname === '/api/telegram/link-tokens' || url.pathname === '/api/bot/v1/links') {
+        if (req.method !== 'POST') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
+        if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
+        const bot = url.pathname === '/api/bot/v1/links'
+        if (!bot) checkBrowser(req)
+        const actor = bot ? store.telegram.authenticate(req.headers.authorization) : store.authenticate(tokenFrom(req))
+        if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
+        const result = bot ? store.telegram.consumeLinkToken(actor, await body(req, 'INVALID_INPUT'))
+          : store.telegram.issueLinkToken(actor, await body(req, 'INVALID_INPUT'))
+        return json(res, bot ? 200 : 201, result)
       }
+      if (url.pathname.startsWith('/api/bot/') || url.pathname.startsWith('/api/telegram/')) {
+        const route = url.pathname.match(/^\/api\/(bot\/v1|telegram)\/bindings\/([a-f0-9-]+)(?:\/(roster|company|consents|control|pause))?$/)
+        const bot = route?.[1] === 'bot/v1'
+        const operation = route?.[3]
+        const supported = route && (bot
+          ? (req.method === 'GET' && !operation) || (req.method === 'POST' && ['consents', 'pause'].includes(operation))
+          : req.method === 'POST' && ['roster', 'company', 'control'].includes(operation))
+        // In particular /events never reads a request body in this slice.
+        if (!supported) throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
+        if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
+        if (!bot) checkBrowser(req)
+        const actor = bot ? store.telegram.authenticate(req.headers.authorization) : store.authenticate(tokenFrom(req))
+        if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
+        const result = req.method === 'GET' ? store.telegram.status(actor, route[2])
+          : store.telegram.mutate(actor, route[2], operation, await body(req, 'INVALID_INPUT'))
+        return json(res, 200, result)
+      }
+      if (req.method === 'POST') checkBrowser(req)
       const input = req.method === 'POST' ? await body(req) : null
       const token = tokenFrom(req)
       const member = store.authenticate(token)
@@ -87,6 +120,7 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
   return {
     server,
     close: () => new Promise((resolveClose, reject) => {
+      clearInterval(cleanupTimer)
       server.close(error => { try { store.close(); error ? reject(error) : resolveClose() } catch (failure) { reject(failure) } })
       server.closeIdleConnections()
     }),
