@@ -297,7 +297,7 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
       consents: { telegramUserId: telegramId, policyVersion: version, rosterVersion: revision,
         decision: v => ['accepted', 'declined', 'withdrawn'].includes(v) },
       control: { action: v => ['resume', 'pause', 'disconnect'].includes(v) },
-      pause: { reason: v => ['unknown_member', 'transport_gap', 'chat_migration', 'manual'].includes(v) },
+      pause: { reason: v => ['unknown_member', 'transport_gap', 'chat_migration', 'message_edit', 'manual'].includes(v) },
     }
     const schema = { requestId: uuid, expectedRevision: revision, ...schemas[operation] }
     if (!schemas[operation] || !input || Array.isArray(input) || typeof input !== 'object'
@@ -840,7 +840,7 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
           clearDerived(id)
         } else if (event.type === 'pause') {
           clearOpenPeriod(id)
-          if (input.reason === 'transport_gap' || input.reason === 'chat_migration') purgeText(id)
+          if (['transport_gap', 'chat_migration', 'message_edit'].includes(input.reason)) purgeText(id)
         }
         if (operation === 'pause' && input.reason === 'chat_migration') run('UPDATE telegram_bindings SET migration_blocked=1 WHERE id=?', id)
         if (event.type === 'disconnect') {

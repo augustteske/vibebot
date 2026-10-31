@@ -420,6 +420,23 @@ test('HTTP/SQLite: unknown sender pauses chat and withdrawal removes retained te
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_texts').get().n, 0)
 })
 
+test('HTTP/SQLite: scoped message-edit pause clears text and open period until explicit resume', async t => {
+  const f = await fixture(t)
+  const active = await f.activate()
+  assert.equal((await f.setProfile()).status, 200)
+  assert.equal((await f.bot('events', textEvent(f, active.revision))).body.result, 'accepted')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_texts').get().n, 1)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_open_periods').get().n, 1)
+  const paused = await f.bot('pause', f.command(active.revision, { reason: 'message_edit' }))
+  assert.equal(paused.body.phase, 'paused')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_texts').get().n, 0)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_open_periods').get().n, 0)
+  error(await f.bot('events', textEvent(f, paused.body.revision, { messageId: '43' })), 409, 'CONSENT_REQUIRED')
+  const resumed = await f.mutate('control', { action: 'resume' })
+  assert.equal(resumed.body.phase, 'active')
+  error(await closeCurrent(f, resumed.body.revision), 409, 'STALE_PERIOD')
+})
+
 test('HTTP/SQLite: raw text expires at 15 minutes, metadata at 24 hours across restart', async t => {
   const f = await fixture(t)
   const active = await f.activate()
