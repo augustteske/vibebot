@@ -30,3 +30,7 @@ coverage
 
 .data/
 .npm/
+.venv/
+**/.venv/
+__pycache__/
+*.py[cod]

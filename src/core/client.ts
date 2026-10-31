@@ -8,7 +8,7 @@ export class ApiError extends Error {
 export async function api<T = SessionSnapshot>(path: string, input?: unknown): Promise<T> {
   let response: Response
   try {
-    response = await fetch('/api' + path, { method: input === undefined ? 'GET' : 'POST', credentials: 'same-origin', headers: input === undefined ? {} : { 'Content-Type': 'application/json', 'X-VibeBot': '1' }, ...(input === undefined ? {} : { body: JSON.stringify(input) }), signal: AbortSignal.timeout(10000) })
+    response = await fetch('/api' + path, { method: input === undefined ? 'GET' : 'POST', credentials: 'same-origin', headers: input === undefined ? {} : { 'Content-Type': 'application/json', 'X-Vibee': '1' }, ...(input === undefined ? {} : { body: JSON.stringify(input) }), signal: AbortSignal.timeout(10000) })
   } catch { throw new ApiError(0, 'NETWORK_ERROR', 'Нет связи. Проверьте подключение и попробуйте ещё раз.') }
   let data
   try { data = await response.json() } catch { throw new ApiError(response.status, 'INVALID_RESPONSE', 'Сервис временно недоступен. Попробуйте ещё раз.') }

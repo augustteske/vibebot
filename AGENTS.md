@@ -1,9 +1,9 @@
-# Правила проекта VibeBot
+# Правила проекта Vibee
 Эти правила относятся к людям и coding assistants. С 31 октября команда выбрала GitLab; PR в этих правилах означает также merge request. Репозиторий перенесён: https://gitlab.com/shertwg-group1/vibebot; см. docs/GITLAB_MIGRATION.md. Стартовые задания участников — docs/onboarding/.
 
 ## Ветки и ревью
 - main — проверенная демонстрационная версия. develop — интеграционная.
-- Фичи разрабатываются в feat/august-core, feat/ilian-checkin, feat/arina-actions, feat/alisa-insights-demo.
+- Фичи разрабатываются в feat/august-core, feat/ilian-checkin, feat/arina-actions, feat/alisa-insights-demo; Python-бот — feat/ilian-bot.
 - Каждая законченная подзадача — отдельный небольшой коммит и PR в develop; не ждать завершения всего своего блока.
 - После слияния обновить свою ветку из origin/develop, не перезаписывать чужую историю.
 - Август объединяет PR и релизы. Прямые push в main/develop, force-push и самостоятельные изменения чужого модуля не использовать.
@@ -11,7 +11,7 @@
 
 ## Владение
 - Август: src/App.*, src/index.css, src/main.tsx, src/core/**, server/**, tests/**, .github/**, .gitlab/**, scripts/**, все конфиги, package*.json, AGENTS.md, README.md, docs/TEAM_PLAN.md, docs/CONTRACTS.md, docs/PRODUCT.md.
-- Илиан: src/features/checkin/**.
+- Илиан: src/features/checkin/**; bot/** на отдельной ветке feat/ilian-bot.
 - Арина: src/features/actions/**.
 - Алиса: src/features/insights/**, src/demo/**, docs/PITCH.md, docs/QA.md.
 - CSS своего компонента хранить рядом и импортировать из компонента; общие стили не менять без согласования.
@@ -24,3 +24,6 @@
 - Вымышленные данные обозначены. Реальные чек-ины не коммитить, ключи не передавать в браузер.
 - Клиент реального продукта получает только допустимые агрегаты; правила публикации проверяются на сервере. Клиентская проверка в стартовом демо не обеспечивает приватность реальных данных.
 - Не обещать полную анонимность, медицинскую оценку или измеренное улучшение без проверки.
+
+## Техническое решение 2-в-1
+Node.js/React/SQLite сохраняются. Бот — Python 3.12/aiogram; новые модули и endpoint согласуются с Августом. Бот не пишет в БД напрямую. Корпоративный модуль требует согласия компании и каждого участника; руководитель видит только допустимые агрегаты. Реальный Groq пока не подключён. Демонстрационные данные и статус модуля обозначаются честно. Python-проверки: python -m unittest discover -s bot/tests -v; python -m bot --check из venv. Docker optional, без удаления volume с данными.

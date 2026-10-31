@@ -19,7 +19,7 @@ const app = createApp({
 })
 const host = process.env.HOST ?? '127.0.0.1'
 const port = Number(process.env.PORT ?? 8787)
-app.server.listen(port, host, () => console.log('VibeBot: http://' + host + ':' + port))
+app.server.listen(port, host, () => console.log('Vibee: http://' + host + ':' + port))
 let shuttingDown = false
 const shutdown = () => { if (!shuttingDown) { shuttingDown = true; app.close().then(() => process.exit(0), () => process.exit(1)) } }
 process.on('SIGINT', shutdown)
