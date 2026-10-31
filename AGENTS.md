@@ -1,5 +1,5 @@
 # Правила проекта VibeBot
-Эти правила относятся к людям и coding assistants.
+Эти правила относятся к людям и coding assistants. С 31 октября команда выбрала GitLab; PR в этих правилах означает также merge request. Перенос ожидает точного адреса, см. docs/GITLAB_MIGRATION.md.
 
 ## Ветки и ревью
 - main — проверенная демонстрационная версия. develop — интеграционная.
@@ -10,7 +10,7 @@
 - Вопрос, который блокирует работу больше 20 минут, фиксировать в задаче с конкретным препятствием.
 
 ## Владение
-- Август: src/App.*, src/index.css, src/main.tsx, src/core/**, server/**, tests/**, .github/**, все конфиги, package*.json, AGENTS.md, README.md, docs/TEAM_PLAN.md, docs/CONTRACTS.md, docs/PRODUCT.md.
+- Август: src/App.*, src/index.css, src/main.tsx, src/core/**, server/**, tests/**, .github/**, .gitlab/**, scripts/**, все конфиги, package*.json, AGENTS.md, README.md, docs/TEAM_PLAN.md, docs/CONTRACTS.md, docs/PRODUCT.md.
 - Илиан: src/features/checkin/**.
 - Арина: src/features/actions/**.
 - Алиса: src/features/insights/**, src/demo/**, docs/PITCH.md, docs/QA.md.
