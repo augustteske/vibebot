@@ -6,6 +6,8 @@ import logging
 from typing import Literal, Protocol
 from uuid import uuid4
 
+from .pause_state import PauseState
+
 
 @dataclass(frozen=True)
 class ConsentSnapshot:
@@ -70,22 +72,54 @@ class TextTransport(Protocol):
     async def get_summary(self, binding_id: str) -> CommunicationView | dict[str, object]:
         """Возвращает сводку общения или ошибку транспорта."""
 
+    async def pause_transport_gap(self, expected_revision: int) -> BindingStatus:
+        """Confirms that the server stopped the binding after uncertain delivery."""
+
 
 class TelegramIntake:
     """Пропускает только новые текстовые события при полном согласии."""
 
-    def __init__(self, consent: ConsentSnapshot, transport: TextTransport) -> None:
-        self._consent = consent
+    def __init__(self, consent: ConsentSnapshot, transport: TextTransport, pause_state: PauseState | None = None) -> None:
+        self._pause_state = pause_state or PauseState()
+        self._consent = replace(consent, active=False) if self._pause_state.stage != "clear" else consent
         self._transport = transport
         self._seen_messages: set[tuple[int, int]] = set()
 
     def update_consent(self, consent: ConsentSnapshot) -> None:
         """Обновляет состояние привязки после паузы или смены согласий."""
-        self._consent = consent
+        self._consent = replace(consent, active=False) if self._pause_state.stage != "clear" else consent
 
     def stop_after_transport_gap(self) -> None:
         """Не передавать новые тексты после неизвестного результата доставки."""
         self._consent = replace(self._consent, active=False)
+        self._pause_state.need_pause()
+
+    async def reconcile_pause(self) -> bool:
+        """Confirm server pause first; later accept only a distinct manual resume revision."""
+        from .http_transport import TransportError
+
+        if self._pause_state.stage == "clear":
+            return False
+        try:
+            status = await self.get_binding_status()
+            if isinstance(status, dict):
+                return False
+            if self._pause_state.stage == "needed":
+                if status.phase != "paused":
+                    status = await self._transport.pause_transport_gap(status.revision)
+                self._pause_state.confirmed(status.revision)
+                return False
+            if (status.phase == "active" and self._pause_state.pause_revision is not None
+                and status.revision > self._pause_state.pause_revision):
+                # The server only permits explicit resume with current full consent.
+                self._consent = replace(self._consent, active=True, revision=status.revision,
+                    policy_version=status.policyVersion, consent_policy_version=status.policyVersion,
+                    roster_version=status.rosterVersion)
+                self._pause_state.clear()
+                return True
+        except TransportError:
+            return False
+        return False
 
     async def get_binding_status(self) -> BindingStatus | dict[str, object]:
         """Запрашивает статус привязки через текущий транспорт."""
@@ -144,51 +178,29 @@ class TelegramIntake:
             "sentAt": sent_at_iso,
             "text": text,
         }
-        from .http_transport import PausedError, StaleRevisionError
+        from .http_transport import DeliveryUncertainError, PausedError, StaleRevisionError
 
         try:
             result = await self._transport.send_text(payload)
+        except DeliveryUncertainError:
+            self.stop_after_transport_gap()
+            await self.reconcile_pause()
+            logging.getLogger(__name__).warning("Telegram intake requires a confirmed server pause")
+            return {"result": "paused"}
         except StaleRevisionError:
-            result = await self.retry_with_new_revision(payload)
+            self._consent = replace(self._consent, active=False)
+            return {"error": {"code": "STALE_REVISION"}}
         except PausedError:
             self._consent = replace(self._consent, active=False)
             self._seen_messages.add(message_key)
             logging.getLogger(__name__).warning("Telegram intake paused after server rejected event delivery")
             return {"result": "paused"}
         if result.get("error", {}).get("code") == "STALE_REVISION":
-            result = await self.retry_with_new_revision(payload)
+            self._consent = replace(self._consent, active=False)
+            return result
         if result.get("result") == "paused":
             self._consent = replace(self._consent, active=False)
             logging.getLogger(__name__).warning("Telegram intake paused by server response")
         if result.get("result") in {"accepted", "duplicate", "paused"}:
             self._seen_messages.add(message_key)
         return result
-
-    async def retry_with_new_revision(self, event: dict[str, object]) -> dict[str, object]:
-        """Обновляет ревизию по статусу и повторяет событие один раз."""
-        from .http_transport import PausedError, StaleRevisionError
-
-        message_key = (int(event["chatId"]), int(event["messageId"]))
-        status = await self.get_binding_status()
-        if isinstance(status, dict):
-            return status
-        if status.phase == "paused":
-            self._consent = replace(self._consent, active=False, revision=status.revision)
-            self._seen_messages.add(message_key)
-            return {"result": "paused", "revision": status.revision}
-        if (
-            status.phase != "active"
-            or status.policyVersion != self._consent.policy_version
-            or status.rosterVersion != self._consent.roster_version
-        ):
-            return {"error": {"code": "CONSENT_REQUIRED"}}
-
-        self._consent = replace(self._consent, revision=status.revision)
-        retry_event = {**event, "eventId": str(uuid4()), "expectedRevision": status.revision}
-        try:
-            return await self._transport.send_text(retry_event)
-        except PausedError:
-            self._consent = replace(self._consent, active=False)
-            self._seen_messages.add(message_key)
-            logging.getLogger(__name__).warning("Telegram intake paused after server rejected event delivery")
-            return {"result": "paused", "revision": status.revision}

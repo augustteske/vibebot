@@ -4,7 +4,9 @@ from contextlib import suppress
 import os
 import sys
 import logging
+from hashlib import sha256
 from datetime import timezone
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
@@ -13,6 +15,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from .flow import CheckinFlow, QUESTIONS
 from .http_transport import HttpTransport, TransportError
 from .intake import ConsentSnapshot, TelegramIntake
+from .pause_state import PauseState
 
 
 def create_dispatcher(intake: TelegramIntake | None = None) -> Dispatcher:
@@ -61,6 +64,7 @@ def create_dispatcher(intake: TelegramIntake | None = None) -> Dispatcher:
             await intake.process(update)
         except TransportError:
             intake.stop_after_transport_gap()
+            await intake.reconcile_pause()
             logging.getLogger(__name__).warning("Telegram intake paused after delivery failure; pause the binding on the server before resuming")
 
     @dispatcher.callback_query(F.data.startswith("consent:") | F.data.startswith("score:"))
@@ -128,6 +132,7 @@ async def main():
         if isinstance(status, dict):
             await transport.close()
             raise SystemExit("Vibee binding status request was rejected; Telegram polling was not started.")
+        pause_path = Path(os.environ.get("VIBEBOT_DATA_DIR", ".data")) / ("bot-gap-" + sha256(binding_id.encode()).hexdigest() + ".json")
         intake = TelegramIntake(ConsentSnapshot(
             chat_id=chat_id,
             binding_id=binding_id,
@@ -140,13 +145,16 @@ async def main():
             consent_policy_version=status.policyVersion,
             roster_verified=True,
             company_accepted=True,
-        ), transport)
+        ), transport, PauseState(pause_path))
+        await intake.reconcile_pause()
     dispatcher, flow = create_dispatcher(intake)
 
     async def cleanup():
         while True:
             await asyncio.sleep(15)
             flow.expire()
+            if intake is not None:
+                await intake.reconcile_pause()
 
     task = asyncio.create_task(cleanup())
     try:
