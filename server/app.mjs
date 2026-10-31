@@ -53,6 +53,15 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
       }
       if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true })
       if (!['GET', 'POST'].includes(req.method)) throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Метод не поддерживается')
+      if (url.pathname === '/api/telegram/profile') {
+        if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
+        if (req.method === 'POST') checkBrowser(req)
+        const actor = store.authenticate(tokenFrom(req))
+        if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
+        return json(res, 200, req.method === 'POST'
+          ? store.telegram.updateProfile(actor, await body(req, 'INVALID_INPUT'))
+          : store.telegram.profile(actor))
+      }
       if (['/api/telegram/link-tokens', '/api/bot/v1/links', '/api/telegram/binding-tokens', '/api/bot/v1/bindings'].includes(url.pathname)) {
         if (req.method !== 'POST') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
         if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')

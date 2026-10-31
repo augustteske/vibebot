@@ -101,7 +101,7 @@ export type CommunicationView =
   | { status: 'published'; period: { id: string; start: string; end: string };
       dataSource: 'chat'; profileVersion: number;
       metrics: { outsideHoursPercent: number; participationEvenness: number; recognitionPercent: number };
-      recognitionMethod: 'lexicon-v1'; comparison: null }
+      recognitionMethod: 'lexicon-v1'; comparison: null; demo?: boolean }
 export type CommunicationRecommendation = {
   id: string; periodId: string; dataSource: 'chat'; source: 'ai' | 'template'
   observation: string; explanation: string; limitation: string; action: string

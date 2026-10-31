@@ -15,6 +15,7 @@ const bootstrapCredential = '3'.repeat(64)
 const credentialHash = createHash('sha256').update(credential).digest('hex')
 const policyVersion = 'synthetic-v1'
 const DAY = 86400000
+const demoIntervals = [1, 2, 3, 4, 5].map(day => ({ day, start: 540, end: 1080 }))
 
 async function fixture(t, { enabled = true, seedLinks = true, seedBindings = true } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'vibee-telegram-test-'))
@@ -29,6 +30,12 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
     tokens.push(token); people.push(store.authenticate(token))
   }
   const foreignToken = store.createWorkspace({ name: 'Synthetic B', displayName: 'Owner B' })
+  const foreignOwner = store.authenticate(foreignToken)
+  const foreignPeople = [foreignOwner]
+  for (let i = 1; i < 6; i++) {
+    const token = store.join({ token: store.invite(foreignOwner).token, displayName: 'Foreign ' + i })
+    foreignPeople.push(store.authenticate(token))
+  }
   const roundId = store.snapshot(owner).round.id
   store.checkin(owner, { roundId, scores: { energy: 3, clarity: 4, support: 5 } })
   store.close()
@@ -79,6 +86,10 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
     input, { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1' })
   const summary = (token = ownerToken, bindingId = id) => request('/telegram/bindings/' + bindingId + '/summary',
     undefined, { Cookie: 'vibebot_session=' + token })
+  const profile = (input, token = ownerToken) => request('/telegram/profile', input,
+    { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1' })
+  const setProfile = () => profile({ requestId: randomUUID(), expectedVersion: 0,
+    timeZone: 'Asia/Omsk', intervals: demoIntervals })
   const command = (expectedRevision, fields) => ({ requestId: randomUUID(), expectedRevision, ...fields })
   const status = async () => {
     const result = await bot('')
@@ -106,7 +117,7 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
     assert.equal(result.body.phase, 'active')
     return result.body
   }
-  return { db, id, otherBindingId, owner, people, tokens, foreignToken, request, web, bot, linkToken, link, bindingToken, bind, closePeriod, summary, command, status,
+  return { db, id, otherBindingId, owner, people, tokens, foreignToken, foreignOwner, foreignPeople, request, web, bot, linkToken, link, bindingToken, bind, closePeriod, summary, profile, setProfile, command, status,
     mutate, decision, prepare, activate, time: () => clock, advance: ms => { clock += ms }, setTime: ms => { clock = ms },
     restart: async () => { await app.close(); await launch() } }
 }
@@ -118,16 +129,47 @@ const error = (result, status, code) => {
 const textEvent = (f, expectedRevision, fields = {}) => ({ eventId: randomUUID(), expectedRevision,
   chatId: '-100000000001', messageId: '42', senderId: '100000001',
   sentAt: new Date(f.time()).toISOString(), text: 'Synthetic allowed text', ...fields })
-const sendMany = async (f, revision, count, authors, firstMessageId, thanks = 0) => {
+const sendMany = async (f, revision, count, authors, firstMessageId, thanks = 0,
+  { bindingId = f.id, credential: botCredential = credential, chatId = '-100000000001', senderBase = 100000001 } = {}) => {
   for (let i = 0; i < count; i++) {
     const result = await f.bot('events', textEvent(f, revision, {
-      messageId: String(firstMessageId + i), senderId: String(100000001 + i % authors),
+      chatId, messageId: String(firstMessageId + i), senderId: String(senderBase + i % authors),
       text: i < thanks ? 'Спасибо за помощь' : 'Synthetic routine update',
-    }))
+    }), bindingId, botCredential)
     assert.equal(result.status, 200, JSON.stringify(result))
   }
 }
-const closeCurrent = (f, revision) => f.closePeriod({ requestId: randomUUID(), expectedRevision: revision, periodId: randomUUID() })
+const closeCurrent = (f, revision, token, bindingId) => f.closePeriod({ requestId: randomUUID(), expectedRevision: revision, periodId: randomUUID() }, token, bindingId)
+const activateForeign = async f => {
+  const bindingId = randomUUID(), botCredential = '4'.repeat(64), chatId = '-100000000009'
+  const state = transitionConsent(initialConsentState(), { type: 'bind', policyVersion }, 0)
+  f.db.prepare('INSERT INTO telegram_bindings(id,workspace_id,chat_id,state) VALUES(?,?,?,?)')
+    .run(bindingId, f.foreignOwner.workspace_id, chatId, JSON.stringify(state))
+  for (let i = 0; i < f.foreignPeople.length; i++) {
+    f.db.prepare('INSERT INTO telegram_links VALUES(?,?,?,?)')
+      .run(bindingId, f.foreignOwner.workspace_id, f.foreignPeople[i].id, String(200000001 + i))
+  }
+  f.db.prepare('INSERT INTO telegram_credentials(token_hash,workspace_id,binding_id) VALUES(?,?,?)')
+    .run(createHash('sha256').update(botCredential).digest('hex'), f.foreignOwner.workspace_id, bindingId)
+  let current = await f.bot('', undefined, bindingId, botCredential)
+  for (const [operation, fields] of [
+    ['roster', { memberIds: f.foreignPeople.map(person => person.id), verified: true }],
+    ['company', { accepted: true, authorityConfirmed: true, policyVersion }],
+  ]) {
+    current = await f.web(operation, f.command(current.body.revision, fields), f.foreignToken, bindingId)
+    assert.equal(current.status, 200)
+  }
+  for (let i = 0; i < f.foreignPeople.length; i++) {
+    current = await f.bot('consents', f.command(current.body.revision, {
+      telegramUserId: String(200000001 + i), policyVersion, rosterVersion: current.body.rosterVersion,
+      decision: 'accepted',
+    }), bindingId, botCredential)
+    assert.equal(current.status, 200)
+  }
+  current = await f.web('control', f.command(current.body.revision, { action: 'resume' }), f.foreignToken, bindingId)
+  assert.equal(current.body.phase, 'active')
+  return { bindingId, credential: botCredential, chatId, senderBase: 200000001, revision: current.body.revision }
+}
 
 test('SQLite: adding Telegram tables preserves existing workspace, member and check-in rows', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'vibee-telegram-legacy-'))
@@ -154,7 +196,7 @@ test('SQLite: adding Telegram tables preserves existing workspace, member and ch
   assert.equal(reopened.prepare('SELECT name FROM members WHERE id=?').get(memberId).name, 'Legacy member')
   assert.deepEqual({ ...reopened.prepare('SELECT energy,clarity,support FROM checkins WHERE round_id=?').get(roundId) },
     { energy: 2, clarity: 3, support: 4 })
-  assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 16)
+  assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 18)
   reopened.close()
 })
 
@@ -367,6 +409,7 @@ test('HTTP/SQLite: raw text expires at 15 minutes, metadata at 24 hours across r
 test('HTTP/SQLite: four authors or 19 messages yield insufficient without numbers', async t => {
   const f = await fixture(t)
   const active = await f.activate()
+  assert.equal((await f.setProfile()).status, 200)
   f.setTime(Date.parse('2026-11-02T03:00:00.000Z'))
   await sendMany(f, active.revision, 20, 4, 100)
   const firstClose = { requestId: randomUUID(), expectedRevision: active.revision, periodId: randomUUID() }
@@ -385,6 +428,7 @@ test('HTTP/SQLite: four authors or 19 messages yield insufficient without number
 test('HTTP/SQLite: three synthetic closed dates publish only aggregate metrics and expire after seven days', async t => {
   const f = await fixture(t)
   const active = await f.activate()
+  assert.equal((await f.setProfile()).status, 200)
   const base = Date.parse('2026-11-02T03:00:00.000Z')
   for (let day = 0; day < 2; day++) {
     f.setTime(base + day * DAY)
@@ -420,6 +464,7 @@ test('HTTP/SQLite: three synthetic closed dates publish only aggregate metrics a
 test('HTTP/SQLite: withdrawal, roster change and transport gap discard an open period', async t => {
   const f = await fixture(t)
   const active = await f.activate()
+  assert.equal((await f.setProfile()).status, 200)
   f.setTime(Date.parse('2026-11-02T03:00:00.000Z'))
   await sendMany(f, active.revision, 1, 1, 600)
   error(await f.closePeriod({ requestId: randomUUID(), expectedRevision: active.revision,
@@ -441,6 +486,101 @@ test('HTTP/SQLite: withdrawal, roster change and transport gap discard an open p
   await f.mutate('roster', { memberIds: f.people.map(person => person.id), verified: true })
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_open_periods').get().n, 0)
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_closed_periods').get().n, 0)
+})
+
+test('HTTP/SQLite: without a schedule the active chat calibrates without invented values', async t => {
+  const f = await fixture(t)
+  const active = await f.activate()
+  assert.deepEqual((await f.profile()).body, { version: 0, timeZone: null, intervals: [] })
+  assert.deepEqual((await f.summary()).body, { status: 'calibrating' })
+  await sendMany(f, active.revision, 20, 5, 700)
+  assert.deepEqual((await f.summary()).body, { status: 'calibrating' })
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_open_periods').get().n, 0)
+  error(await closeCurrent(f, active.revision), 409, 'STALE_PERIOD')
+})
+
+test('HTTP/SQLite: invalid profiles and foreign actors cannot alter a team profile or open period', async t => {
+  const f = await fixture(t)
+  const active = await f.activate()
+  const saved = await f.setProfile()
+  assert.equal(saved.body.version, 1)
+  f.setTime(Date.parse('2026-11-02T04:00:00.000Z'))
+  await sendMany(f, active.revision, 1, 1, 710)
+  const open = f.db.prepare('SELECT * FROM telegram_open_periods WHERE binding_id=?').get(f.id)
+  const base = { requestId: randomUUID(), expectedVersion: 1, timeZone: 'Asia/Omsk', intervals: demoIntervals }
+  for (const changes of [
+    { timeZone: 'Mars/Olympus' }, { intervals: [{ day: 0, start: 1, end: 2 }] },
+    { intervals: [{ day: 1, start: 600, end: 600 }] },
+    { intervals: [{ day: 1, start: 600, end: 700 }, { day: 1, start: 699, end: 800 }] },
+    { intervals: [{ day: 1, start: 0, end: 1441 }] },
+    { intervals: [{ day: 1, start: 1320, end: 360 }] },
+    { workspaceId: f.foreignOwner.workspace_id },
+  ]) error(await f.profile({ ...base, requestId: randomUUID(), ...changes }), 400, 'INVALID_INPUT')
+  error(await f.profile({ ...base, requestId: randomUUID() }, f.tokens[1]), 403, 'FORBIDDEN')
+  error(await f.profile({ ...base, requestId: randomUUID(), workspaceId: f.owner.workspace_id }, f.foreignToken), 400, 'INVALID_INPUT')
+  assert.deepEqual((await f.profile()).body, saved.body)
+  assert.deepEqual(f.db.prepare('SELECT * FROM telegram_open_periods WHERE binding_id=?').get(f.id), open)
+  const foreign = await f.profile({ requestId: randomUUID(), expectedVersion: 0,
+    timeZone: 'UTC', intervals: [{ day: 1, start: 0, end: 1440 }] }, f.foreignToken)
+  assert.equal(foreign.body.version, 1)
+  assert.deepEqual((await f.profile()).body, saved.body)
+  const splitNight = await f.profile({ requestId: randomUUID(), expectedVersion: 1,
+    timeZone: 'UTC', intervals: [{ day: 1, start: 1320, end: 1440 }, { day: 2, start: 0, end: 360 }] }, f.foreignToken)
+  assert.equal(splitNight.body.version, 2)
+  const update = { requestId: randomUUID(), expectedVersion: 1, timeZone: 'UTC', intervals: demoIntervals }
+  const changed = await f.profile(update)
+  assert.equal(changed.body.version, 2)
+  assert.deepEqual(await f.profile(update), changed)
+  error(await f.profile({ ...update, timeZone: 'Asia/Omsk' }), 409, 'EVENT_CONFLICT')
+  error(await f.profile({ ...update, requestId: randomUUID() }), 409, 'STALE_REVISION')
+  await f.restart()
+  assert.deepEqual((await f.profile()).body, changed.body)
+  assert.deepEqual((await f.profile(undefined, f.foreignToken)).body, splitNight.body)
+})
+
+test('HTTP/SQLite: profile version discards open work and starts calibration again', async t => {
+  const f = await fixture(t)
+  const active = await f.activate()
+  await f.setProfile()
+  const base = Date.parse('2026-11-02T04:00:00.000Z')
+  for (let day = 0; day < 2; day++) {
+    f.setTime(base + day * DAY)
+    await sendMany(f, active.revision, 20, 5, 800 + day * 100)
+    assert.equal((await closeCurrent(f, active.revision)).body.status, 'calibrating')
+  }
+  f.setTime(base + 2 * DAY)
+  await sendMany(f, active.revision, 1, 1, 1000)
+  const changed = await f.profile({ requestId: randomUUID(), expectedVersion: 1,
+    timeZone: 'UTC', intervals: demoIntervals })
+  assert.equal(changed.body.version, 2)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_open_periods').get().n, 0)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_closed_periods').get().n, 0)
+  await sendMany(f, active.revision, 20, 5, 1001)
+  assert.deepEqual((await closeCurrent(f, active.revision)).body, { status: 'calibrating' })
+  assert.equal(f.db.prepare('SELECT profile_version FROM telegram_closed_periods').get().profile_version, 2)
+})
+
+test('HTTP/SQLite: two teams with different schedules get different aggregate outside-hours values', async t => {
+  const f = await fixture(t)
+  const active = await f.activate()
+  const foreign = await activateForeign(f)
+  assert.equal((await f.setProfile()).body.version, 1)
+  assert.equal((await f.profile({ requestId: randomUUID(), expectedVersion: 0, timeZone: 'Asia/Omsk',
+    intervals: [1, 2, 3, 4, 5].map(day => ({ day, start: 1080, end: 1380 })) }, f.foreignToken)).body.version, 1)
+  const base = Date.parse('2026-11-02T04:00:00.000Z')
+  let ownView, foreignView
+  for (let day = 0; day < 3; day++) {
+    f.setTime(base + day * DAY)
+    await sendMany(f, active.revision, 20, 5, 1100 + day * 100)
+    await sendMany(f, foreign.revision, 20, 5, 1100 + day * 100, 0, foreign)
+    ownView = await closeCurrent(f, active.revision)
+    foreignView = await closeCurrent(f, foreign.revision, f.foreignToken, foreign.bindingId)
+  }
+  assert.equal(ownView.body.status, 'published')
+  assert.equal(foreignView.body.status, 'published')
+  assert.equal(ownView.body.metrics.outsideHoursPercent, 0)
+  assert.equal(foreignView.body.metrics.outsideHoursPercent, 100)
+  assert.equal(ownView.body.metrics.participationEvenness, foreignView.body.metrics.participationEvenness)
 })
 
 test('HTTP/SQLite: all consent and explicit resume; withdrawal persists and old buttons fail', async t => {
@@ -626,5 +766,5 @@ test('Telegram synthetic gate defaults off and unfinished summary routes remain 
   error(await f.bot('events', { text: 'synthetic text must not be stored' }), 503, 'UNAVAILABLE')
   error(await f.request('/telegram/link-tokens', { requestId: randomUUID() }), 503, 'UNAVAILABLE')
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_requests').get().n, 0)
-  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 16)
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 18)
 })

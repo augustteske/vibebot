@@ -5,7 +5,7 @@ const DAY = 86400000
 const LINK_TTL = 600000
 const TEXT_TTL = 900000
 const CLOSED_TTL = 7 * DAY
-const PROFILE = { version: 1, timeZone: 'Asia/Omsk', startMinute: 540, endMinute: 1080 }
+const MAX_INTERVALS = 70
 const uuid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
 const telegramId = value => typeof value === 'string' && /^[1-9][0-9]{0,15}$/.test(value)
 const chatId = value => typeof value === 'string' && /^-[1-9][0-9]{0,19}$/.test(value)
@@ -109,6 +109,15 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
       response_status TEXT NOT NULL, expires INTEGER NOT NULL,
       PRIMARY KEY(binding_id,actor_key,request_id)
     );
+    CREATE TABLE IF NOT EXISTS telegram_profiles(
+      workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id), version INTEGER NOT NULL,
+      time_zone TEXT, intervals TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS telegram_profile_requests(
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id), member_id TEXT NOT NULL,
+      request_id TEXT NOT NULL, digest TEXT NOT NULL, response TEXT NOT NULL, expires INTEGER NOT NULL,
+      PRIMARY KEY(workspace_id,member_id,request_id)
+    );
   `)
   const one = (sql, ...args) => db.prepare(sql).get(...args)
   const run = (sql, ...args) => db.prepare(sql).run(...args)
@@ -132,19 +141,26 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
     clearOpenPeriod(bindingId)
     run('DELETE FROM telegram_closed_periods WHERE binding_id=?', bindingId)
   }
-  const localParts = millis => {
+  const localParts = (millis, timeZone) => {
     const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
-      timeZone: PROFILE.timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+      timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
       weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
     }).formatToParts(new Date(millis)).map(part => [part.type, part.value]))
-    return { date: `${parts.year}-${parts.month}-${parts.day}`, weekday: parts.weekday,
+    return { date: `${parts.year}-${parts.month}-${parts.day}`,
+      day: { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 }[parts.weekday],
       minute: Number(parts.hour) * 60 + Number(parts.minute) }
   }
-  const outsideHours = millis => {
-    const local = localParts(millis)
-    return !['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(local.weekday)
-      || local.minute < PROFILE.startMinute || local.minute >= PROFILE.endMinute
+  const outsideHours = (millis, profile) => {
+    const local = localParts(millis, profile.timeZone)
+    return !profile.intervals.some(interval => interval.day === local.day
+      && local.minute >= interval.start && local.minute < interval.end)
   }
+  const profileFor = workspaceId => {
+    const saved = one('SELECT * FROM telegram_profiles WHERE workspace_id=?', workspaceId)
+    return saved ? { version: saved.version, timeZone: saved.time_zone, intervals: JSON.parse(saved.intervals) }
+      : { version: 0, timeZone: null, intervals: [] }
+  }
+  const hasSchedule = profile => Boolean(profile.timeZone && profile.intervals.length)
   const recognition = text => Array.from(text.toLowerCase().matchAll(/\p{L}+/gu), match => match[0])
       .some(word => ['спасибо', 'благодарю', 'благодарим', 'thanks'].includes(word))
   const roundOne = value => Math.round(value * 10) / 10
@@ -180,6 +196,7 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
     run('DELETE FROM telegram_message_ids WHERE expires<=?', time)
     run('DELETE FROM telegram_closed_periods WHERE expires<=?', time)
     run('DELETE FROM telegram_close_requests WHERE expires<=?', time)
+    run('DELETE FROM telegram_profile_requests WHERE expires<=?', time)
     for (const open of db.prepare('SELECT binding_id FROM telegram_open_periods WHERE opened_at<=?').all(time - DAY)) clearOpenPeriod(open.binding_id)
     for (const binding of db.prepare('SELECT * FROM telegram_bindings WHERE evidence_expires<=?').all(time)) expireBinding(binding)
   })
@@ -208,9 +225,74 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
       actor.token_hash, actor.workspace_id, id)) fail(401, 'BOT_AUTH_REQUIRED', 'Нужна авторизация бота')
     return binding
   }
+  const organizerProfile = actor => {
+    if (!actor || actor.kind === 'bot' || actor.kind === 'bootstrap' || actor.role !== 'organizer') {
+      fail(403, 'FORBIDDEN', 'Нужны права организатора')
+    }
+    return profileFor(actor.workspace_id)
+  }
+  const validatedProfile = input => {
+    if (!input || Array.isArray(input) || typeof input !== 'object'
+      || Object.keys(input).length !== 4 || !uuid(input.requestId) || !revision(input.expectedVersion)
+      || !Array.isArray(input.intervals) || input.intervals.length > MAX_INTERVALS
+      || !(input.timeZone === null || typeof input.timeZone === 'string')) invalid()
+    let timeZone = input.timeZone
+    if (timeZone !== null) {
+      if (!timeZone || timeZone.length > 100 || timeZone !== timeZone.trim()) invalid()
+      try { timeZone = new Intl.DateTimeFormat('en-US', { timeZone }).resolvedOptions().timeZone }
+      catch { invalid() }
+    }
+    if (timeZone === null && input.intervals.length) invalid()
+    const intervals = input.intervals.map(interval => {
+      if (!interval || Array.isArray(interval) || typeof interval !== 'object'
+        || Object.keys(interval).length !== 3 || !Number.isInteger(interval.day)
+        || interval.day < 1 || interval.day > 7 || !Number.isInteger(interval.start)
+        || !Number.isInteger(interval.end) || interval.start < 0 || interval.end > 1440
+        || interval.start >= interval.end) invalid()
+      return { day: interval.day, start: interval.start, end: interval.end }
+    }).sort((a, b) => a.day - b.day || a.start - b.start)
+    for (let i = 1; i < intervals.length; i++) {
+      if (intervals[i].day === intervals[i - 1].day && intervals[i].start < intervals[i - 1].end) invalid()
+    }
+    return { timeZone, intervals }
+  }
 
   return {
     cleanup,
+    profile(actor) {
+      unavailable()
+      return organizerProfile(actor)
+    },
+    updateProfile(actor, input) {
+      unavailable()
+      organizerProfile(actor)
+      const next = validatedProfile(input)
+      return tx(() => {
+        const current = organizerProfile(actor)
+        const requestDigest = digest(canonical({ operation: 'profile', input }))
+        const previous = one('SELECT * FROM telegram_profile_requests WHERE workspace_id=? AND member_id=? AND request_id=?',
+          actor.workspace_id, actor.id, input.requestId)
+        if (previous) {
+          if (previous.digest !== requestDigest) fail(409, 'EVENT_CONFLICT', 'Идентификатор запроса уже использован')
+          return JSON.parse(previous.response)
+        }
+        if (input.expectedVersion !== current.version) fail(409, 'STALE_REVISION', 'Версия профиля изменилась')
+        const historical = one(`SELECT MAX(version) AS version FROM (
+          SELECT profile_version AS version FROM telegram_open_periods JOIN telegram_bindings ON binding_id=id WHERE workspace_id=?
+          UNION ALL SELECT profile_version AS version FROM telegram_closed_periods JOIN telegram_bindings ON binding_id=id WHERE workspace_id=?
+        )`, actor.workspace_id, actor.workspace_id)?.version ?? 0
+        const response = { version: Math.max(current.version, historical) + 1, ...next }
+        run('INSERT INTO telegram_profiles VALUES(?,?,?,?) ON CONFLICT(workspace_id) DO UPDATE SET version=excluded.version,time_zone=excluded.time_zone,intervals=excluded.intervals',
+          actor.workspace_id, response.version, response.timeZone, JSON.stringify(response.intervals))
+        for (const binding of db.prepare('SELECT id FROM telegram_bindings WHERE workspace_id=?').all(actor.workspace_id)) {
+          purgeText(binding.id)
+          clearDerived(binding.id)
+        }
+        run('INSERT INTO telegram_profile_requests VALUES(?,?,?,?,?,?)', actor.workspace_id, actor.id,
+          input.requestId, requestDigest, JSON.stringify(response), now() + DAY)
+        return response
+      })
+    },
     authenticateBootstrap(authorization) {
       unavailable()
       if (!bootstrapCredential || !/^[a-f0-9]{64}$/.test(bootstrapCredential)) {
@@ -387,18 +469,22 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
           if (!seenEvent) run('INSERT INTO telegram_event_ids VALUES(?,?,?,?)', id, input.eventId, contentDigest, now() + DAY)
           return { eventId: input.eventId, result: 'duplicate', revision: state.revision }
         }
-        const open = one('SELECT * FROM telegram_open_periods WHERE binding_id=?', id)
-        if (open && (open.revision !== state.revision || now() - open.opened_at >= DAY)) {
+        const profile = profileFor(actor.workspace_id)
+        const open = hasSchedule(profile) && one('SELECT * FROM telegram_open_periods WHERE binding_id=?', id)
+        if (open && (open.revision !== state.revision || open.profile_version !== profile.version
+          || now() - open.opened_at >= DAY)) {
           fail(409, 'STALE_PERIOD', 'Незакрытый период устарел')
         }
         run('INSERT INTO telegram_event_ids VALUES(?,?,?,?)', id, input.eventId, contentDigest, now() + DAY)
         run('INSERT INTO telegram_message_ids VALUES(?,?,?,?,?)', id, input.chatId, input.messageId, contentDigest, now() + DAY)
         run('INSERT INTO telegram_texts VALUES(?,?,?,?,?,?,?)', id, input.chatId, input.messageId,
           input.senderId, input.sentAt, input.text, now() + TEXT_TTL)
-        if (!open) run('INSERT INTO telegram_open_periods VALUES(?,?,?,?,?,?,?)', id, now(), state.revision, PROFILE.version, 0, 0, 0)
-        run('UPDATE telegram_open_periods SET total=total+1,outside_count=outside_count+?,recognition_count=recognition_count+? WHERE binding_id=?',
-          outsideHours(Date.parse(input.sentAt)) ? 1 : 0, recognition(input.text) ? 1 : 0, id)
-        run('INSERT INTO telegram_period_authors VALUES(?,?,1) ON CONFLICT(binding_id,member_id) DO UPDATE SET count=count+1', id, member)
+        if (hasSchedule(profile)) {
+          if (!open) run('INSERT INTO telegram_open_periods VALUES(?,?,?,?,?,?,?)', id, now(), state.revision, profile.version, 0, 0, 0)
+          run('UPDATE telegram_open_periods SET total=total+1,outside_count=outside_count+?,recognition_count=recognition_count+? WHERE binding_id=?',
+            outsideHours(Date.parse(input.sentAt), profile) ? 1 : 0, recognition(input.text) ? 1 : 0, id)
+          run('INSERT INTO telegram_period_authors VALUES(?,?,1) ON CONFLICT(binding_id,member_id) DO UPDATE SET count=count+1', id, member)
+        }
         return { eventId: input.eventId, result: 'accepted', revision: state.revision }
       })
     },
@@ -413,9 +499,11 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
         const state = JSON.parse(binding.state)
         if (!canProcessChat(state)) return { status: state.phase }
         if (binding.evidence_expires !== null && binding.evidence_expires <= now()) return { status: 'paused' }
+        const profile = profileFor(actor.workspace_id)
+        if (!hasSchedule(profile)) return { status: 'calibrating' }
         if (one('SELECT 1 FROM telegram_open_periods WHERE binding_id=?', id)) return { status: 'open' }
-        const closed = one('SELECT * FROM telegram_closed_periods WHERE binding_id=? AND revision=? AND expires>? ORDER BY closed_at DESC,rowid DESC LIMIT 1',
-          id, state.revision, now())
+        const closed = one('SELECT * FROM telegram_closed_periods WHERE binding_id=? AND revision=? AND profile_version=? AND expires>? ORDER BY closed_at DESC,rowid DESC LIMIT 1',
+          id, state.revision, profile.version, now())
         return closed ? periodView(closed) : { status: 'insufficient' }
       })
     },
@@ -432,6 +520,8 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
         if (binding.evidence_expires !== null && binding.evidence_expires <= now()) {
           fail(409, 'CONSENT_REQUIRED', 'Срок свидетельства согласия истёк')
         }
+        const profile = profileFor(actor.workspace_id)
+        if (!hasSchedule(profile)) fail(409, 'STALE_PERIOD', 'Расписание не задано')
         const actorKey = digest('web:' + actor.id)
         const requestDigest = digest(canonical({ operation: 'close', input }))
         const previous = one('SELECT * FROM telegram_close_requests WHERE binding_id=? AND actor_key=? AND request_id=?',
@@ -447,7 +537,9 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
           fail(409, 'EVENT_CONFLICT', 'Идентификатор периода уже использован')
         }
         const open = one('SELECT * FROM telegram_open_periods WHERE binding_id=?', id)
-        if (!open || open.revision !== state.revision) fail(409, 'STALE_PERIOD', 'Нет актуального открытого периода')
+        if (!open || open.revision !== state.revision || open.profile_version !== profile.version) {
+          fail(409, 'STALE_PERIOD', 'Нет актуального открытого периода')
+        }
         const authors = db.prepare('SELECT count FROM telegram_period_authors WHERE binding_id=?').all(id)
         const valid = authors.length >= 5 && open.total >= 20 && now() - open.opened_at <= DAY
         let metrics = null
@@ -462,7 +554,7 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
         }
         const closedAt = now()
         run('INSERT INTO telegram_closed_periods VALUES(?,?,?,?,?,?,?,?,?,?)', id, input.periodId,
-          open.opened_at, closedAt, localParts(open.opened_at).date, open.revision,
+          open.opened_at, closedAt, localParts(open.opened_at, profile.timeZone).date, open.revision,
           open.profile_version, valid ? 'valid' : 'insufficient', metrics && JSON.stringify(metrics), closedAt + CLOSED_TTL)
         clearOpenPeriod(id)
         const closed = one('SELECT * FROM telegram_closed_periods WHERE binding_id=? AND period_id=?', id, input.periodId)
