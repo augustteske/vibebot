@@ -98,7 +98,8 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
         return json(res, 200, confirming
           ? store.telegram.confirmChatAction(actor, recommendationRoute[1], recommendationRoute[2], await body(req, 'INVALID_INPUT'))
-          : store.telegram.recommendation(actor, recommendationRoute[1], recommendationRoute[2]))
+          : await store.telegram.recommendation(actor, recommendationRoute[1], recommendationRoute[2],
+            () => store.authenticate(tokenFrom(req))))
       }
       const chatFeedbackRoute = url.pathname.match(/^\/api\/telegram\/bindings\/([a-f0-9-]+)\/periods\/([a-f0-9-]+)\/feedback\/(interpretation|outcome)(\/close)?$/)
       if (chatFeedbackRoute) {

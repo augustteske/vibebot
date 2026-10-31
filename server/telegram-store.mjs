@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual, randomUUID } from 'node:crypto'
 import { canProcessChat, initialConsentState, transitionConsent } from '../src/core/telegram.ts'
-import { templateRecommendationProvider, templateRecommendationContent } from './recommendation-provider.mjs'
+import { templateRecommendationProvider, recommendationProviderContent } from './recommendation-provider.mjs'
 
 const DAY = 86400000
 const LINK_TTL = 600000
@@ -207,7 +207,8 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
       dataSource: 'chat', profileVersion: row.profile_version, metrics: JSON.parse(row.metrics),
       recognitionMethod: 'lexicon-v1', comparison: null }
   }
-  const publishedPeriod = (actor, id, periodId, linkedMember = false) => {
+  const publishedPeriod = (actor, id, periodId, linkedMember = false,
+    expectedRevision, expectedProfileVersion) => {
     const binding = linkedMember
       ? one('SELECT * FROM telegram_bindings WHERE id=? AND workspace_id=?', id, actor.workspace_id)
       : bindingFor(actor, id)
@@ -221,7 +222,13 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
     if (!canProcessChat(state) || (binding.evidence_expires !== null && binding.evidence_expires <= now())) {
       fail(409, 'CONSENT_REQUIRED', 'Чат не активен')
     }
+    if (expectedRevision !== undefined && state.revision !== expectedRevision) {
+      fail(409, 'STALE_REVISION', 'Версия изменилась')
+    }
     const profile = profileFor(actor.workspace_id)
+    if (expectedProfileVersion !== undefined && profile.version !== expectedProfileVersion) {
+      fail(409, 'STALE_PERIOD', 'Версия профиля изменилась')
+    }
     if (!hasSchedule(profile) || one('SELECT 1 FROM telegram_open_periods WHERE binding_id=?', id)) {
       fail(409, 'STALE_PERIOD', 'Период не опубликован')
     }
@@ -232,17 +239,14 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
     }
     return { row, state, profile }
   }
-  const templateCard = (id, row) => {
-    const metrics = JSON.parse(row.metrics)
-    return { id: digest(`recommendation:${id}:${row.period_id}:${row.revision}:${row.profile_version}`),
+  const cardIdentity = (id, row) =>
+    ({ id: digest(`recommendation:${id}:${row.period_id}:${row.revision}:${row.profile_version}`),
       periodId: row.period_id, profileVersion: row.profile_version,
-      dataSource: 'chat', source: 'template', demo: true,
-      ...templateRecommendationContent(recommendationProvider, metrics) }
-  }
+      dataSource: 'chat', source: 'template', demo: true })
   const feedbackKinds = { interpretation: ['useful', 'incorrect', 'usual_joke'], outcome: ['helped', 'not_helped'] }
   const feedbackTarget = (id, row, kind) => {
     if (!Object.hasOwn(feedbackKinds, kind)) invalid()
-    if (kind === 'interpretation') return templateCard(id, row).id
+    if (kind === 'interpretation') return cardIdentity(id, row).id
     const action = one('SELECT id FROM telegram_chat_actions WHERE binding_id=? AND period_id=? AND expires>?',
       id, row.period_id, now())
     if (!action) fail(409, 'STALE_PERIOD', 'Шаг ещё не подтверждён')
@@ -591,12 +595,21 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
         return closed ? periodView(closed) : { status: 'insufficient' }
       })
     },
-    recommendation(actor, id, periodId) {
+    async recommendation(actor, id, periodId, reauthenticate) {
       unavailable()
       if (!uuid(periodId)) invalid()
+      const snapshot = tx(() => {
+        const { row, state, profile } = publishedPeriod(actor, id, periodId)
+        return { metrics: JSON.parse(row.metrics), revision: state.revision, profileVersion: profile.version }
+      })
+      const content = await recommendationProviderContent(recommendationProvider, snapshot.metrics)
       return tx(() => {
-        const { row } = publishedPeriod(actor, id, periodId)
-        return templateCard(id, row)
+        const currentActor = reauthenticate()
+        if (!currentActor) fail(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
+        const { row } = publishedPeriod(currentActor, id, periodId, false,
+          snapshot.revision, snapshot.profileVersion)
+        return { ...cardIdentity(id, row),
+          ...(content ?? templateRecommendationProvider.generate({ metrics: snapshot.metrics })) }
       })
     },
     confirmChatAction(actor, id, periodId, input) {
@@ -610,7 +623,7 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
       return tx(() => {
         const { row, state } = publishedPeriod(actor, id, input.periodId)
         if (input.expectedRevision !== state.revision) fail(409, 'STALE_REVISION', 'Версия изменилась')
-        const card = templateCard(id, row)
+        const card = cardIdentity(id, row)
         if (input.recommendationId !== card.id) fail(409, 'STALE_PERIOD', 'Карточка изменилась')
         const requestDigest = digest(canonical({ operation: 'chatAction', input }))
         const previous = one('SELECT * FROM telegram_chat_actions WHERE binding_id=? AND actor_id=? AND request_id=?',

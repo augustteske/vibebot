@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { createApp } from '../server/app.mjs'
-import { templateRecommendationProvider, templateRecommendationContent } from '../server/recommendation-provider.mjs'
+import { templateRecommendationProvider, recommendationProviderContent } from '../server/recommendation-provider.mjs'
 import { createStore } from '../server/store.mjs'
 import { initialConsentState, transitionConsent } from '../src/core/telegram.ts'
 
@@ -553,19 +553,91 @@ test('HTTP/SQLite: recommendation provider receives aggregates and safely falls 
   assert.equal(seen.length, 2)
 })
 
-test('recommendation provider rejects missing, blank, oversized and extra fields', () => {
+test('recommendation provider rejects missing, blank, oversized and extra fields', async () => {
   const metrics = { outsideHoursPercent: 25, participationEvenness: 90, recognitionPercent: 20 }
   const expected = templateRecommendationProvider.generate({ metrics })
-  const from = content => templateRecommendationContent({ generate: () => content }, metrics)
+  const from = content => recommendationProviderContent({ generate: () => content }, metrics)
   for (const field of ['observation', 'explanation', 'limitation', 'action']) {
     const missing = { ...expected }; delete missing[field]
-    assert.deepEqual(from(missing), expected)
-    assert.deepEqual(from({ ...expected, [field]: '   ' }), expected)
-    assert.deepEqual(from({ ...expected, [field]: 'x'.repeat(501) }), expected)
+    assert.equal(await from(missing), null)
+    assert.equal(await from({ ...expected, [field]: '   ' }), null)
+    assert.equal(await from({ ...expected, [field]: 'x'.repeat(501) }), null)
   }
-  assert.deepEqual(from({ ...expected, extra: 'unexpected' }), expected)
-  assert.deepEqual(from({ ...expected, action: 42 }), expected)
-  assert.deepEqual(from({ ...expected, action: 'x'.repeat(500) }).action, 'x'.repeat(500))
+  assert.equal(await from({ ...expected, extra: 'unexpected' }), null)
+  assert.equal(await from({ ...expected, action: 42 }), null)
+  assert.deepEqual((await from({ ...expected, action: 'x'.repeat(500) })).action, 'x'.repeat(500))
+})
+
+const deferredRecommendationProvider = () => {
+  let startedResolve, resolve, reject
+  const started = new Promise(done => { startedResolve = done })
+  const provider = { generate() {
+    return new Promise((done, fail) => { resolve = done; reject = fail; startedResolve() })
+  } }
+  return { provider, started, resolve: value => resolve(value), reject: error => reject(error) }
+}
+
+test('HTTP/SQLite: withdrawal during provider wait prevents any recommendation', async t => {
+  const delayed = deferredRecommendationProvider()
+  const f = await fixture(t, { recommendationProvider: delayed.provider })
+  const { periodId } = await publishForRecommendation(f)
+  const pending = f.recommendation(periodId)
+  await delayed.started
+  assert.equal((await f.decision(1, 'withdrawn')).status, 200)
+  delayed.resolve({ observation: 'Delayed text', explanation: 'Delayed', limitation: 'Delayed', action: 'Delayed' })
+  error(await pending, 409, 'CONSENT_REQUIRED')
+  error(await f.recommendation(periodId), 409, 'CONSENT_REQUIRED')
+})
+
+test('HTTP/SQLite: profile change during provider wait discards its result', async t => {
+  const delayed = deferredRecommendationProvider()
+  const f = await fixture(t, { recommendationProvider: delayed.provider })
+  const { periodId } = await publishForRecommendation(f)
+  const pending = f.recommendation(periodId)
+  await delayed.started
+  assert.equal((await f.profile({ requestId: randomUUID(), expectedVersion: 1,
+    timeZone: 'Asia/Omsk', intervals: demoIntervals })).body.version, 2)
+  delayed.resolve({ observation: 'Old profile', explanation: 'Old', limitation: 'Old', action: 'Old' })
+  error(await pending, 409, 'STALE_PERIOD')
+})
+
+test('HTTP/SQLite: role and revision are rechecked after provider wait', async t => {
+  const delayed = deferredRecommendationProvider()
+  const f = await fixture(t, { recommendationProvider: delayed.provider })
+  const { periodId } = await publishForRecommendation(f)
+  const pending = f.recommendation(periodId)
+  await delayed.started
+  f.db.prepare("UPDATE members SET role='participant' WHERE id=?").run(f.owner.id)
+  delayed.resolve({ observation: 'Old', explanation: 'Old', limitation: 'Old', action: 'Old' })
+  error(await pending, 403, 'FORBIDDEN')
+})
+
+test('HTTP/SQLite: a new active revision still discards a delayed recommendation', async t => {
+  const delayed = deferredRecommendationProvider()
+  const f = await fixture(t, { recommendationProvider: delayed.provider })
+  const { periodId } = await publishForRecommendation(f)
+  const pending = f.recommendation(periodId)
+  await delayed.started
+  assert.equal((await f.mutate('pause', { reason: 'manual' }, f.bot)).body.phase, 'paused')
+  assert.equal((await f.mutate('control', { action: 'resume' })).body.phase, 'active')
+  delayed.resolve({ observation: 'Old', explanation: 'Old', limitation: 'Old', action: 'Old' })
+  error(await pending, 409, 'STALE_REVISION')
+})
+
+test('HTTP/SQLite: rejected asynchronous provider falls back after state recheck', async t => {
+  const delayed = deferredRecommendationProvider()
+  const f = await fixture(t, { recommendationProvider: delayed.provider })
+  const { periodId } = await publishForRecommendation(f)
+  const pending = f.recommendation(periodId)
+  await delayed.started
+  delayed.reject(new Error('synthetic provider failure'))
+  const result = await pending
+  assert.equal(result.status, 200)
+  assert.equal(result.body.source, 'template')
+  assert.equal(result.body.demo, true)
+  assert.deepEqual({ observation: result.body.observation, explanation: result.body.explanation,
+    limitation: result.body.limitation, action: result.body.action },
+  templateRecommendationProvider.generate({ metrics: (await f.summary()).body.metrics }))
 })
 
 test('HTTP/SQLite: expired published card and action disappear after restart', async t => {
