@@ -79,11 +79,9 @@ class HttpTransport:
             raise TransportError("Vibee API returned an invalid binding status") from None
 
     async def get_summary(self, binding_id: str | None = None) -> dict[str, object]:
-        """Загружает сводку, если серверный маршрут доступен для бота."""
+        """Сводка для бота появится после отдельного авторизованного маршрута."""
         self._check_binding_id(binding_id)
-        url = f"{self._base_url}/api/telegram/bindings/{self._binding_id}/summary"
-        response = await self._get(url)
-        return self._response_body(response)
+        raise TransportError("Telegram summary delivery is not implemented")
 
     async def close(self) -> None:
         """Закрывает созданный транспортом HTTP-клиент."""
