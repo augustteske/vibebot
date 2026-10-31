@@ -44,7 +44,7 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
       if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true })
       if (!['GET', 'POST'].includes(req.method)) throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Метод не поддерживается')
       if (req.method === 'POST') {
-        if (req.headers['x-vibebot'] !== '1') throw new AppError(403, 'REQUEST_REJECTED', 'Обновите страницу и повторите действие')
+        if (req.headers['x-vibee'] !== '1' && req.headers['x-vibebot'] !== '1') throw new AppError(403, 'REQUEST_REJECTED', 'Обновите страницу и повторите действие')
         const origin = req.headers.origin
         const sameOrigin = (secureCookies ? 'https://' : 'http://') + req.headers.host
         if (origin && origin !== sameOrigin && !allowedOrigins.includes(origin)) throw new AppError(403, 'ORIGIN_REJECTED', 'Запрос с другого сайта запрещён')
