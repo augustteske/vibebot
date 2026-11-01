@@ -1,14 +1,19 @@
 {
-  "name": "vibebot",
+  "name": "vibee",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node --env-file-if-exists=.env scripts/dev.mjs",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "dev:ui": "vite",
+    "dev:server": "node --env-file-if-exists=.env --watch server/index.mjs",
+    "start": "node --env-file-if-exists=.env server/index.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "check": "node scripts/check.mjs"
   },
   "dependencies": {
     "react": "^19.3.1",
@@ -22,5 +27,8 @@
     "oxlint": "^1.89.0",
     "typescript": "~7.0.2",
     "vite": "^8.3.5"
+  },
+  "engines": {
+    "node": "24.x"
   }
 }

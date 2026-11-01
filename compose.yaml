@@ -1,0 +1,20 @@
+services:
+  web:
+    build: .
+    ports:
+      - "127.0.0.1:8787:8787"
+    environment:
+      COOKIE_SECURE: "false"
+    volumes:
+      - vibebot_data:/app/.data
+    restart: unless-stopped
+  bot:
+    profiles: [bot-demo]
+    build:
+      context: .
+      dockerfile: bot/Dockerfile
+    environment:
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+    restart: "no"
+volumes:
+  vibebot_data:

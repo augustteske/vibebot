@@ -27,3 +27,10 @@ dist-ssr
 .env.*
 !.env.example
 coverage
+
+.data/
+.npm/
+.venv/
+**/.venv/
+__pycache__/
+*.py[cod]
