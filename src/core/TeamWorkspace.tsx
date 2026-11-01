@@ -3,6 +3,10 @@ import type { FormEvent } from 'react'
 import { api, ApiError } from './client'
 import type { SessionSnapshot } from './contracts'
 import type { CommunicationRecommendation, CommunicationView } from './telegram'
+import { SYNTHETIC_METRICS } from '../demo/insightsFixtures'
+import { ActionRecommendationCard } from '../features/actions/ActionRecommendationCard'
+import { demoActionRecommendation } from '../features/actions/actionRecommendationDemo'
+import { InsightsWidget } from '../features/insights/InsightsWidget'
 import './team.css'
 
 export type TeamMemberRole = 'lead' | 'developer' | 'designer' | 'manager' | 'other';
@@ -86,12 +90,6 @@ const demoChatRecommendation = {
   action: 'Обсудить с командой удобное время для рабочих сообщений.',
   demo: true,
 } satisfies CommunicationRecommendation
-const chatMetricLabels = [
-  ['outsideHoursPercent', 'Вне рабочих интервалов'],
-  ['participationEvenness', 'Равномерность участия'],
-  ['recognitionPercent', 'Сообщения с благодарностью'],
-] as const
-
 function ChatAnalyticsPreview({
   view,
   recommendation,
@@ -108,23 +106,20 @@ function ChatAnalyticsPreview({
       <span className="chat-demo__badge">ВЫМЫШЛЕННЫЕ ДАННЫЕ</span>
     </div>
     <p className="chat-demo__period">Закрытый период · {dateLabel(view.period.start)} — {dateLabel(view.period.end)}</p>
-    <div className="metrics">
-      {chatMetricLabels.map(([key, label]) => <div className="metric" key={key}>
-        {label}
-        <strong>{view.metrics[key].toLocaleString('ru-RU', { maximumFractionDigits: 1 })}<small>%</small></strong>
-      </div>)}
-    </div>
-    <article className="chat-demo__recommendation">
-      <div className="chat-demo__recommendation-heading">
-        <h3>Шаблонная рекомендация</h3>
-        <span className="eyebrow">{recommendation.source} · {recommendation.dataSource}</span>
-      </div>
-      <p>{recommendation.observation}</p>
-      <p>{recommendation.explanation}</p>
-      <p className="muted">Ограничение: {recommendation.limitation}</p>
-      <p><strong>Возможный следующий шаг:</strong> {recommendation.action}</p>
-      <p className="muted">Демо-карточка не подтверждена командой и никуда не отправляется. Сравнение с историей отсутствует.</p>
-    </article>
+    <InsightsWidget
+      state="published"
+      metrics={SYNTHETIC_METRICS}
+      teamProfile="formal"
+      periodLabel={`${dateLabel(view.period.start)} — ${dateLabel(view.period.end)}`}
+    />
+    <ActionRecommendationCard
+      {...demoActionRecommendation}
+      observation={recommendation.observation}
+      explanation={recommendation.explanation}
+      limitation={recommendation.limitation}
+      suggestedAction={recommendation.action}
+      periodLabel={`${dateLabel(view.period.start)} — ${dateLabel(view.period.end)}`}
+    />
   </section>
 }
 
