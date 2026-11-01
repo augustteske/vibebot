@@ -117,11 +117,11 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
             : store.telegram.chatFeedback(actor, bindingId, periodId, kind))
       }
       if (url.pathname.startsWith('/api/bot/') || url.pathname.startsWith('/api/telegram/')) {
-        const route = url.pathname.match(/^\/api\/(bot\/v1|telegram)\/bindings\/([a-f0-9-]+)(?:\/(roster|company|consents|control|pause|events))?$/)
+        const route = url.pathname.match(/^\/api\/(bot\/v1|telegram)\/bindings\/([a-f0-9-]+)(?:\/(roster|company|consents|control|pause|events|media-observations))?$/)
         const bot = route?.[1] === 'bot/v1'
         const operation = route?.[3]
         const supported = route && (bot
-          ? (req.method === 'GET' && !operation) || (req.method === 'POST' && ['consents', 'pause', 'events'].includes(operation))
+          ? (req.method === 'GET' && !operation) || (req.method === 'POST' && ['consents', 'pause', 'events', 'media-observations'].includes(operation))
           : req.method === 'POST' && ['roster', 'company', 'control'].includes(operation))
         if (!supported) throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
         if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
@@ -130,6 +130,7 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
         const result = req.method === 'GET' ? store.telegram.status(actor, route[2])
           : operation === 'events' ? store.telegram.acceptText(actor, route[2], await body(req, 'INVALID_INPUT'))
+          : operation === 'media-observations' ? store.telegram.acceptMedia(actor, route[2], await body(req, 'INVALID_INPUT'))
           : store.telegram.mutate(actor, route[2], operation, await body(req, 'INVALID_INPUT'))
         return json(res, 200, result)
       }

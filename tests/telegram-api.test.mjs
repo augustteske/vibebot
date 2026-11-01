@@ -226,7 +226,7 @@ test('SQLite: adding Telegram tables preserves existing workspace, member and ch
   assert.equal(reopened.prepare('SELECT name FROM members WHERE id=?').get(memberId).name, 'Legacy member')
   assert.deepEqual({ ...reopened.prepare('SELECT energy,clarity,support FROM checkins WHERE round_id=?').get(roundId) },
     { energy: 2, clarity: 3, support: 4 })
-  assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 22)
+  assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 23)
   reopened.close()
 })
 
@@ -1208,9 +1208,10 @@ test('Telegram synthetic gate defaults off and unfinished summary routes remain 
   error(await f.bot(''), 503, 'UNAVAILABLE')
   error(await f.web('control', f.command(1, { action: 'resume' })), 503, 'UNAVAILABLE')
   error(await f.bot('events', { text: 'synthetic text must not be stored' }), 503, 'UNAVAILABLE')
+  error(await f.bot('media-observations', { media: { kind: 'voice' } }), 503, 'UNAVAILABLE')
   error(await f.request('/telegram/link-tokens', { requestId: randomUUID() }), 503, 'UNAVAILABLE')
   error(await f.recommendation(randomUUID()), 503, 'UNAVAILABLE')
   error(await f.chatFeedback(randomUUID(), 'interpretation', undefined), 503, 'UNAVAILABLE')
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_requests').get().n, 0)
-  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 22)
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 23)
 })
