@@ -266,7 +266,7 @@ export function TeamWorkspace() {
         if (event.currentTarget.open && teamProfileWorkspaceRef.current !== activeWorkspaceId) loadTeamProfile(activeWorkspaceId)
       }}>
         <summary>Профиль команды <span className="muted">· необязательно</span></summary>
-        <p className="muted">Укажите участников, роли и контекст для более точных рекомендаций. Это добровольная настройка, не психологический тест. Данные хранятся только в этом браузере и не отправляются на сервер.</p>
+        <p className="muted">Здесь можно сохранить состав, роли и контекст команды для себя. Демонстрационная рекомендация не использует этот профиль. Данные хранятся только в этом браузере и не отправляются на сервер.</p>
         {!teamProfileLoaded || teamProfileWorkspaceId !== activeWorkspaceId ? teamProfileError
           ? <div className="error" role="alert">{teamProfileError} <button type="button" onClick={() => loadTeamProfile(activeWorkspaceId, true)}>Повторить загрузку</button></div>
           : <p role="status">Загружаем локальный профиль…</p>
