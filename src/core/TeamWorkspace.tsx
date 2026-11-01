@@ -5,6 +5,54 @@ import type { SessionSnapshot } from './contracts'
 import type { CommunicationRecommendation, CommunicationView } from './telegram'
 import './team.css'
 
+export type TeamMemberRole = 'lead' | 'developer' | 'designer' | 'manager' | 'other';
+
+export interface TeamMember {
+  userId: string;
+  name: string;
+  isTeamMember: boolean;
+  role?: TeamMemberRole;
+}
+
+export interface TeamProfile {
+  members: TeamMember[];
+  description?: string;
+  currentContext?: string;
+  updatedAt?: string;
+}
+
+const teamMemberRoles: { value: TeamMemberRole; label: string }[] = [
+  { value: 'lead', label: 'Лид команды' },
+  { value: 'developer', label: 'Разработчик' },
+  { value: 'designer', label: 'Дизайнер' },
+  { value: 'manager', label: 'Менеджер' },
+  { value: 'other', label: 'Другое' },
+]
+
+const teamProfileStorageKey = (workspaceId: string) => `vibee:team-profile:${workspaceId}`
+
+function isTeamMemberRole(value: unknown): value is TeamMemberRole {
+  return teamMemberRoles.some(role => role.value === value)
+}
+
+function isTeamProfile(value: unknown): value is TeamProfile {
+  if (!value || typeof value !== 'object') return false
+  const profile = value as Record<string, unknown>
+  if (!Array.isArray(profile.members)) return false
+  const memberIds = new Set<string>()
+  for (const member of profile.members) {
+    if (!member || typeof member !== 'object') return false
+    const item = member as Record<string, unknown>
+    if (typeof item.userId !== 'string' || !item.userId.trim() || memberIds.has(item.userId)
+      || typeof item.name !== 'string' || typeof item.isTeamMember !== 'boolean'
+      || (item.role !== undefined && !isTeamMemberRole(item.role))) return false
+    memberIds.add(item.userId)
+  }
+  return (profile.description === undefined || typeof profile.description === 'string')
+    && (profile.currentContext === undefined || typeof profile.currentContext === 'string')
+    && (profile.updatedAt === undefined || (typeof profile.updatedAt === 'string' && !Number.isNaN(Date.parse(profile.updatedAt))))
+}
+
 const labels = { energy: 'Ресурс', clarity: 'Ясность', support: 'Поддержка' }
 const dateLabel = (date: string) => new Date(date).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Omsk' })
 const initialToken = () => new URLSearchParams(window.location.hash.slice(1)).get('invite') ?? ''
@@ -96,8 +144,30 @@ export function TeamWorkspace() {
   const [restore, setRestore] = useState(false)
   const [accessKey, setAccessKey] = useState('')
   const [confirm, setConfirm] = useState('')
+  const [teamProfile, setTeamProfile] = useState<TeamProfile>({ members: [] })
+  const [teamProfileWorkspaceId, setTeamProfileWorkspaceId] = useState('')
+  const [teamProfileLoaded, setTeamProfileLoaded] = useState(false)
+  const [teamProfileError, setTeamProfileError] = useState('')
   const requestVersion = useRef(0)
   const busyRef = useRef(false)
+  const teamProfileWorkspaceRef = useRef('')
+  const activeWorkspaceId = snapshot?.workspace.id ?? ''
+  const loadTeamProfile = useCallback((workspaceId: string, force = false) => {
+    if (!force && teamProfileWorkspaceRef.current === workspaceId) return
+    teamProfileWorkspaceRef.current = workspaceId
+    setTeamProfileLoaded(false)
+    setTeamProfileError('')
+    try {
+      const stored = window.localStorage.getItem(teamProfileStorageKey(workspaceId))
+      const profile: unknown = stored === null ? { members: [] } : JSON.parse(stored)
+      if (!isTeamProfile(profile)) throw new Error('Сохранённый профиль команды имеет неверный формат.')
+      setTeamProfile(profile)
+      setTeamProfileWorkspaceId(workspaceId)
+      setTeamProfileLoaded(true)
+    } catch (failure) {
+      setTeamProfileError(failure instanceof Error ? failure.message : 'Не удалось прочитать профиль команды из этого браузера.')
+    }
+  }, [])
   const refresh = useCallback(async () => {
     const version = ++requestVersion.current
     try {
@@ -114,6 +184,28 @@ export function TeamWorkspace() {
     const timer = window.setInterval(() => { if (!busyRef.current && !document.hidden) void refresh() }, 15000)
     return () => { window.clearInterval(timer); requestVersion.current++ }
   }, [refresh])
+  function updateTeamProfile(update: (profile: TeamProfile) => TeamProfile, updatedAt: string) {
+    const updated = { ...update(teamProfile), updatedAt }
+    setTeamProfile(updated)
+    if (!activeWorkspaceId || !teamProfileLoaded || teamProfileWorkspaceId !== activeWorkspaceId) return
+    try {
+      window.localStorage.setItem(teamProfileStorageKey(activeWorkspaceId), JSON.stringify(updated))
+      setTeamProfileError('')
+    } catch (failure) {
+      setTeamProfileError(failure instanceof Error ? failure.message : 'Не удалось сохранить профиль команды в этом браузере.')
+    }
+  }
+  function updateTeamMember(userId: string, changes: Partial<TeamMember>, updatedAt: string) {
+    updateTeamProfile(current => ({
+      ...current,
+      members: current.members.map(member => {
+        if (member.userId !== userId) return member
+        const updated = { ...member, ...changes }
+        if (!updated.isTeamMember) delete updated.role
+        return updated
+      }),
+    }), updatedAt)
+  }
   async function perform(path: string, input: unknown, message: string) {
     if (busyRef.current) return false
     busyRef.current = true; setBusy(true); setError(''); setNotice(''); requestVersion.current++
@@ -175,6 +267,57 @@ export function TeamWorkspace() {
     </section> : <>
       <div className="team-heading"><div><h2>{snapshot.workspace.name}</h2><p className="muted">{snapshot.member.name} · {snapshot.member.role === 'organizer' ? 'организатор' : 'участник'} · время по Омску</p></div><div className="button-row"><button className="button secondary" onClick={() => void refresh()} disabled={busy}>Обновить</button><button className="text-button" onClick={() => setConfirm('logout')} disabled={busy}>Выйти</button></div></div>
       {confirm === 'logout' && <div className="panel confirmation"><p>Для возвращения понадобится личный код входа. Сохраните его перед выходом.</p><div className="button-row"><button className="button secondary" onClick={() => setConfirm('')} disabled={busy}>Остаться</button><button className="button" onClick={() => void logout()} disabled={busy}>Выйти из пространства</button></div></div>}
+      {snapshot.member.role === 'organizer' && <details key={activeWorkspaceId} className="panel team-profile" onToggle={event => {
+        if (event.currentTarget.open && teamProfileWorkspaceRef.current !== activeWorkspaceId) loadTeamProfile(activeWorkspaceId)
+      }}>
+        <summary>Профиль команды <span className="muted">· необязательно</span></summary>
+        <p className="muted">Укажите участников, роли и контекст для более точных рекомендаций. Это добровольная настройка, не психологический тест. Данные хранятся только в этом браузере и не отправляются на сервер.</p>
+        {!teamProfileLoaded || teamProfileWorkspaceId !== activeWorkspaceId ? teamProfileError
+          ? <div className="error" role="alert">{teamProfileError} <button type="button" onClick={() => loadTeamProfile(activeWorkspaceId, true)}>Повторить загрузку</button></div>
+          : <p role="status">Загружаем локальный профиль…</p>
+          : <>
+            {teamProfileError && <p className="error" role="alert">{teamProfileError}</p>}
+            <label className="team-field">О команде<textarea value={teamProfile.description ?? ''} maxLength={500} rows={3} placeholder="Например, небольшая команда разработки продукта" onChange={event => updateTeamProfile(current => ({ ...current, description: event.target.value }), new Date().toISOString())}/></label>
+            <label className="team-field">Текущий контекст<textarea value={teamProfile.currentContext ?? ''} maxLength={500} rows={3} placeholder="Например, готовим запуск и согласуем приоритеты" onChange={event => updateTeamProfile(current => ({ ...current, currentContext: event.target.value }), new Date().toISOString())}/></label>
+            <h3>Состав команды</h3>
+            {teamProfile.members.length === 0 && <p className="muted">Добавьте членов команды и гостей, например заказчиков.</p>}
+            <div className="team-profile__members">
+              {teamProfile.members.map(member => <article className="team-profile__member" key={member.userId}>
+                <label className="team-field">Имя<input value={member.name} maxLength={80} onChange={event => updateTeamMember(member.userId, { name: event.target.value }, new Date().toISOString())}/></label>
+                <label className="team-profile__checkbox"><input type="checkbox" checked={member.isTeamMember} onChange={event => updateTeamMember(member.userId, { isTeamMember: event.target.checked }, new Date().toISOString())}/> Член команды</label>
+                {member.isTeamMember && <label className="team-field">Роль<select value={member.role ?? 'other'} onChange={event => { if (isTeamMemberRole(event.target.value)) updateTeamMember(member.userId, { role: event.target.value }, new Date().toISOString()) }}>
+                  {teamMemberRoles.map(role => <option value={role.value} key={role.value}>{role.label}</option>)}
+                </select></label>}
+                {!member.isTeamMember && <p className="muted">Гость / заказчик</p>}
+                <button className="text-button" type="button" onClick={() => updateTeamProfile(current => ({ ...current, members: current.members.filter(item => item.userId !== member.userId) }), new Date().toISOString())}>Удалить участника</button>
+              </article>)}
+            </div>
+            <form className="team-profile__add" onSubmit={event => {
+              event.preventDefault()
+              const values = new FormData(event.currentTarget)
+              const name = String(values.get('memberName') ?? '').trim()
+              if (!name) return
+              const isTeamMember = values.get('isTeamMember') === 'on'
+              const selectedRole = values.get('role')
+              const member: TeamMember = {
+                userId: crypto.randomUUID(),
+                name,
+                isTeamMember,
+                ...(isTeamMember && isTeamMemberRole(selectedRole) ? { role: selectedRole } : {}),
+              }
+              updateTeamProfile(current => ({ ...current, members: [...current.members, member] }), new Date().toISOString())
+              event.currentTarget.reset()
+            }}>
+              <label className="team-field">Добавить человека<input name="memberName" maxLength={80} required placeholder="Имя участника или гостя"/></label>
+              <label className="team-profile__checkbox"><input type="checkbox" name="isTeamMember" defaultChecked/> Член команды</label>
+              <label className="team-field">Роль (для члена команды)<select name="role" defaultValue="other">
+                {teamMemberRoles.map(role => <option value={role.value} key={role.value}>{role.label}</option>)}
+              </select></label>
+              <button className="button secondary" type="submit">Добавить</button>
+            </form>
+            {teamProfile.updatedAt && <p className="muted team-profile__updated">Изменено: {dateLabel(teamProfile.updatedAt)}</p>}
+          </>}
+      </details>}
       <div className="grid"><div>
         <section className="panel"><h2>Температура команды</h2><p className="muted">Раунд от {dateLabel(snapshot.round.createdAt)}{snapshot.round.closedAt ? ' · завершён ' + dateLabel(snapshot.round.closedAt) : ' · сбор ответов открыт'}</p>
           {status?.status === 'open' ? <p>Результаты появятся после завершения раунда. Для публикации нужны ответы минимум пяти отдельных участников.</p> : status?.status === 'insufficient' ? <p>Недостаточно данных для публикации. Доступны добровольные упражнения.</p> : status?.status === 'published' ? <><p>{status.needs.includes('clarity') ? '🌥 Команде стоит сверить приоритеты.' : status.needs.length ? 'Команде может пригодиться поддержка.' : '☀️ Сигналы ровные. Продолжайте замечать вклад друг друга.'}</p><div className="metrics">{(['energy','clarity','support'] as const).map(key => <div className="metric" key={key}>{labels[key]}<strong>{status.means[key].toFixed(1)}<small>/5</small></strong></div>)}</div></> : null}
