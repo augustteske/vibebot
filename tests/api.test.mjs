@@ -9,6 +9,13 @@ const secret = 'test-secret-used-only-in-automated-tests-123456789'
 const normal = { energy: 4, clarity: 4, support: 4 }
 const unclear = { energy: 4, clarity: 1, support: 4 }
 
+test('current web client header is accepted without the legacy header', async t => {
+  const { client } = await start(t)
+  const result = await client()('/workspaces', { name: 'Synthetic', displayName: 'Owner' },
+    { 'X-VibeBot': '', 'X-Vibee': '1' })
+  assert.equal(result.status, 201)
+})
+
 async function start(t, dbPath) {
   const app = createApp({ secret, dbPath })
   await new Promise(resolveListen => app.server.listen(0, '127.0.0.1', resolveListen))

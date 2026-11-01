@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { aggregateRound } from '../src/core/rules.ts'
+import { createTelegramStore } from './telegram-store.mjs'
 
 export class AppError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code }
@@ -18,7 +19,8 @@ const templates = {
   recognition: { title: 'Замеченный вклад', body: 'Назовите конкретный поступок коллеги, который помог вам в работе.', reason: 'Добровольное упражнение, доступное при любом размере команды.' },
 }
 
-export function createStore({ path = ':memory:', secret }) {
+export function createStore({ path = ':memory:', secret, telegramBootstrapCredential, telegramSynthetic = false, now = Date.now,
+  recommendationProvider, recommendationTimeoutMs }) {
   if (!secret || secret.length < 32) throw new Error('A persistent server secret of at least 32 characters is required')
   const db = new DatabaseSync(path)
   db.exec(`
@@ -58,7 +60,10 @@ export function createStore({ path = ':memory:', secret }) {
     return kinds.map(kind => ({ id: kind, ...templates[kind], source: 'template' }))
   }
 
+  const telegram = createTelegramStore({ db, secret, bootstrapCredential: telegramBootstrapCredential, fail,
+    enabled: telegramSynthetic, now, recommendationProvider, recommendationTimeoutMs })
   return {
+    telegram,
     close: () => db.close(),
     authenticate(token) {
       if (!token || !/^[a-f0-9]{64}$/.test(token)) return null

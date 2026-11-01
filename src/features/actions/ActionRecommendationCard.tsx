@@ -3,8 +3,8 @@ import './ActionRecommendationCard.css';
 
 export type ActionDataSource = 'checkin' | 'chat';
 export type ActionGenerationSource = 'ai' | 'template';
-export type InterpretationFeedback = 'useful' | 'wrong_interpretation' | 'just_a_joke';
-export type ActionOutcomeFeedback = 'helped' | 'did_not_help';
+export type InterpretationFeedback = 'useful' | 'incorrect' | 'usual_joke';
+export type ActionOutcomeFeedback = 'helped' | 'not_helped';
 
 export interface ActionRecommendationCardProps {
   observation?: string;
@@ -35,13 +35,13 @@ const GENERATION_LABEL: Record<ActionGenerationSource, string> = {
 
 const INTERPRETATION_LABEL: Record<InterpretationFeedback, string> = {
   useful: 'Полезно',
-  wrong_interpretation: 'Неверная интерпретация',
-  just_a_joke: 'Обычная шутка',
+  incorrect: 'Неверная интерпретация',
+  usual_joke: 'Обычная шутка',
 };
 
 const OUTCOME_LABEL: Record<ActionOutcomeFeedback, string> = {
   helped: 'Помогло',
-  did_not_help: 'Не помогло',
+  not_helped: 'Не помогло',
 };
 
 type Phase = 'review' | 'editing' | 'saving' | 'accepted' | 'later' | 'rejected';
@@ -97,11 +97,13 @@ export function ActionRecommendationCard({
     }
   }
 
-  async function sendFeedback<T>(value: T, cb?: (v: T) => Promise<void> | void) {
+  async function sendFeedback<T>(value: T, cb: ((v: T) => Promise<void> | void) | undefined, accept: (value: T) => void) {
     if (feedbackBusy) return;
     setFeedbackBusy(true);
+    setError(null);
     try {
       await cb?.(value);
+      accept(value);
     } catch {
       setError('Не удалось отправить отзыв. Попробуйте ещё раз.');
     } finally {
@@ -259,8 +261,7 @@ export function ActionRecommendationCard({
                   aria-pressed={interpretation === key}
                   disabled={feedbackBusy}
                   onClick={() => {
-                    setInterpretation(key);
-                    void sendFeedback(key, onInterpretationFeedback);
+                    void sendFeedback(key, onInterpretationFeedback, setInterpretation);
                   }}
                 >
                   {INTERPRETATION_LABEL[key]}
@@ -278,8 +279,7 @@ export function ActionRecommendationCard({
                   aria-pressed={outcome === key}
                   disabled={feedbackBusy}
                   onClick={() => {
-                    setOutcome(key);
-                    void sendFeedback(key, onActionFeedback);
+                    void sendFeedback(key, onActionFeedback, setOutcome);
                   }}
                 >
                   {OUTCOME_LABEL[key]}

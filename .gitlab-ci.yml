@@ -28,9 +28,14 @@ verify:
 
 verify-bot:
   stage: verify
+  # Python 3.12 нужен боту, Node 24 — локальному API в test_http_integration.py.
+  # Node ставится из официального дистрибутива nodejs.org с проверкой SHA-256.
   image: python:3.12-slim
   before_script:
-    - python -m pip install -r bot/requirements.txt
+    - apt-get update
+    - apt-get install --no-install-recommends --yes ca-certificates curl xz-utils
+    - sh scripts/install-node.sh
+    - python -m pip install --disable-pip-version-check -r bot/requirements.txt
   script:
     - python -m unittest discover -s bot/tests -v
     - python -m bot --check
