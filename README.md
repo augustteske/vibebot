@@ -4,12 +4,41 @@
 Добровольный чек-ин → общий сигнал → предложение → договорённость → проверка пользы.
 
 ## Запуск
-Нужен Node.js 24.
+Нужны Node.js 24 и Python 3.12 для бота.
 ```sh
-npm ci
+npm install
 npm run dev
 ```
 Открыть http://127.0.0.1:5173. Одна команда запускает интерфейс и локальный сервер. Порты 5173 и 8787 должны быть свободны.
+
+### Локальный Telegram QA
+
+Обычный сервер оставляет Telegram API выключенным. Для локальной проверки UI-состояния без привязки включите синтетический API в PowerShell до запуска `npm run dev`:
+
+```powershell
+$env:NODE_ENV = "development"
+$env:VIBEE_TELEGRAM_SYNTHETIC = "true"
+$env:VIBEE_TELEGRAM_BOOTSTRAP_CREDENTIAL = (node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))")
+npm run dev
+```
+
+Создайте тестовое пространство в веб-кабинете: пока к нему не привязана тестовая группа, Telegram-блок показывает «Нет активной привязки». Синтетический режим разрешён только при `NODE_ENV=development` и не подключается к настоящему чату.
+
+Чтобы проверить Python-бота, из корня проекта установите зависимости и проверьте обработчики:
+
+```powershell
+python -m pip install -r bot/requirements.txt
+python -m bot --check
+```
+
+Для отдельного личного Telegram-демо задайте токен локально и запустите polling в отдельном терминале:
+
+```powershell
+$env:TELEGRAM_BOT_TOKEN = "<локальный токен Telegram>"
+python -m bot
+```
+
+Бот отвечает на личные `/start` и `/stop`; это не сквозное подключение группового чата к веб-аналитике. Групповой HTTP transport проверяется синтетическими API-тестами. Не публикуйте токены и не добавляйте демо-бота в рабочую группу.
 
 Показ готовой сборки:
 ```sh
@@ -22,6 +51,7 @@ npm start
 ```sh
 npm test
 npm run build
+npm run check
 ```
 
 ## Два режима
