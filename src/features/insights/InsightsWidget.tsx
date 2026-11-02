@@ -68,7 +68,7 @@ export function InsightsWidget({ state, metrics, teamProfile, periodLabel, demo 
         <h2 className="iw-title">Коммуникация команды</h2>
         {demo && <span className="iw-badge">демо-данные</span>}
       </div>
-      
+
       {periodLabel && <p className="iw-period">Период: {periodLabel}</p>}
 
       <div className="iw-grid">

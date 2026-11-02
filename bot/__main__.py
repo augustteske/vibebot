@@ -25,7 +25,8 @@ def create_dispatcher(
 ) -> Dispatcher:
     dispatcher = Dispatcher()
     flow = CheckinFlow()
-    install_voice_handlers(dispatcher, voice)
+    voice_transcription = voice
+    install_voice_handlers(dispatcher, voice_transcription)
 
     async def question(message, nonce, step):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
@@ -51,8 +52,8 @@ def create_dispatcher(
         if message.chat.type != "private" or message.from_user is None:
             return
         flow.cancel(message.from_user.id)
-        if voice is not None:
-            voice.cancel(message.from_user.id)
+        if voice_transcription is not None:
+            voice_transcription.cancel(message.from_user.id)
         await message.answer("Участие отменено, черновик удалён. Разрешение на расшифровку отозвано, текущая обработка останавливается. Сообщения в Telegram автоматически не удаляются.")
 
     async def submit_intake_text(message: Message, text: str) -> None:

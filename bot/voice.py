@@ -239,7 +239,7 @@ def install_voice_handlers(dispatcher, service: VoiceTranscription | None):
         await event.answer()
         await event.message.answer("Отправьте одно новое голосовое. Отмена: /stop.")
 
-    @dispatcher.message(F.voice)
+    @dispatcher.message(F.voice, F.chat.type == "private")
     async def voice_message(message: Message):
         if service is None or message.chat.type != "private" or message.from_user is None or message.from_user.is_bot:
             return
