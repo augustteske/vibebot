@@ -191,6 +191,7 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
     );
   `)
   const one = (sql, ...args) => db.prepare(sql).get(...args)
+  const all = (sql, ...args) => db.prepare(sql).all(...args)
   const run = (sql, ...args) => db.prepare(sql).run(...args)
   const tx = fn => {
     db.exec('BEGIN IMMEDIATE')
@@ -703,6 +704,17 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
           id, state.revision, profile.version, now())
         return closed ? periodView(closed) : { status: 'insufficient' }
       })
+    },
+    currentSummary(actor) {
+      unavailable()
+      organizerProfile(actor)
+      const bindings = all('SELECT * FROM telegram_bindings WHERE workspace_id=? ORDER BY rowid DESC', actor.workspace_id)
+      const binding = bindings.find(item => JSON.parse(item.state).phase === 'active')
+        ?? bindings.find(item => JSON.parse(item.state).phase === 'paused')
+        ?? bindings[0]
+      return binding
+        ? { bindingId: binding.id, view: this.summary(actor, binding.id) }
+        : { bindingId: null, view: { status: 'disconnected' } }
     },
     async recommendation(actor, id, periodId, reauthenticate) {
       unavailable()

@@ -2,11 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { api, ApiError } from './client'
 import type { SessionSnapshot } from './contracts'
-import type { CommunicationRecommendation, CommunicationView } from './telegram'
-import { SYNTHETIC_METRICS } from '../demo/insightsFixtures'
-import { ActionRecommendationCard } from '../features/actions/ActionRecommendationCard'
-import { demoActionRecommendation } from '../features/actions/actionRecommendationDemo'
-import { InsightsWidget } from '../features/insights/InsightsWidget'
+import { SummaryPanels } from './SummaryPanels'
 import './team.css'
 
 export type TeamMemberRole = 'lead' | 'developer' | 'designer' | 'manager' | 'other';
@@ -60,69 +56,6 @@ function isTeamProfile(value: unknown): value is TeamProfile {
 const labels = { energy: 'Ресурс', clarity: 'Ясность', support: 'Поддержка' }
 const dateLabel = (date: string) => new Date(date).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Omsk' })
 const initialToken = () => new URLSearchParams(window.location.hash.slice(1)).get('invite') ?? ''
-const demoChatView = {
-  status: 'published',
-  demo: true,
-  period: {
-    id: '11111111-1111-4111-8111-111111111111',
-    start: '2026-10-29T03:00:00.000Z',
-    end: '2026-10-30T03:00:00.000Z',
-  },
-  dataSource: 'chat',
-  profileVersion: 1,
-  metrics: {
-    outsideHoursPercent: 25,
-    participationEvenness: 89.8,
-    recognitionPercent: 20,
-  },
-  recognitionMethod: 'lexicon-v1',
-  comparison: null,
-} satisfies Extract<CommunicationView, { status: 'published' }>
-const demoChatRecommendation = {
-  id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-  periodId: demoChatView.period.id,
-  profileVersion: demoChatView.profileVersion,
-  dataSource: 'chat',
-  source: 'template',
-  observation: 'Вне рабочих интервалов отправлено 25% сообщений периода.',
-  explanation: 'Возможно, часть обсуждений приходится на время вне согласованного расписания.',
-  limitation: 'Это доля сообщений, а не оценка нагрузки; причины неизвестны.',
-  action: 'Обсудить с командой удобное время для рабочих сообщений.',
-  demo: true,
-} satisfies CommunicationRecommendation
-function ChatAnalyticsPreview({
-  view,
-  recommendation,
-}: {
-  view: Extract<CommunicationView, { status: 'published' }>
-  recommendation: CommunicationRecommendation
-}) {
-  return <section className="panel chat-demo" aria-labelledby="chat-demo-title">
-    <div className="chat-demo__header">
-      <div>
-        <h2 id="chat-demo-title">Демо чат-аналитики</h2>
-        <p className="muted">Синтетический пример в формате серверного контракта · не данные этой команды</p>
-      </div>
-      <span className="chat-demo__badge">ВЫМЫШЛЕННЫЕ ДАННЫЕ</span>
-    </div>
-    <p className="chat-demo__period">Закрытый период · {dateLabel(view.period.start)} — {dateLabel(view.period.end)}</p>
-    <InsightsWidget
-      state="published"
-      metrics={SYNTHETIC_METRICS}
-      teamProfile="formal"
-      periodLabel={`${dateLabel(view.period.start)} — ${dateLabel(view.period.end)}`}
-    />
-    <ActionRecommendationCard
-      {...demoActionRecommendation}
-      observation={recommendation.observation}
-      explanation={recommendation.explanation}
-      limitation={recommendation.limitation}
-      suggestedAction={recommendation.action}
-      periodLabel={`${dateLabel(view.period.start)} — ${dateLabel(view.period.end)}`}
-    />
-  </section>
-}
-
 function invitationToken(value: string) {
   try { return new URLSearchParams(new URL(value).hash.slice(1)).get('invite') ?? value.trim() } catch { return value.trim() }
 }
@@ -251,7 +184,6 @@ export function TeamWorkspace() {
   const status = snapshot?.round.summary
   return <section className="team-space" aria-label="Моя команда">
     <div className="feedback-messages" aria-live="polite">{error && <div className="error" role="alert">{error} <button type="button" onClick={() => void refresh()} disabled={busy}>Обновить</button></div>}{notice && <p className="status">{notice}</p>}</div>
-    <ChatAnalyticsPreview view={demoChatView} recommendation={demoChatRecommendation}/>
     {!initialized ? <div className="panel"><p role="status">Открываем пространство…</p></div> : !snapshot ? <section className="panel entrance">
       <h2>{restore ? 'Вернуться в команду' : join ? 'Присоединиться к команде' : 'Создать пространство'}</h2>
       <p className="muted">Собирайте добровольные сигналы и выбирайте полезный следующий шаг.</p>
@@ -261,6 +193,7 @@ export function TeamWorkspace() {
       </fieldset></form><div className="button-row"><button className="text-button" onClick={() => { setRestore(false); setJoin(!join) }} disabled={busy}>{join ? 'Создать новую команду' : 'У меня есть приглашение'}</button><button className="text-button" onClick={() => setRestore(!restore)} disabled={busy}>{restore ? 'Обычный вход' : 'У меня есть личный код входа'}</button></div>
     </section> : <>
       <div className="team-heading"><div><h2>{snapshot.workspace.name}</h2><p className="muted">{snapshot.member.name} · {snapshot.member.role === 'organizer' ? 'организатор' : 'участник'} · время по Омску</p></div><div className="button-row"><button className="button secondary" onClick={() => void refresh()} disabled={busy}>Обновить</button><button className="text-button" onClick={() => setConfirm('logout')} disabled={busy}>Выйти</button></div></div>
+      <SummaryPanels key={snapshot.round.id + ':' + snapshot.round.summary.status}/>
       {confirm === 'logout' && <div className="panel confirmation"><p>Для возвращения понадобится личный код входа. Сохраните его перед выходом.</p><div className="button-row"><button className="button secondary" onClick={() => setConfirm('')} disabled={busy}>Остаться</button><button className="button" onClick={() => void logout()} disabled={busy}>Выйти из пространства</button></div></div>}
       {snapshot.member.role === 'organizer' && <details key={activeWorkspaceId} className="panel team-profile" onToggle={event => {
         if (event.currentTarget.open && teamProfileWorkspaceRef.current !== activeWorkspaceId) loadTeamProfile(activeWorkspaceId)

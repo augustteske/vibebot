@@ -89,6 +89,11 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
     input, { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1' })
   const summary = (token = ownerToken, bindingId = id) => request('/telegram/bindings/' + bindingId + '/summary',
     undefined, { Cookie: 'vibebot_session=' + token })
+  const currentSummary = (token = ownerToken) => request('/telegram/summary', undefined,
+    { Cookie: 'vibebot_session=' + token })
+  const currentRecommendation = (periodId, token = ownerToken) => request(
+    '/telegram/recommendation?periodId=' + encodeURIComponent(periodId), undefined,
+    { Cookie: 'vibebot_session=' + token })
   const recommendation = (periodId, token = ownerToken, bindingId = id) => request(
     '/telegram/bindings/' + bindingId + '/periods/' + periodId + '/recommendation', undefined,
     { Cookie: 'vibebot_session=' + token })
@@ -132,7 +137,7 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
     assert.equal(result.body.phase, 'active')
     return result.body
   }
-  return { db, id, otherBindingId, owner, people, tokens, foreignToken, foreignOwner, foreignPeople, request, web, bot, linkToken, link, bindingToken, bind, closePeriod, summary, recommendation, confirmAction, chatFeedback, closeChatFeedback, profile, setProfile, command, status,
+  return { db, id, otherBindingId, owner, people, tokens, foreignToken, foreignOwner, foreignPeople, request, web, bot, linkToken, link, bindingToken, bind, closePeriod, summary, currentSummary, currentRecommendation, recommendation, confirmAction, chatFeedback, closeChatFeedback, profile, setProfile, command, status,
     mutate, decision, prepare, activate, time: () => clock, advance: ms => { clock += ms }, setTime: ms => { clock = ms },
     restart: async () => { await app.close(); await launch() } }
 }
@@ -144,6 +149,13 @@ const error = (result, status, code) => {
 const textEvent = (f, expectedRevision, fields = {}) => ({ eventId: randomUUID(), expectedRevision,
   chatId: '-100000000001', messageId: '42', senderId: '100000001',
   sentAt: new Date(f.time()).toISOString(), text: 'Synthetic allowed text', ...fields })
+test('HTTP: current Telegram summary requires an organizer session and handles missing binding', async t => {
+  const f = await fixture(t, { seedBindings: false, seedLinks: false })
+  error(await f.currentSummary(''), 401, 'SIGN_IN_REQUIRED')
+  error(await f.currentSummary(f.tokens[1]), 403, 'FORBIDDEN')
+  assert.deepEqual((await f.currentSummary()).body, { status: 'disconnected' })
+})
+
 const sendMany = async (f, revision, count, authors, firstMessageId, thanks = 0,
   { bindingId = f.id, credential: botCredential = credential, chatId = '-100000000001', senderBase = 100000001 } = {}) => {
   for (let i = 0; i < count; i++) {
@@ -498,8 +510,18 @@ test('HTTP/SQLite: three synthetic closed dates publish only aggregate metrics a
   assert.equal(published.body.comparison, null)
   assert.equal(JSON.stringify(published.body).includes('100000001'), false)
   assert.deepEqual((await f.summary()).body, published.body)
+  const current = await f.currentSummary()
+  assert.equal(current.status, 200, JSON.stringify(current.body))
+  assert.deepEqual(current.body, published.body)
+  const currentCard = await f.currentRecommendation(published.body.period.id)
+  assert.equal(currentCard.status, 200, JSON.stringify(currentCard.body))
+  assert.equal(currentCard.body.periodId, published.body.period.id)
+  assert.equal(currentCard.body.dataSource, 'chat')
+  assert.equal(currentCard.body.source, 'template')
   await f.mutate('pause', { reason: 'manual' }, f.bot)
   assert.deepEqual((await f.summary()).body, { status: 'paused' })
+  assert.deepEqual((await f.currentSummary()).body, { status: 'paused' })
+  assert.equal((await f.currentRecommendation(published.body.period.id)).body.error.code, 'STALE_PERIOD')
   await f.mutate('control', { action: 'resume' })
   assert.deepEqual((await f.summary()).body, { status: 'insufficient' })
   f.advance(7 * DAY + 1)

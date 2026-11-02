@@ -59,6 +59,7 @@ test('complete shared flow: private check-ins, frozen summary, confirmed action 
   for (let i = 0; i < people.length; i++) {
     assert.equal((await people[i]('/checkins', { roundId, scores: i < 3 ? unclear : normal })).status, 200)
   }
+  assert.deepEqual((await owner('/summary')).body, { status: 'open' })
   const before = (await people[1]('/session')).body
   assert.deepEqual(before.round.summary, { status: 'open' })
   assert.equal(before.round.mySubmitted, true)
@@ -66,6 +67,7 @@ test('complete shared flow: private check-ins, frozen summary, confirmed action 
   assert.equal((await people[1]('/rounds/close', { roundId })).status, 403)
   const closed = await owner('/rounds/close', { roundId })
   assert.equal(closed.body.round.summary.status, 'published')
+  assert.deepEqual((await owner('/summary')).body, closed.body.round.summary)
   assert.deepEqual(closed.body.round.summary.needs, ['clarity'])
   assert.equal(closed.body.round.summary.means.clarity, 2.5)
   assert.doesNotMatch(JSON.stringify(closed.body), /voter_key|token_hash|"answers"|"scores"|"participants"/)
@@ -130,6 +132,7 @@ test('session, JSON values, request origin and workspace boundaries are enforced
   const { owner, client, roundId } = await team(t, 1)
   const outsider = client()
   assert.equal((await outsider('/session')).status, 401)
+  assert.equal((await outsider('/summary')).status, 401)
   assert.equal((await owner('/checkins', { roundId, scores: { ...normal, energy: 0 } })).status, 400)
   assert.equal((await owner('/checkins', { roundId, scores: { ...normal, energy: 2.5 } })).status, 400)
   assert.equal((await owner('/checkins', { roundId, scores: normal }, { Origin: 'https://other.example' })).status, 403)

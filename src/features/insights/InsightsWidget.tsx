@@ -4,20 +4,24 @@ export interface InsightsMetrics {
   outsideHoursPercent: number;
   participationEvenness: number;
   recognitionPercent: number;
-  participantCount: number;
-  messageCount: number;
+  participantCount?: number;
+  messageCount?: number;
 }
 
 export interface InsightsWidgetProps {
   state: 'calibrating' | 'insufficient' | 'published' | 'paused';
   metrics: InsightsMetrics | null;
-  teamProfile: 'informal' | 'formal';
+  teamProfile?: 'informal' | 'formal';
   periodLabel?: string;
+  demo?: boolean;
 }
 
-export function InsightsWidget({ state, metrics, teamProfile, periodLabel }: InsightsWidgetProps) {
+export function InsightsWidget({ state, metrics, teamProfile, periodLabel, demo = false }: InsightsWidgetProps) {
   // Проверка на недостаток данных (по ТЗ Августа)
-  const isInsufficient = state === 'insufficient' || (metrics && (metrics.participantCount < 5 || metrics.messageCount < 20));
+  const isInsufficient = state === 'insufficient' || (metrics && (
+    (metrics.participantCount !== undefined && metrics.participantCount < 5)
+    || (metrics.messageCount !== undefined && metrics.messageCount < 20)
+  ));
 
   if (state === 'paused') {
     return (
@@ -50,15 +54,17 @@ export function InsightsWidget({ state, metrics, teamProfile, periodLabel }: Ins
   if (!metrics) return null;
 
   // Разная интерпретация для разных профилей
-  const interpretation = teamProfile === 'informal' 
+  const interpretation = teamProfile === 'informal'
     ? 'Возможно, вы просто продолжаете общение в relaxed режиме.'
-    : 'Возможно, изменились ожидания по доступности.';
+    : teamProfile === 'formal'
+      ? 'Возможно, изменились ожидания по доступности.'
+      : 'Причины изменений неизвестны без контекста команды.';
 
   return (
     <div className="iw-container">
       <div className="iw-header">
         <h2 className="iw-title">Коммуникация команды</h2>
-        <span className="iw-badge">демо-данные</span>
+        {demo && <span className="iw-badge">демо-данные</span>}
       </div>
       
       {periodLabel && <p className="iw-period">Период: {periodLabel}</p>}

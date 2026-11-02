@@ -54,6 +54,28 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
       }
       if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true })
       if (!['GET', 'POST'].includes(req.method)) throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Метод не поддерживается')
+      if (url.pathname === '/api/telegram/summary') {
+        if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
+        if (req.method !== 'GET') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
+        const actor = store.authenticate(tokenFrom(req))
+        if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
+        const current = store.telegram.currentSummary(actor)
+        return json(res, 200, current.view)
+      }
+      if (url.pathname === '/api/telegram/recommendation') {
+        if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
+        if (req.method !== 'GET') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
+        const actor = store.authenticate(tokenFrom(req))
+        if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
+        const periodId = url.searchParams.get('periodId')
+        const current = store.telegram.currentSummary(actor)
+        if (current.view.status !== 'published' || current.view.period.id !== periodId) {
+          throw new AppError(409, 'STALE_PERIOD', 'Период изменился. Обновите страницу.')
+        }
+        const recommendation = await store.telegram.recommendation(actor, current.bindingId, periodId,
+          () => store.authenticate(tokenFrom(req)))
+        return json(res, 200, recommendation)
+      }
       if (url.pathname === '/api/telegram/profile') {
         if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
         if (req.method === 'POST') checkBrowser(req)
@@ -146,6 +168,7 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
       }
       if (!member) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, store.snapshot(member))
+      if (req.method === 'GET' && url.pathname === '/api/summary') return json(res, 200, store.summary(member))
       if (req.method === 'POST') {
         if (url.pathname === '/api/logout') {
           store.logout(token); res.setHeader('Set-Cookie', cookie('')); return json(res, 200, { ok: true })

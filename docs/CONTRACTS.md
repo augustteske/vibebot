@@ -28,6 +28,7 @@ SessionSnapshot содержит только своё имя/роль, прос
 | POST /join | {token, displayName} | Одноразовое приглашение; создаёт участника и сессию |
 | POST /restore | {key} | Возвращает того же участника с теми же правами |
 | GET /session | — | SessionSnapshot своей команды либо 401 |
+| GET /summary | — | Summary текущего раунда своей команды либо 401 |
 | POST /logout | {} | Отзывает текущую сессию |
 | POST /recovery-key | {} | Свой личный код входа на 30 дней; новый заменяет старый |
 | POST /invitations | {} | Только организатор: {token, expiresAt}; одно использование, 24 часа |
@@ -120,6 +121,8 @@ workspaceId — существующая команда; bindingId — серв�
 | POST bot/v1/bindings/:id/events | бот | TelegramTextEvent ниже; {eventId, result:accepted/duplicate/paused, revision} |
 | POST telegram/bindings/:id/periods/close | веб-организатор | {requestId, expectedRevision, periodId}; CommunicationView |
 | GET telegram/bindings/:id/summary | веб-организатор | CommunicationView |
+| GET telegram/summary | веб-организатор с сессией | CommunicationView текущей привязки; без привязки — disconnected |
+| GET telegram/recommendation?periodId=:id | веб-организатор с сессией | CommunicationRecommendation последнего опубликованного периода текущей привязки |
 | GET telegram/bindings/:id/periods/:periodId/recommendation | веб-организатор | Только карточка последнего опубликованного периода |
 | POST telegram/bindings/:id/periods/:periodId/action | веб-организатор | {requestId, expectedRevision, periodId, recommendationId, action}; подтверждённый шаг |
 | POST telegram/bindings/:id/periods/:periodId/feedback/interpretation | связанный участник с согласием | {requestId, expectedRevision, recommendationId, value} |
