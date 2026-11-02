@@ -1,72 +1,64 @@
-# Vibee
+<div align="center">
+  <img src="public/bee.svg" alt="Vibee bee mascot" width="112">
+  <h1>Vibee</h1>
+  <p><strong>Почувствовать команду. Сделать следующий шаг.</strong></p>
+  <p>
+    <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
+    <img alt="Node.js 24.x" src="https://img.shields.io/badge/Node.js-24.x%2B-339933?logo=node.js&logoColor=white">
+  </p>
+</div>
 
-**Team communication insights with consent at the center.** Vibee is an early-stage open-source prototype for turning voluntarily shared team signals into cautious, aggregate insights and practical suggestions. It is not a medical, performance-monitoring, or employee-scoring tool.
+Vibee — open-source прототип для бережной аналитики командной коммуникации. Он помогает смотреть на общие сигналы команды и обсуждать практические шаги, не оценивая отдельных людей.
 
-See [Project Context](docs/PROJECT_CONTEXT.md) for product goals, current status, and boundaries.
+Подробнее о целях и текущих границах проекта — в [контексте проекта](docs/PROJECT_CONTEXT.md).
 
-## Requirements
+## Features
 
-- Node.js 24.x and npm
-- Python 3.12 for the Telegram bot
-- Docker Compose v2 (optional)
+- **Telegram communication insights:** прототип API и UI для агрегированного обзора командной переписки; полный production-поток подключения групп пока не готов.
+- **Three aggregate metrics:** доля сообщений вне рабочих часов, равномерность участия и доля сообщений с благодарностью/признанием.
+- **Recommendations:** шаблонная рекомендация по умолчанию; опционально можно настроить Groq, OpenAI или Ollama. Внешнему LLM передаются только опубликованные метрики, не тексты чата и не личности.
+- **Privacy by design:** добровольное участие, проверка согласий и порог публикации агрегатов. Это ранний прототип, не медицинский инструмент, система оценки сотрудников или обещание полной анонимности.
+- **Python Telegram bot:** личное демо на aiogram; синтетический API доступен для локальной QA. Реальная групповая интеграция и production-привязка пока не готовы.
 
-## Install and run locally
+## Quick Start
+
+### Web app and API
+
+Requirements: Node.js 24.x and npm. Python 3.12 is needed for the bot. Docker Compose v2 is optional.
 
 ```sh
 npm ci
 cp .env.example .env
-npm run doctor
 npm run dev
 ```
 
-Open <http://127.0.0.1:5173>. The dev command starts the Vite UI and Node API; keep its terminal running. `npm run doctor` checks the Node version, dependencies, and repository remote.
+Open <http://127.0.0.1:5173>. The dev command starts the React/Vite UI and Node API. See `.env.example` for server, bot, and optional LLM settings.
 
-The Python bot runs separately. In PowerShell:
+### Telegram bot
 
-```powershell
+Install the bot dependencies once:
+
+```sh
 python -m venv bot/.venv
-.\bot\.venv\Scripts\Activate.ps1
+source bot/.venv/bin/activate
 python -m pip install -r bot/requirements.txt
-python -m bot --check
-$env:TELEGRAM_BOT_TOKEN = "<token from BotFather>"
+```
+
+Set `TELEGRAM_BOT_TOKEN` in the same shell that runs the bot, then start the personal demo:
+
+```sh
+export TELEGRAM_BOT_TOKEN="<token from BotFather>"
 python -m bot
 ```
 
-On macOS/Linux, activate with `source bot/.venv/bin/activate`. Set environment variables in the shell that launches the bot; Python does not load the root `.env` file. The personal polling demo supports `/start` and `/stop`; it does not yet complete a production group-to-dashboard workflow.
+In PowerShell, activate with `.\bot\.venv\Scripts\Activate.ps1` and set the token with `$env:TELEGRAM_BOT_TOKEN = "<token from BotFather>"`. The bot answers `/start` and `/stop` in private chat; it does not yet deliver real group analytics to the dashboard. Do not configure it to collect real group messages.
 
-## Environment
+### Docker Compose
 
-Copy `.env.example` to `.env`. Never commit tokens or API keys.
-
-| Variable | Purpose |
-|---|---|
-| `TELEGRAM_BOT_TOKEN` | Secret token for the Python Telegram bot |
-| `VIBEE_API_BASE_URL` | Node API URL for the bot (`http://localhost:8787` locally; `http://web:8787` in Compose) |
-| `VIBEE_BINDING_ID` | Binding identifier for the optional bot HTTP transport |
-| `VIBEE_BOT_TOKEN` | Scoped bot API credential; required with binding ID and chat ID |
-| `VIBEE_CHAT_ID` | Negative Telegram group ID; required with the other transport credentials |
-| `LLM_PROVIDER` | `template` (default), `groq`, `openai`, or `ollama` |
-| `LLM_API_KEY` | Provider key for Groq or OpenAI; keep it private |
-| `LLM_BASE_URL` | Optional OpenAI-compatible endpoint override |
-| `LLM_MODEL` | Optional model override |
-
-The bot's API transport is enabled only when `VIBEE_BOT_TOKEN`, `VIBEE_BINDING_ID`, and `VIBEE_CHAT_ID` are all set. Do not set these against a real group for this prototype: the production Telegram binding/bootstrap workflow is not ready.
-
-LLM generation is opt-in. `template` makes no external request. When configured, only a published aggregate metrics object is sent to the selected provider—never chat text or participant identities. Validate your provider's data handling before enabling it. An invalid or unavailable provider response falls back to the local template.
-
-## Connect a Telegram demo bot
-
-1. In Telegram, open **@BotFather**, run `/newbot`, follow the prompts, and store the returned token as `TELEGRAM_BOT_TOKEN`. Do not put it in source control or screenshots.
-2. Privacy Mode is enabled by default. Keep it enabled for a personal bot that responds to `/start` and `/stop`. A group bot generally sees commands and messages addressed to it; receiving all group messages requires disabling Privacy Mode with `/setprivacy` or granting admin privileges. Do not change this for a real group until the product's consent, binding, and production ingestion flow is ready.
-3. For synthetic QA only, enable the development API in `.env` with `NODE_ENV=development`, `VIBEE_TELEGRAM_SYNTHETIC=true`, and a fresh 64-character lowercase hex `VIBEE_TELEGRAM_BOOTSTRAP_CREDENTIAL` (generate one with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`). After signing in as an organizer, `POST /api/telegram/binding-tokens` with `{"requestId":"<new UUID>"}` returns a one-time token that expires in 10 minutes. This endpoint is disabled outside the synthetic development API; it is not a production binding flow.
-4. For the available personal demo, start the bot with `TELEGRAM_BOT_TOKEN` and use `/start` in a private chat. It does not send check-ins to the dashboard. Never collect group messages without explicit company and participant consent.
-
-## Docker Compose
-
-The repository includes a Node and Python Dockerfile. The web service is available at <http://127.0.0.1:8787>; its SQLite database and server key persist in the named `vibebot_data` volume. The bot uses the internal API URL `http://web:8787` and has its own `vibebot_bot_data` volume for its pause marker; it never mounts or accesses the SQLite volume.
+Start the web app and API:
 
 ```sh
-docker compose up --build web
+docker compose up --build
 ```
 
 For the personal bot demo, set `TELEGRAM_BOT_TOKEN` in `.env`, then run:
@@ -75,24 +67,27 @@ For the personal bot demo, set `TELEGRAM_BOT_TOKEN` in `.env`, then run:
 docker compose --profile bot-demo up --build
 ```
 
-The bot profile does not make the unfinished production group-binding workflow available. For a self-hosted Ollama server in Docker Desktop, set `LLM_BASE_URL=http://host.docker.internal:11434/v1` in `.env`.
+The Node service owns SQLite storage in a persistent volume. The bot communicates over the Compose network and does not access the database directly. Compose does not enable the unfinished production group-binding workflow.
 
 ## Architecture
 
 ```text
-Telegram → Python (aiogram) → Node API → SQLite → React web dashboard
+Telegram → Python / aiogram → Node.js API → SQLite
+                                  ↑
+                           React web app
 ```
 
-The Node API owns persistence, authorization, consent checks, and aggregation. The bot communicates over HTTP and must not access SQLite directly. The React app calls the Node API. In the current prototype, the Python bot's private demo works, and a synthetic Telegram API exists for local QA; real group ingestion and production binding are not yet ready.
+React provides the web UI; Node.js owns the API, consent checks, aggregation, and SQLite persistence. The Python/aiogram bot is a separate HTTP client and never connects to SQLite. Current Telegram group flows are synthetic/local QA only; the private polling demo is not connected to team analytics.
 
-## Checks
+## Development checks
 
 ```sh
+npm run doctor
 npm run check
 npm test
 ```
 
-Python bot checks:
+Python checks:
 
 ```sh
 python -m unittest discover -s bot/tests -v
@@ -101,4 +96,4 @@ python -m bot --check
 
 ## License
 
-Vibee is distributed under the [MIT License](LICENSE).
+Distributed under the [MIT License](LICENSE).
