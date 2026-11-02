@@ -103,6 +103,16 @@ class TelegramIntake:
         """Обновляет состояние привязки после паузы или смены согласий."""
         self._consent = replace(consent, active=False) if self._pause_state.stage != "clear" else consent
 
+    def is_active_chat(self, chat_id: int) -> bool:
+        """Разрешает предварительную обработку только для активной привязки."""
+        return type(chat_id) is int and self._consent.active and chat_id == self._consent.chat_id
+
+    def is_rate_limited(self, sender_id: int) -> bool:
+        """Проверяет квоту отправителя до затратной обработки, например Whisper."""
+        now = monotonic()
+        self._prune_rate_events(now)
+        return len(self._rate_timestamps.get(sender_id, ())) >= self.RATE_LIMIT
+
     def stop_after_transport_gap(self) -> None:
         """Не передавать новые тексты после неизвестного результата доставки."""
         self._consent = replace(self._consent, active=False)

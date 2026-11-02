@@ -1,4 +1,4 @@
-"""Opt-in transcription of one voice message in a private Telegram chat."""
+"""Bounded local transcription for private consent flow and active intake chats."""
 import asyncio
 from contextlib import suppress
 from dataclasses import dataclass
@@ -47,7 +47,7 @@ class LocalWhisperProvider:
         try:
             output, _ = await asyncio.wait_for(process.communicate(audio), timeout=self.timeout)
             if process.returncode or len(output) > 16384:
-                raise VoiceError("Не удалось распознать голосовое. Проверьте формат и попробуйте /transcribe заново.")
+                raise VoiceError("Не удалось распознать голосовое. Проверьте формат и отправьте запись снова.")
             result = json.loads(output)
             text = result.get("text") if isinstance(result, dict) else None
             if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT:
@@ -110,10 +110,53 @@ class VoiceTranscription:
 
     async def close(self):
         tasks = list(self.jobs.values())
-        for user in list(self.consents):
+        for user in set(self.consents) | set(self.jobs):
             self.cancel(user)
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def transcribe_for_intake(self, *, user_id, sent_at, voice, download):
+        """Transcribe audio only after the caller confirms an active group binding.
+
+        Unlike the separate private /transcribe flow, authorization for this path
+        comes from the active server-backed Telegram intake consent snapshot.
+        """
+        if (type(sent_at) is not int or not -30 <= self.epoch_clock() - sent_at <= 60):
+            return None
+        size, duration, mime = voice.file_size, voice.duration, voice.mime_type
+        if (type(size) is not int or not 1 <= size <= MAX_BYTES
+                or type(duration) is not int or not 1 <= duration <= MAX_SECONDS or mime != "audio/ogg"):
+            raise VoiceError("Нужно голосовое Ogg/Opus до 60 секунд и 2 МиБ.")
+        if self.jobs:
+            raise VoiceError("Распознавание уже выполняется. Дождитесь результата и отправьте запись снова.")
+
+        async def work():
+            with LimitedAudio() as buffer:
+                await asyncio.wait_for(download(buffer), timeout=15)
+                audio = buffer.getvalue()
+            if not audio or len(audio) != size or not audio.startswith(b"OggS"):
+                raise VoiceError("Не удалось проверить формат или размер голосового.")
+            text = await self.provider.transcribe(audio)
+            if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT:
+                raise VoiceError("Речь не распознана или текст слишком длинный.")
+            if not -30 <= self.epoch_clock() - sent_at <= 60:
+                return None
+            return text.strip()
+
+        task = asyncio.create_task(work())
+        self.jobs[user_id] = task
+        try:
+            return await task
+        except asyncio.CancelledError:
+            if asyncio.current_task().cancelling():
+                raise
+            return None
+        except VoiceError:
+            raise
+        except Exception:
+            raise VoiceError("Не удалось обработать голосовое. Попробуйте отправить запись ещё раз.") from None
+        finally:
+            self.jobs.pop(user_id, None)
 
     async def recognize(self, *, user_id, chat_id, chat_type, sent_at, voice, download):
         self.expire()
