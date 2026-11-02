@@ -53,6 +53,10 @@ class HttpTransport:
         """Передаёт только контрактные поля и отображает ответы API."""
         fields = ("eventId", "expectedRevision", "chatId", "messageId", "senderId", "sentAt", "text")
         payload = {field: event[field] for field in fields}
+        text = payload["text"]
+        if not isinstance(text, str):
+            raise TransportError("Telegram event text must be a string")
+        payload["text"] = text[:4096]
         url = f"{self._base_url}/api/bot/v1/bindings/{self._binding_id}/events"
         try:
             sent_at = datetime.fromisoformat(str(payload["sentAt"]).replace("Z", "+00:00"))
