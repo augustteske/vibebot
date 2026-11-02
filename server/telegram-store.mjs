@@ -732,6 +732,7 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
         const { row } = publishedPeriod(currentActor, id, periodId, false,
           snapshot.revision, snapshot.profileVersion)
         return { ...cardIdentity(id, row),
+          source: recommendationProvider.source === 'ai' && content ? 'ai' : 'template',
           ...(content ?? templateRecommendationProvider.generate({ metrics: snapshot.metrics })) }
       })
     },
