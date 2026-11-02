@@ -16,11 +16,13 @@ from .flow import CheckinFlow, QUESTIONS
 from .http_transport import HttpTransport, TransportError
 from .intake import ConsentSnapshot, TelegramIntake
 from .pause_state import PauseState
+from .voice import LocalWhisperProvider, VoiceTranscription, install_voice_handlers
 
 
-def create_dispatcher(intake: TelegramIntake | None = None) -> Dispatcher:
+def create_dispatcher(intake: TelegramIntake | None = None, voice: VoiceTranscription | None = None) -> Dispatcher:
     dispatcher = Dispatcher()
     flow = CheckinFlow()
+    install_voice_handlers(dispatcher, voice)
 
     async def question(message, nonce, step):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
@@ -39,12 +41,16 @@ def create_dispatcher(intake: TelegramIntake | None = None) -> Dispatcher:
             InlineKeyboardButton(text="Согласен на демо", callback_data=f"consent:{nonce}:yes"),
             InlineKeyboardButton(text="Отказаться", callback_data=f"consent:{nonce}:no"),
         ]])
-        await message.answer("Vibee · демо-прототип. Собираем только три оценки 1–5. Черновик действует пять минут; очистка памяти выполняется каждые 15 секунд, а после завершения или /stop — сразу. Тексты переписки не анализируются. Передача на веб-платформу и ИИ пока не подключены; результаты руководителю не отправляются. Это личный тест, корпоративный модуль ещё в разработке.", reply_markup=keyboard)
+        await message.answer("Vibee · демо-прототип. Собираем только три оценки 1–5. Черновик действует пять минут; очистка памяти выполняется каждые 15 секунд, а после завершения или /stop — сразу. Тексты переписки не анализируются. Передача чек-инов на веб-платформу и их ИИ-анализ пока не подключены; результаты руководителю не отправляются. Это личный тест, корпоративный модуль ещё в разработке. Отдельный режим расшифровки голосового: /transcribe — со своим согласием.", reply_markup=keyboard)
 
     @dispatcher.message(Command("stop"))
     async def stop(message: Message):
+        if message.chat.type != "private" or message.from_user is None:
+            return
         flow.cancel(message.from_user.id)
-        await message.answer("Участие отменено, черновик удалён из памяти бота. Сообщения в Telegram автоматически не удаляются.")
+        if voice is not None:
+            voice.cancel(message.from_user.id)
+        await message.answer("Участие отменено, черновик удалён. Разрешение на расшифровку отозвано, текущая обработка останавливается. Сообщения в Telegram автоматически не удаляются.")
 
     @dispatcher.message(F.text)
     async def intake_message(message: Message) -> None:
@@ -154,12 +160,16 @@ async def main():
             company_accepted=True,
         ), transport, PauseState(pause_path))
         await intake.reconcile_pause()
-    dispatcher, flow = create_dispatcher(intake)
+    model_dir = os.environ.get("VIBEE_TRANSCRIPTION_MODEL_DIR")
+    voice = VoiceTranscription(LocalWhisperProvider(model_dir)) if model_dir else None
+    dispatcher, flow = create_dispatcher(intake, voice)
 
     async def cleanup():
         while True:
             await asyncio.sleep(15)
             flow.expire()
+            if voice is not None:
+                voice.expire()
             if intake is not None:
                 await intake.reconcile_pause()
 
@@ -172,6 +182,8 @@ async def main():
         with suppress(asyncio.CancelledError):
             await task
         flow.drafts.clear()
+        if voice is not None:
+            await voice.close()
         if transport is not None:
             await transport.close()
 
