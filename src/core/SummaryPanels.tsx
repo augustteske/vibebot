@@ -70,15 +70,20 @@ export function SummaryPanels() {
     return <section className="panel telegram-summary-state" role="alert"><h2>Анализ чата временно недоступен</h2></section>
   }
   if (view.status !== 'published') return null
+  const metrics = {
+    outsideHoursPercent: view.metrics.outsideHoursPercent,
+    participationEvenness: view.metrics.participationEvenness,
+    recognitionPercent: view.metrics.recognitionPercent,
+  }
   if (!recommendation) {
     return <section className="panel telegram-summary-state" role="alert">
       <h2>Рекомендация для периода недоступна</h2>
-      <InsightsWidget state="published" metrics={view.metrics} periodLabel={periodLabel(view)} demo={view.demo}/>
+      <InsightsWidget state="published" metrics={metrics} periodLabel={periodLabel(view)} demo={view.demo}/>
     </section>
   }
 
   return <div className="telegram-summary">
-    <InsightsWidget state="published" metrics={view.metrics} periodLabel={periodLabel(view)} demo={view.demo}/>
+    <InsightsWidget state="published" metrics={metrics} periodLabel={periodLabel(view)} demo={view.demo}/>
     <ActionRecommendationCard
       observation={recommendation.observation}
       explanation={recommendation.explanation}

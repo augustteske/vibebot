@@ -1,4 +1,7 @@
-import './InsightsWidget.css';
+import { lazy, Suspense } from 'react'
+import './InsightsWidget.css'
+
+const InsightsCharts = lazy(() => import('./InsightsCharts').then(module => ({ default: module.InsightsCharts })))
 
 export interface InsightsMetrics {
   outsideHoursPercent: number;
@@ -59,7 +62,6 @@ export function InsightsWidget({ state, metrics, teamProfile, periodLabel, demo 
     : teamProfile === 'formal'
       ? 'Возможно, изменились ожидания по доступности.'
       : 'Причины изменений неизвестны без контекста команды.';
-
   return (
     <div className="iw-container">
       <div className="iw-header">
@@ -72,12 +74,16 @@ export function InsightsWidget({ state, metrics, teamProfile, periodLabel, demo 
       <div className="iw-grid">
         <div className="iw-card">
           <h3>Общение вне рабочих часов</h3>
-          <p className="iw-value">{metrics.outsideHoursPercent}%</p>
+          <Suspense fallback={<div className="iw-chart iw-chart--donut" aria-hidden="true" />}>
+            <InsightsCharts metric="outsideHoursPercent" value={metrics.outsideHoursPercent} />
+          </Suspense>
           <p className="iw-method">Ограничение: {interpretation}</p>
         </div>
         <div className="iw-card">
           <h3>Равномерность участия</h3>
-          <p className="iw-value">{metrics.participationEvenness}%</p>
+          <Suspense fallback={<div className="iw-chart" aria-hidden="true" />}>
+            <InsightsCharts metric="participationEvenness" value={metrics.participationEvenness} />
+          </Suspense>
           <p className="iw-method">Ограничение: Не измеряет вклад людей.</p>
         </div>
         <div className="iw-card">
