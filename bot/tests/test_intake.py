@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import httpx
 
@@ -118,6 +119,28 @@ class IntakeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["sentAt"], "2026-10-31T08:00:00.000Z")
         self.assertIn("мой id 12345", payload["text"])
 
+    async def test_rate_limit_drops_eleventh_message_for_sender(self):
+        transport = FakeTransport()
+        intake = TelegramIntake(full_consent(), transport)
+
+        results = [
+            await intake.process(telegram_update(message_id=message_id))
+            for message_id in range(1, 12)
+        ]
+
+        self.assertTrue(all(result["result"] == "accepted" for result in results[:10]))
+        self.assertIsNone(results[10])
+        self.assertEqual(len(transport.events), 10)
+
+    async def test_long_message_is_truncated_to_telegram_limit(self):
+        transport = FakeTransport()
+        intake = TelegramIntake(full_consent(), transport)
+
+        result = await intake.process(telegram_update(text="x" * 5000))
+
+        self.assertEqual(result["result"], "accepted")
+        self.assertEqual(len(transport.events[0]["text"]), 4096)
+
     async def test_non_text_edits_empty_text_and_bot_senders_are_dropped(self):
         transport = FakeTransport()
         intake = TelegramIntake(full_consent(), transport)
@@ -189,6 +212,51 @@ class IntakeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await intake.process(telegram_update(message_id=8)))
         self.assertEqual(len(transport.events), 1)
 
+    async def test_new_active_status_resumes_intake_after_pause(self):
+        transport = FakeTransport(result="paused")
+        intake = TelegramIntake(full_consent(), transport)
+
+        self.assertEqual((await intake.process(telegram_update()))["result"], "paused")
+        self.assertIsNone(await intake.process(telegram_update(message_id=8)))
+        self.assertEqual(len(transport.events), 1)
+
+        transport.result = "accepted"
+        transport.status = BindingStatus("active", 12, "policy-2", 4)
+        status = await intake.get_binding_status()
+
+        self.assertEqual(status.phase, "active")
+        self.assertEqual((await intake.process(telegram_update(message_id=9)))["result"], "accepted")
+        self.assertEqual(len(transport.events), 2)
+
+    async def test_paused_intake_refreshes_status_at_most_once_per_interval(self):
+        transport = FakeTransport(result="paused")
+        transport.status = BindingStatus("active", 12, "policy-2", 4)
+        intake = TelegramIntake(full_consent(), transport)
+
+        with patch("bot.intake.monotonic", side_effect=[100.0, 101.0, 131.0, 132.0]):
+            self.assertEqual((await intake.process(telegram_update()))["result"], "paused")
+            self.assertIsNone(await intake.process(telegram_update(message_id=8)))
+            self.assertEqual(transport.status_requests, [])
+            # The first message after the pause refresh interval triggers a status
+            # read but is itself discarded because it arrived while paused.
+            self.assertIsNone(await intake.process(telegram_update(message_id=9)))
+            self.assertEqual(transport.status_requests, ["binding-test"])
+            transport.result = "accepted"
+            self.assertEqual((await intake.process(telegram_update(message_id=10)))["result"], "accepted")
+
+        self.assertEqual(len(transport.events), 2)
+
+    async def test_nonactive_status_keeps_intake_paused(self):
+        transport = FakeTransport(result="paused")
+        intake = TelegramIntake(full_consent(), transport)
+        self.assertEqual((await intake.process(telegram_update()))["result"], "paused")
+
+        transport.status = BindingStatus("awaiting_consents", 12, "policy-2", 4)
+        await intake.get_binding_status()
+
+        self.assertIsNone(await intake.process(telegram_update(message_id=8)))
+        self.assertEqual(len(transport.events), 1)
+
     async def test_unknown_sender_is_sent_for_server_authoritative_check(self):
         transport = FakeTransport()
         result = await TelegramIntake(full_consent(), transport).process(
@@ -228,6 +296,29 @@ class HttpTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(headers["Content-Type"], "application/json")
         self.assertNotIn("unexpected", sent_json)
         self.assertEqual(result["result"], "accepted")
+
+    async def test_post_truncates_long_text_to_contract_limit(self):
+        response = httpx.Response(200, json={"result": "accepted", "revision": 3})
+        client = FakeHttpClient(response=response)
+        transport = HttpTransport("http://localhost:8787", "binding-1", "token", client)
+        await transport.send_text({
+            "eventId": "evt", "expectedRevision": 2, "chatId": "-1001", "messageId": "5",
+            "senderId": "11", "sentAt": "2026-10-31T08:00:00.000Z", "text": "x" * 5000,
+        })
+
+        self.assertEqual(len(client.calls[0][3]["text"]), 4096)
+
+    async def test_post_returns_paused_server_result(self):
+        response = httpx.Response(200, json={"result": "paused", "revision": 3})
+        client = FakeHttpClient(response=response)
+        transport = HttpTransport("http://localhost:8787", "binding-1", "token", client)
+
+        result = await transport.send_text({
+            "eventId": "evt", "expectedRevision": 2, "chatId": "-1001", "messageId": "5",
+            "senderId": "11", "sentAt": "2026-10-31T08:00:00.000Z", "text": "x",
+        })
+
+        self.assertEqual(result["result"], "paused")
 
     async def test_http_error_mapping_and_network_errors(self):
         stale_client = FakeHttpClient(httpx.Response(409, json={"error": {"code": "STALE_REVISION"}}))
