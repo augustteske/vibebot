@@ -4,9 +4,23 @@ services:
     ports:
       - "127.0.0.1:8787:8787"
     environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 8787
+      VIBEBOT_DATA_DIR: /app/.data
       COOKIE_SECURE: "false"
+      APP_ORIGIN: "${APP_ORIGIN:-http://127.0.0.1:8787}"
+      LLM_PROVIDER: "${LLM_PROVIDER:-template}"
+      LLM_API_KEY: "${LLM_API_KEY:-}"
+      LLM_BASE_URL: "${LLM_BASE_URL:-}"
+      LLM_MODEL: "${LLM_MODEL:-}"
     volumes:
       - vibebot_data:/app/.data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
   bot:
     profiles: [bot-demo]
@@ -15,6 +29,17 @@ services:
       dockerfile: bot/Dockerfile
     environment:
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+      VIBEE_API_BASE_URL: http://web:8787
+      VIBEE_BOT_TOKEN: "${VIBEE_BOT_TOKEN:-}"
+      VIBEE_BINDING_ID: "${VIBEE_BINDING_ID:-}"
+      VIBEE_CHAT_ID: "${VIBEE_CHAT_ID:-}"
+      VIBEBOT_DATA_DIR: /app/.data
+    volumes:
+      - vibebot_bot_data:/app/.data
+    depends_on:
+      web:
+        condition: service_healthy
     restart: "no"
 volumes:
   vibebot_data:
+  vibebot_bot_data:

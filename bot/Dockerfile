@@ -4,6 +4,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 COPY bot/requirements.txt ./bot/requirements.txt
 RUN pip install --no-cache-dir -r bot/requirements.txt
 COPY bot ./bot
-RUN useradd --create-home botuser
+RUN useradd --create-home botuser && mkdir -p /app/.data && chown -R botuser:botuser /app
 USER botuser
 CMD ["python", "-m", "bot"]

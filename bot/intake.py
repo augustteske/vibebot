@@ -8,6 +8,8 @@ from time import monotonic
 from typing import Literal, Protocol
 from uuid import uuid4
 
+from .pause_state import PauseState
+
 
 @dataclass(frozen=True)
 class ConsentSnapshot:
@@ -72,6 +74,12 @@ class TextTransport(Protocol):
     async def get_summary(self, binding_id: str) -> CommunicationView | dict[str, object]:
         """Возвращает сводку общения или ошибку транспорта."""
 
+    async def pause_transport_gap(self, expected_revision: int) -> BindingStatus:
+        """Confirms that the server stopped the binding after uncertain delivery."""
+
+    async def pause_message_edit(self, expected_revision: int, request_id: str) -> BindingStatus:
+        """Confirms the scoped edit pause, replaying the same request after lost ACK."""
+
 
 class TelegramIntake:
     """Пропускает только новые текстовые события при полном согласии."""
@@ -81,8 +89,9 @@ class TelegramIntake:
     MAX_MESSAGE_LENGTH = 4096
     PAUSED_STATUS_REFRESH_SECONDS = 30.0
 
-    def __init__(self, consent: ConsentSnapshot, transport: TextTransport) -> None:
-        self._consent = consent
+    def __init__(self, consent: ConsentSnapshot, transport: TextTransport, pause_state: PauseState | None = None) -> None:
+        self._pause_state = pause_state or PauseState()
+        self._consent = replace(consent, active=False) if self._pause_state.stage != "clear" else consent
         self._transport = transport
         self._seen_messages: set[tuple[int, int]] = set()
         self._rate_timestamps: dict[int, deque[float]] = {}
@@ -92,7 +101,7 @@ class TelegramIntake:
 
     def update_consent(self, consent: ConsentSnapshot) -> None:
         """Обновляет состояние привязки после паузы или смены согласий."""
-        self._consent = consent
+        self._consent = replace(consent, active=False) if self._pause_state.stage != "clear" else consent
 
     def is_active_chat(self, chat_id: int) -> bool:
         """Разрешает предварительную обработку только для активной привязки."""
@@ -109,20 +118,70 @@ class TelegramIntake:
         self._consent = replace(self._consent, active=False)
         self._server_paused = False
         self._last_status_refresh = None
+        self._pause_state.need_pause()
+
+    def stop_after_message_edit(self, chat_id: int) -> bool:
+        """Block a bound group immediately; never retain or forward the edited text."""
+        if chat_id != self._consent.chat_id:
+            return False
+        self._consent = replace(self._consent, active=False)
+        self._pause_state.need_pause("message_edit")
+        return True
+
+    async def reconcile_pause(self) -> bool:
+        """Confirm server pause first; later accept only a distinct manual resume revision."""
+        from .http_transport import StaleRevisionError, TransportError
+
+        if self._pause_state.stage == "clear":
+            return False
+        try:
+            status = await self.get_binding_status()
+            if isinstance(status, dict):
+                return False
+            if self._pause_state.stage == "needed":
+                if self._pause_state.reason == "message_edit":
+                    self._pause_state.set_request_revision(status.revision)
+                    try:
+                        status = await self._transport.pause_message_edit(
+                            self._pause_state.request_revision, self._pause_state.request_id)
+                    except StaleRevisionError:
+                        self._pause_state.retry_message_edit()
+                        return False
+                elif status.phase != "paused":
+                    status = await self._transport.pause_transport_gap(status.revision)
+                self._pause_state.confirmed(status.revision)
+                self._consent = replace(self._consent, active=False)
+                self._server_paused = True
+                self._last_status_refresh = monotonic()
+                return False
+            if (status.phase == "active" and self._pause_state.pause_revision is not None
+                and status.revision > self._pause_state.pause_revision):
+                # The server only permits explicit resume with current full consent.
+                self._consent = replace(self._consent, active=True, revision=status.revision,
+                    policy_version=status.policyVersion, consent_policy_version=status.policyVersion,
+                    roster_version=status.rosterVersion)
+                self._pause_state.clear()
+                self._server_paused = False
+                self._last_status_refresh = None
+                return True
+        except TransportError:
+            return False
+        return False
 
     async def get_binding_status(self) -> BindingStatus | dict[str, object]:
         """Обновляет статус с сервера; активирует intake только по свежему active."""
         status = await self._transport.get_binding_status(self._consent.binding_id)
         if isinstance(status, BindingStatus):
+            pause_pending = self._pause_state.stage != "clear"
             self._consent = replace(
                 self._consent,
-                active=status.phase == "active",
+                active=status.phase == "active" and not pause_pending,
                 revision=status.revision,
                 policy_version=status.policyVersion,
                 consent_policy_version=status.policyVersion,
                 roster_version=status.rosterVersion,
             )
-            self._server_paused = status.phase != "active"
+            self._server_paused = status.phase != "active" or pause_pending
         return status
 
     async def get_summary(self) -> CommunicationView | dict[str, object]:
@@ -198,17 +257,24 @@ class TelegramIntake:
             "sentAt": sent_at_iso,
             "text": text[: self.MAX_MESSAGE_LENGTH],
         }
+        from .http_transport import DeliveryUncertainError, PausedError, StaleRevisionError
+
         if sender_timestamps is None:
             sender_timestamps = deque()
             self._rate_timestamps[sender_id] = sender_timestamps
         sender_timestamps.append(now)
         self._recent_rate_events.append((now, sender_id))
-        from .http_transport import PausedError, StaleRevisionError
 
         try:
             result = await self._transport.send_text(payload)
+        except DeliveryUncertainError:
+            self.stop_after_transport_gap()
+            await self.reconcile_pause()
+            logging.getLogger(__name__).warning("Telegram intake requires a confirmed server pause")
+            return {"result": "paused"}
         except StaleRevisionError:
-            result = await self.retry_with_new_revision(payload)
+            self._consent = replace(self._consent, active=False)
+            return {"error": {"code": "STALE_REVISION"}}
         except PausedError:
             self._consent = replace(self._consent, active=False)
             self._server_paused = True
@@ -217,7 +283,8 @@ class TelegramIntake:
             logging.getLogger(__name__).warning("Telegram intake paused after server rejected event delivery")
             return {"result": "paused"}
         if result.get("error", {}).get("code") == "STALE_REVISION":
-            result = await self.retry_with_new_revision(payload)
+            self._consent = replace(self._consent, active=False)
+            return result
         if result.get("result") == "paused":
             self._consent = replace(self._consent, active=False)
             self._server_paused = True
@@ -226,7 +293,6 @@ class TelegramIntake:
         if result.get("result") in {"accepted", "duplicate", "paused"}:
             self._seen_messages.add(message_key)
         return result
-
     def _prune_rate_events(self, now: float) -> None:
         """Удаляет timestamps старше окна, сохраняя только актуальные sender ID."""
         while self._recent_rate_events and now - self._recent_rate_events[0][0] >= self.RATE_WINDOW_SECONDS:

@@ -1,10 +1,23 @@
 import unittest
+from datetime import datetime, timezone
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import httpx
 
-from bot.http_transport import HttpTransport, PausedError, StaleRevisionError, TransportError
+from bot.http_transport import DeliveryUncertainError, HttpTransport, PausedError, StaleRevisionError, TransportError
 from bot.intake import BindingStatus, CommunicationView, ConsentSnapshot, TelegramIntake
+from bot.pause_state import PauseState
+from bot.__main__ import create_dispatcher
+
+
+FIXED_NOW = lambda: datetime(2026, 10, 31, 8, tzinfo=timezone.utc)
+
+
+async def no_sleep(_delay):
+    return None
 
 
 class FakeTransport:
@@ -15,6 +28,8 @@ class FakeTransport:
         self.responses = list(responses or [])
         self.status_requests = []
         self.summary_requests = []
+        self.pause_requests = []
+        self.edit_pause_requests = []
 
     async def send_text(self, event):
         self.events.append(event.copy())
@@ -27,21 +42,39 @@ class FakeTransport:
 
     async def get_binding_status(self, binding_id):
         self.status_requests.append(binding_id)
+        if isinstance(self.status, Exception):
+            raise self.status
         return self.status
 
     async def get_summary(self, binding_id):
         self.summary_requests.append(binding_id)
         return CommunicationView("open")
 
+    async def pause_transport_gap(self, expected_revision):
+        self.pause_requests.append(expected_revision)
+        self.status = BindingStatus("paused", expected_revision + 1, self.status.policyVersion, self.status.rosterVersion)
+        return self.status
+
+    async def pause_message_edit(self, expected_revision, request_id):
+        self.edit_pause_requests.append((expected_revision, request_id))
+        self.status = BindingStatus("paused", expected_revision + 1, self.status.policyVersion, self.status.rosterVersion)
+        return self.status
+
 
 class FakeHttpClient:
-    def __init__(self, response=None, error=None):
+    def __init__(self, response=None, error=None, sequence=None):
         self.response = response
         self.error = error
+        self.sequence = list(sequence or [])
         self.calls = []
 
     async def post(self, url, headers, json):
         self.calls.append(("POST", url, headers, json))
+        if self.sequence:
+            item = self.sequence.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
         if self.error:
             raise self.error
         return self.response
@@ -84,6 +117,84 @@ def telegram_update(**changes):
 
 
 class IntakeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_edited_message_handler_pauses_only_bound_group_without_forwarding_text(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "pause.json"
+            transport = FakeTransport(status=BindingStatus("active", 9, "policy-2", 4))
+            intake = TelegramIntake(full_consent(), transport, PauseState(path))
+            dispatcher, _ = create_dispatcher(intake)
+            self.assertIn("edited_message", dispatcher.resolve_used_update_types())
+            handler = dispatcher.edited_message.handlers[0].callback
+            message = lambda chat_id, kind="supergroup": SimpleNamespace(
+                chat=SimpleNamespace(id=chat_id, type=kind), text="edited secret")
+            await handler(message(-999))
+            await handler(message(-100123, "private"))
+            self.assertEqual(transport.edit_pause_requests, [])
+            await handler(message(-100123))
+            self.assertEqual(len(transport.edit_pause_requests), 1)
+            self.assertEqual(PauseState(path).stage, "awaiting_resume")
+            self.assertNotIn("edited secret", path.read_text(encoding="utf-8"))
+            self.assertEqual(transport.events, [])
+            self.assertIsNone(await intake.process(telegram_update(message_id=8)))
+            self.assertFalse(await intake.reconcile_pause())
+            transport.status = BindingStatus("active", 11, "policy-2", 4)
+            self.assertTrue(await intake.reconcile_pause())
+            self.assertEqual((await intake.process(telegram_update(message_id=9)))["result"], "accepted")
+
+    async def test_edit_pause_marker_survives_network_failure_and_restart(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "pause.json"
+            transport = FakeTransport(status=TransportError("offline"))
+            intake = TelegramIntake(full_consent(), transport, PauseState(path))
+            self.assertTrue(intake.stop_after_message_edit(-100123))
+            self.assertFalse(await intake.reconcile_pause())
+            self.assertEqual(PauseState(path).reason, "message_edit")
+            self.assertIsNone(await intake.process(telegram_update()))
+            restored = TelegramIntake(full_consent(), transport, PauseState(path))
+            self.assertIsNone(await restored.process(telegram_update(message_id=8)))
+            transport.status = BindingStatus("active", 9, "policy-2", 4)
+            self.assertFalse(await restored.reconcile_pause())
+            self.assertEqual(PauseState(path).stage, "awaiting_resume")
+            self.assertEqual(len(transport.edit_pause_requests), 1)
+            self.assertIsNone(await restored.process(telegram_update(message_id=9)))
+
+    async def test_gap_marker_blocks_until_server_pause_and_distinct_manual_resume(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "pause.json"
+            transport = FakeTransport(status=BindingStatus("active", 9, "policy-2", 4))
+            intake = TelegramIntake(full_consent(), transport, PauseState(path))
+            intake.stop_after_transport_gap()
+            self.assertTrue(path.exists())
+            self.assertNotIn("Синтетический", path.read_text(encoding="utf-8"))
+            self.assertIsNone(await intake.process(telegram_update()))
+            self.assertEqual(transport.events, [])
+            transport.status = TransportError("offline")
+            self.assertFalse(await intake.reconcile_pause())
+            self.assertIsNone(await intake.process(telegram_update(message_id=8)))
+            transport.status = BindingStatus("active", 9, "policy-2", 4)
+            self.assertFalse(await intake.reconcile_pause())
+            self.assertEqual(transport.pause_requests, [9])
+            self.assertEqual(PauseState(path).stage, "awaiting_resume")
+            self.assertIsNone(await intake.process(telegram_update(message_id=9)))
+            self.assertFalse(await intake.reconcile_pause())  # Paused status is not a resume.
+            transport.status = BindingStatus("active", 10, "policy-2", 4)
+            self.assertFalse(await intake.reconcile_pause())  # Same revision cannot prove manual resume.
+            transport.status = BindingStatus("active", 11, "policy-2", 4)
+            self.assertTrue(await intake.reconcile_pause())
+            self.assertFalse(path.exists())
+            self.assertEqual((await intake.process(telegram_update(message_id=10)))["result"], "accepted")
+
+    async def test_uncertain_delivery_marks_durable_gap_without_new_events(self):
+        with TemporaryDirectory() as directory:
+            transport = FakeTransport(status=TransportError("offline"), responses=[DeliveryUncertainError("timeout")])
+            path = Path(directory) / "pause.json"
+            intake = TelegramIntake(full_consent(), transport, PauseState(path))
+            self.assertEqual((await intake.process(telegram_update(text="secret body")))["result"], "paused")
+            self.assertEqual(PauseState(path).stage, "needed")
+            self.assertNotIn("secret body", path.read_text(encoding="utf-8"))
+            self.assertIsNone(await intake.process(telegram_update(message_id=8)))
+            self.assertEqual(len(transport.events), 1)
+
     async def test_inactive_local_status_blocks_new_messages(self):
         transport = FakeTransport()
         intake = TelegramIntake(full_consent(active=False), transport)
@@ -163,7 +274,7 @@ class IntakeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await intake.process(telegram_update(message_id=8, text=secret_text)))
         self.assertEqual(len(transport.events), 1)
 
-    async def test_stale_revision_fetches_status_and_retries_with_new_event_id(self):
+    async def test_stale_revision_never_resends_old_text_with_new_revision(self):
         transport = FakeTransport(responses=[
             {"error": {"code": "STALE_REVISION"}},
             {"eventId": "retry-id", "result": "accepted", "revision": 11},
@@ -172,10 +283,10 @@ class IntakeTests(unittest.IsolatedAsyncioTestCase):
 
         result = await intake.process(telegram_update())
 
-        self.assertEqual(result["result"], "accepted")
-        self.assertEqual(transport.status_requests, ["binding-test"])
-        self.assertEqual(transport.events[1]["expectedRevision"], 10)
-        self.assertNotEqual(transport.events[0]["eventId"], transport.events[1]["eventId"])
+        self.assertEqual(result["error"]["code"], "STALE_REVISION")
+        self.assertEqual(transport.status_requests, [])
+        self.assertEqual(len(transport.events), 1)
+        self.assertIsNone(await intake.process(telegram_update(message_id=8)))
 
     async def test_paused_binding_status_does_not_retry_stale_event(self):
         transport = FakeTransport(
@@ -184,9 +295,9 @@ class IntakeTests(unittest.IsolatedAsyncioTestCase):
         )
         intake = TelegramIntake(full_consent(), transport)
         result = await intake.process(telegram_update())
-        self.assertEqual(result["result"], "paused")
+        self.assertEqual(result["error"]["code"], "STALE_REVISION")
         self.assertEqual(len(transport.events), 1)
-        self.assertEqual(transport.status_requests, ["binding-test"])
+        self.assertEqual(transport.status_requests, [])
 
     async def test_status_and_summary_use_fake_transport(self):
         transport = FakeTransport()
@@ -267,20 +378,35 @@ class IntakeTests(unittest.IsolatedAsyncioTestCase):
 
 
 class HttpTransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_retries_retryable_failures_with_identical_event_id_and_stops_at_three(self):
+        responses = [httpx.ReadTimeout("lost"), httpx.Response(429, headers={"Retry-After": "1"}),
+            httpx.Response(200, json={"eventId": "evt", "result": "duplicate", "revision": 9})]
+        client = FakeHttpClient(sequence=responses)
+        transport = HttpTransport("http://localhost:8787", "b", "token", client, now=FIXED_NOW, sleep=no_sleep)
+        event = {"eventId": "evt", "expectedRevision": 9, "chatId": "-1001", "messageId": "1",
+            "senderId": "11", "sentAt": "2026-10-31T08:00:00.000Z", "text": "private"}
+        self.assertEqual((await transport.send_text(event))["result"], "duplicate")
+        self.assertEqual(len(client.calls), 3)
+        self.assertTrue(all(call[3] == event for call in client.calls))
+        failed = FakeHttpClient(sequence=[httpx.Response(500), httpx.Response(502), httpx.Response(503)])
+        with self.assertRaises(DeliveryUncertainError):
+            await HttpTransport("http://localhost:8787", "b", "token", failed, now=FIXED_NOW, sleep=no_sleep).send_text(event)
+        self.assertEqual(len(failed.calls), 3)
+
     async def test_get_binding_status_parses_the_server_snapshot(self):
         response = httpx.Response(200, json={
             "bindingId": "binding-1", "phase": "active", "revision": 9,
             "policyVersion": "policy-2", "rosterVersion": 4,
         })
         client = FakeHttpClient(response=response)
-        transport = HttpTransport("http://localhost:8787", "binding-1", "token", client)
+        transport = HttpTransport("http://localhost:8787", "binding-1", "token", client, now=FIXED_NOW)
         status = await transport.get_binding_status()
         self.assertEqual(status, BindingStatus("active", 9, "policy-2", 4))
 
     async def test_post_uses_exact_contract_url_headers_and_fields(self):
         response = httpx.Response(200, json={"result": "accepted", "revision": 3})
         client = FakeHttpClient(response=response)
-        transport = HttpTransport("http://localhost:8787/", "bind/id", "secret", client=client)
+        transport = HttpTransport("http://localhost:8787/", "bind/id", "secret", client=client, now=FIXED_NOW)
         payload = {
             "eventId": "evt", "expectedRevision": 2, "chatId": "-1001", "messageId": "5",
             "senderId": "11", "sentAt": "2026-10-31T08:00:00.000Z", "text": "message",
@@ -300,7 +426,7 @@ class HttpTransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_post_truncates_long_text_to_contract_limit(self):
         response = httpx.Response(200, json={"result": "accepted", "revision": 3})
         client = FakeHttpClient(response=response)
-        transport = HttpTransport("http://localhost:8787", "binding-1", "token", client)
+        transport = HttpTransport("http://localhost:8787", "binding-1", "token", client, now=FIXED_NOW)
         await transport.send_text({
             "eventId": "evt", "expectedRevision": 2, "chatId": "-1001", "messageId": "5",
             "senderId": "11", "sentAt": "2026-10-31T08:00:00.000Z", "text": "x" * 5000,
@@ -311,7 +437,7 @@ class HttpTransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_post_returns_paused_server_result(self):
         response = httpx.Response(200, json={"result": "paused", "revision": 3})
         client = FakeHttpClient(response=response)
-        transport = HttpTransport("http://localhost:8787", "binding-1", "token", client)
+        transport = HttpTransport("http://localhost:8787", "binding-1", "token", client, now=FIXED_NOW)
 
         result = await transport.send_text({
             "eventId": "evt", "expectedRevision": 2, "chatId": "-1001", "messageId": "5",
@@ -323,28 +449,28 @@ class HttpTransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_http_error_mapping_and_network_errors(self):
         stale_client = FakeHttpClient(httpx.Response(409, json={"error": {"code": "STALE_REVISION"}}))
         with self.assertRaises(StaleRevisionError):
-            await HttpTransport("http://localhost:8787", "b", "t", stale_client).send_text({
+            await HttpTransport("http://localhost:8787", "b", "t", stale_client, now=FIXED_NOW).send_text({
                 "eventId": "e", "expectedRevision": 1, "chatId": "1", "messageId": "1",
                 "senderId": "1", "sentAt": "2026-10-31T08:00:00Z", "text": "x",
             })
 
         forbidden_client = FakeHttpClient(httpx.Response(403, json={"error": {"code": "FORBIDDEN"}}))
         with self.assertRaises(PausedError):
-            await HttpTransport("http://localhost:8787", "b", "t", forbidden_client).send_text({
+            await HttpTransport("http://localhost:8787", "b", "t", forbidden_client, now=FIXED_NOW).send_text({
                 "eventId": "e", "expectedRevision": 1, "chatId": "1", "messageId": "1",
                 "senderId": "1", "sentAt": "2026-10-31T08:00:00Z", "text": "x",
             })
 
         network_client = FakeHttpClient(error=httpx.ConnectError("offline"))
         with self.assertRaises(TransportError):
-            await HttpTransport("http://localhost:8787", "b", "t", network_client).send_text({
+            await HttpTransport("http://localhost:8787", "b", "t", network_client, now=FIXED_NOW, sleep=no_sleep).send_text({
                 "eventId": "e", "expectedRevision": 1, "chatId": "1", "messageId": "1",
                 "senderId": "1", "sentAt": "2026-10-31T08:00:00Z", "text": "x",
             })
 
         error_client = FakeHttpClient(httpx.Response(500, json={"error": {"code": "UNAVAILABLE"}}))
         with self.assertRaises(TransportError):
-            await HttpTransport("http://localhost:8787", "b", "t", error_client).send_text({
+            await HttpTransport("http://localhost:8787", "b", "t", error_client, now=FIXED_NOW, sleep=no_sleep).send_text({
                 "eventId": "e", "expectedRevision": 1, "chatId": "1", "messageId": "1",
                 "senderId": "1", "sentAt": "2026-10-31T08:00:00Z", "text": "x",
             })

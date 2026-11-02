@@ -1,71 +1,99 @@
-# Vibee
-Почувствовать команду. Сделать следующий шаг.
+<div align="center">
+  <img src="public/bee.svg" alt="Vibee bee mascot" width="112">
+  <h1>Vibee</h1>
+  <p><strong>Почувствовать команду. Сделать следующий шаг.</strong></p>
+  <p>
+    <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
+    <img alt="Node.js 24.x" src="https://img.shields.io/badge/Node.js-24.x%2B-339933?logo=node.js&logoColor=white">
+  </p>
+</div>
 
-Добровольный чек-ин → общий сигнал → предложение → договорённость → проверка пользы.
+Vibee — open-source прототип для бережной аналитики командной коммуникации. Он помогает смотреть на общие сигналы команды и обсуждать практические шаги, не оценивая отдельных людей.
 
-## Запуск
-Нужен Node.js 24.
+Подробнее о целях и текущих границах проекта — в [контексте проекта](docs/PROJECT_CONTEXT.md).
+
+## Features
+
+- **Telegram communication insights:** прототип API и UI для агрегированного обзора командной переписки; полный production-поток подключения групп пока не готов.
+- **Three aggregate metrics:** доля сообщений вне рабочих часов, равномерность участия и доля сообщений с благодарностью/признанием.
+- **Recommendations:** шаблонная рекомендация по умолчанию; опционально можно настроить Groq, OpenAI или Ollama. Внешнему LLM передаются только опубликованные метрики, не тексты чата и не личности.
+- **Privacy by design:** добровольное участие, проверка согласий и порог публикации агрегатов. Это ранний прототип, не медицинский инструмент, система оценки сотрудников или обещание полной анонимности.
+- **Python Telegram bot:** личное демо на aiogram; синтетический API доступен для локальной QA. Реальная групповая интеграция и production-привязка пока не готовы.
+
+## Quick Start
+
+### Web app and API
+
+Requirements: Node.js 24.x and npm. Python 3.12 is needed for the bot. Docker Compose v2 is optional.
+
 ```sh
 npm ci
+cp .env.example .env
 npm run dev
 ```
-Открыть http://127.0.0.1:5173. Одна команда запускает интерфейс и локальный сервер. Порты 5173 и 8787 должны быть свободны.
 
-Показ готовой сборки:
+Open <http://127.0.0.1:5173>. The dev command starts the React/Vite UI and Node API. See `.env.example` for server, bot, and optional LLM settings.
+
+### Telegram bot
+
+Install the bot dependencies once:
+
 ```sh
-npm run build
-npm start
+python -m venv bot/.venv
+source bot/.venv/bin/activate
+python -m pip install -r bot/requirements.txt
 ```
-Открыть http://127.0.0.1:8787.
 
-Проверки:
+Set `TELEGRAM_BOT_TOKEN` in the same shell that runs the bot, then start the personal demo:
+
 ```sh
+export TELEGRAM_BOT_TOKEN="<token from BotFather>"
+python -m bot
+```
+
+In PowerShell, activate with `.\bot\.venv\Scripts\Activate.ps1` and set the token with `$env:TELEGRAM_BOT_TOKEN = "<token from BotFather>"`. The bot answers `/start` and `/stop` in private chat; it does not yet deliver real group analytics to the dashboard. Do not configure it to collect real group messages.
+
+### Docker Compose
+
+Start the web app and API:
+
+```sh
+docker compose up --build
+```
+
+For the personal bot demo, set `TELEGRAM_BOT_TOKEN` in `.env`, then run:
+
+```sh
+docker compose --profile bot-demo up --build
+```
+
+The Node service owns SQLite storage in a persistent volume. The bot communicates over the Compose network and does not access the database directly. Compose does not enable the unfinished production group-binding workflow.
+
+## Architecture
+
+```text
+Telegram → Python / aiogram → Node.js API → SQLite
+                                  ↑
+                           React web app
+```
+
+React provides the web UI; Node.js owns the API, consent checks, aggregation, and SQLite persistence. The Python/aiogram bot is a separate HTTP client and never connects to SQLite. Current Telegram group flows are synthetic/local QA only; the private polling demo is not connected to team analytics.
+
+## Development checks
+
+```sh
+npm run doctor
+npm run check
 npm test
-npm run build
 ```
 
-## Два режима
-**Демо для питча:** вымышленные данные, три сценария, быстрый локальный чек-ин и карточки. Демонстрационные действия сбрасываются при обновлении.
+Python checks:
 
-**Моя команда:** создание пространства, личная сессия в браузере, одноразовые приглашения, настоящие сохранённые чек-ины, закрытие/открытие раундов, общие договорённости и отзывы. Данные хранятся в SQLite на сервере и переживают перезапуск. Участники видят изменения после обновления или автоматического опроса раз в 15 секунд.
+```sh
+python -m unittest discover -s bot/tests -v
+python -m bot --check
+```
 
-Генерация ИИ ещё не подключена. Подсказки формируются по проверяемым правилам и обозначены как готовые шаблоны.
+## License
 
-## Доступ и данные
-- Организатор создаёт отдельное приглашение для каждого человека. Оно действует 24 часа и используется один раз.
-- Сессия HttpOnly/SameSite=Strict действует 7 дней. Для возвращения с другого устройства заранее создать и сохранить личный код входа: он действует 30 дней; новый код заменяет прежний.
-- Код восстанавливает того же участника и его права, а не создаёт дополнительный голос.
-- Идентификация основана на выданных приглашениях и кодах. Это не проверка реальной личности: организатор отвечает за одно приглашение одному человеку.
-- Результаты только после закрытия и минимум пяти отдельных участников. При четырёх данные скрыты; добровольные упражнения доступны.
-- До закрытия повторный ответ заменяет предыдущий. Запрос содержит roundId: запоздалый ответ не попадает в новый раунд.
-- После закрытия сохраняется только агрегат; отдельные чек-ины/отзывы удаляются. Агрегат отзывов также публикуется только после закрытия при минимум пяти ответах.
-- Полная криптографическая анонимность не заявляется. В открытом раунде сервер хранит псевдонимные ответы; владелец сервера имеет доступ к его хранилищу.
-- Максимум два принятых общих шага за скользящие 24 часа.
-
-Файлы .data/vibebot.sqlite и .data/server.key локальные и игнорируются Git. Не передавать .data участникам и не публиковать её; ключ нужен для стабильного учёта повторных ответов после перезапуска. .env также игнорируется. Можно скопировать .env.example в .env.
-
-По умолчанию сервер доступен только на этом компьютере. Для подключения других устройств нужен отдельно выбранный хост и корректный адрес вместо 127.0.0.1; для внешнего размещения — HTTPS и COOKIE_SECURE=true. Публичное развёртывание пока не выполнено.
-
-## Репозиторий и команда
-Основной репозиторий: https://gitlab.com/shertwg-group1/vibebot. История и все шесть веток перенесены. GitHub сохранён как первоначальная копия. Подготовлены .gitlab-ci.yml и шаблон MR; результат удалённого pipeline пока не проверен. [Порядок переноса](docs/GITLAB_MIGRATION.md).
-
-| Участник | Ветка | Зона |
-|---|---|---|
-| Август | feat/august-core | Ядро, сервер, общий клиент, интеграция, ИИ, выпуск |
-| Илиан | feat/ilian-checkin | Чек-ин и состояния раунда |
-| Арина | feat/arina-actions | Карточки, договорённости, благодарности |
-| Алиса | feat/alisa-insights-demo | Состояние команды, демо, QA и питч |
-
-main — проверенный показ, develop — интеграция, рабочие изменения — через PR/MR. Компоненты в src/features сохранены для независимой работы ребят. src/core/TeamWorkspace.tsx — работающий интеграционный пример клиента; после готовности своих компонентов подключать их к этому же API по согласованию с Августом.
-
-- [Контракты](docs/CONTRACTS.md)
-- [План и нагрузка](docs/TEAM_PLAN.md)
-- [Концепция](docs/PRODUCT.md)
-- [Питч](docs/PITCH.md)
-- [Проверки серверной итерации](docs/ITERATION_2026-10-31.md)
-
-## Начало работы участников
-Самостоятельные файлы для новых чатов с ИИ: [docs/onboarding](docs/onboarding/README.md). Проверка среды: npm run doctor. Все проверки: npm run check. Node.js 24 обязателен.
-
-## Решение 2-в-1
-Веб-платформа и корпоративная утилита для чатов; подробности — [стек](docs/STACK.md) и [бот](bot/README.md). Telegram-прототип на Python/aiogram работает отдельно в демо-режиме; передачи ответов на сервер пока нет. Node.js и SQLite сохраняются. Groq — планируемый серверный провайдер; текущие подсказки шаблонные. Docker Compose для веба: docker compose up --build web (нужен запущенный Docker). Бот — дополнительный профиль bot-demo. Папка bot/.venv, токены, .env и .data в Git не входят.
+Distributed under the [MIT License](LICENSE).

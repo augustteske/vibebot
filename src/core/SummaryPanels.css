@@ -1,0 +1,26 @@
+.telegram-summary {
+  display: grid;
+  gap: 18px;
+  margin-bottom: 22px;
+}
+
+.telegram-summary-state {
+  margin-bottom: 22px;
+}
+
+.telegram-summary-state--calibrating {
+  border: 2px solid #000;
+  border-radius: 12px;
+  background: #ffd700;
+  color: #000;
+  padding: 20px;
+  margin-bottom: 22px;
+}
+
+.telegram-summary-state--calibrating h2 {
+  margin: 0;
+}
+
+.telegram-summary-state--calibrating p {
+  margin-bottom: 0;
+}

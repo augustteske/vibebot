@@ -4,7 +4,9 @@ from contextlib import suppress
 import os
 import sys
 import logging
+from hashlib import sha256
 from datetime import timezone
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
@@ -13,15 +15,18 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from .flow import CheckinFlow, QUESTIONS
 from .http_transport import HttpTransport, TransportError
 from .intake import ConsentSnapshot, TelegramIntake
-from .voice import LocalWhisperProvider, VoiceError, VoiceTranscription
+from .pause_state import PauseState
+from .voice import LocalWhisperProvider, VoiceError, VoiceTranscription, install_voice_handlers
 
 
 def create_dispatcher(
     intake: TelegramIntake | None = None,
-    voice_transcription: VoiceTranscription | None = None,
+    voice: VoiceTranscription | None = None,
 ) -> Dispatcher:
     dispatcher = Dispatcher()
     flow = CheckinFlow()
+    voice_transcription = voice
+    install_voice_handlers(dispatcher, voice_transcription)
 
     async def question(message, nonce, step):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
@@ -40,14 +45,16 @@ def create_dispatcher(
             InlineKeyboardButton(text="Согласен на демо", callback_data=f"consent:{nonce}:yes"),
             InlineKeyboardButton(text="Отказаться", callback_data=f"consent:{nonce}:no"),
         ]])
-        await message.answer("Vibee · демо-прототип. Собираем только три оценки 1–5. Черновик действует пять минут; очистка памяти выполняется каждые 15 секунд, а после завершения или /stop — сразу. Тексты переписки не анализируются. Передача на веб-платформу и ИИ пока не подключены; результаты руководителю не отправляются. Это личный тест, корпоративный модуль ещё в разработке.", reply_markup=keyboard)
+        await message.answer("Vibee · демо-прототип. Собираем только три оценки 1–5. Черновик действует пять минут; очистка памяти выполняется каждые 15 секунд, а после завершения или /stop — сразу. Тексты переписки не анализируются. Передача чек-инов на веб-платформу и их ИИ-анализ пока не подключены; результаты руководителю не отправляются. Это личный тест, корпоративный модуль ещё в разработке. Отдельный режим расшифровки голосового: /transcribe — со своим согласием.", reply_markup=keyboard)
 
     @dispatcher.message(Command("stop"))
     async def stop(message: Message):
+        if message.chat.type != "private" or message.from_user is None:
+            return
         flow.cancel(message.from_user.id)
         if voice_transcription is not None:
             voice_transcription.cancel(message.from_user.id)
-        await message.answer("Участие отменено, черновик удалён из памяти бота. Сообщения в Telegram автоматически не удаляются.")
+        await message.answer("Участие отменено, черновик удалён. Разрешение на расшифровку отозвано, текущая обработка останавливается. Сообщения в Telegram автоматически не удаляются.")
 
     async def submit_intake_text(message: Message, text: str) -> None:
         if intake is None or message.chat.type == "private" or message.from_user is None:
@@ -66,6 +73,7 @@ def create_dispatcher(
             await intake.process(update)
         except TransportError:
             intake.stop_after_transport_gap()
+            await intake.reconcile_pause()
             logging.getLogger(__name__).warning("Telegram intake paused after delivery failure; pause the binding on the server before resuming")
 
     @dispatcher.message(F.text)
@@ -109,6 +117,13 @@ def create_dispatcher(
                 await submit_intake_text(message, text)
         except VoiceError as error:
             await message.answer(str(error), parse_mode=None)
+
+    @dispatcher.edited_message()
+    async def intake_edit(message: Message) -> None:
+        if intake is None or message.chat.type == "private":
+            return
+        if intake.stop_after_message_edit(message.chat.id):
+            await intake.reconcile_pause()
 
     @dispatcher.callback_query(F.data.startswith("consent:") | F.data.startswith("score:"))
     async def callback(event: CallbackQuery):
@@ -183,6 +198,7 @@ async def main():
         if isinstance(status, dict):
             await transport.close()
             raise SystemExit("Vibee binding status request was rejected; Telegram polling was not started.")
+        pause_path = Path(os.environ.get("VIBEBOT_DATA_DIR", ".data")) / ("bot-gap-" + sha256(binding_id.encode()).hexdigest() + ".json")
         intake = TelegramIntake(ConsentSnapshot(
             chat_id=chat_id,
             binding_id=binding_id,
@@ -195,13 +211,18 @@ async def main():
             consent_policy_version=status.policyVersion,
             roster_verified=True,
             company_accepted=True,
-        ), transport)
+        ), transport, PauseState(pause_path))
+        await intake.reconcile_pause()
     dispatcher, flow = create_dispatcher(intake, voice_transcription)
 
     async def cleanup():
         while True:
             await asyncio.sleep(15)
             flow.expire()
+            if voice_transcription is not None:
+                voice_transcription.expire()
+            if intake is not None:
+                await intake.reconcile_pause()
 
     task = asyncio.create_task(cleanup())
     try:
