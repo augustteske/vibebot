@@ -9,6 +9,13 @@ const secret = 'test-secret-used-only-in-automated-tests-123456789'
 const normal = { energy: 4, clarity: 4, support: 4 }
 const unclear = { energy: 4, clarity: 1, support: 4 }
 
+test('current web client header is accepted without the legacy header', async t => {
+  const { client } = await start(t)
+  const result = await client()('/workspaces', { name: 'Synthetic', displayName: 'Owner' },
+    { 'X-VibeBot': '', 'X-Vibee': '1' })
+  assert.equal(result.status, 201)
+})
+
 async function start(t, dbPath) {
   const app = createApp({ secret, dbPath })
   await new Promise(resolveListen => app.server.listen(0, '127.0.0.1', resolveListen))
@@ -52,6 +59,7 @@ test('complete shared flow: private check-ins, frozen summary, confirmed action 
   for (let i = 0; i < people.length; i++) {
     assert.equal((await people[i]('/checkins', { roundId, scores: i < 3 ? unclear : normal })).status, 200)
   }
+  assert.deepEqual((await owner('/summary')).body, { status: 'open' })
   const before = (await people[1]('/session')).body
   assert.deepEqual(before.round.summary, { status: 'open' })
   assert.equal(before.round.mySubmitted, true)
@@ -59,6 +67,7 @@ test('complete shared flow: private check-ins, frozen summary, confirmed action 
   assert.equal((await people[1]('/rounds/close', { roundId })).status, 403)
   const closed = await owner('/rounds/close', { roundId })
   assert.equal(closed.body.round.summary.status, 'published')
+  assert.deepEqual((await owner('/summary')).body, closed.body.round.summary)
   assert.deepEqual(closed.body.round.summary.needs, ['clarity'])
   assert.equal(closed.body.round.summary.means.clarity, 2.5)
   assert.doesNotMatch(JSON.stringify(closed.body), /voter_key|token_hash|"answers"|"scores"|"participants"/)
@@ -123,6 +132,7 @@ test('session, JSON values, request origin and workspace boundaries are enforced
   const { owner, client, roundId } = await team(t, 1)
   const outsider = client()
   assert.equal((await outsider('/session')).status, 401)
+  assert.equal((await outsider('/summary')).status, 401)
   assert.equal((await owner('/checkins', { roundId, scores: { ...normal, energy: 0 } })).status, 400)
   assert.equal((await owner('/checkins', { roundId, scores: { ...normal, energy: 2.5 } })).status, 400)
   assert.equal((await owner('/checkins', { roundId, scores: normal }, { Origin: 'https://other.example' })).status, 403)

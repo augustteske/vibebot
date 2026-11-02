@@ -2,9 +2,24 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { createApp } from './app.mjs'
+import { createRecommendationProvider } from './recommendation-provider.mjs'
 
 const dataDir = resolve(process.env.VIBEBOT_DATA_DIR ?? '.data')
 mkdirSync(dataDir, { recursive: true })
+const telegramSynthetic = process.env.VIBEE_TELEGRAM_SYNTHETIC === 'true'
+const telegramBootstrapCredential = process.env.VIBEE_TELEGRAM_BOOTSTRAP_CREDENTIAL
+if (telegramSynthetic && process.env.NODE_ENV !== 'development') {
+  throw new Error('The synthetic Telegram API requires NODE_ENV=development')
+}
+if (telegramSynthetic && !/^[a-f0-9]{64}$/.test(telegramBootstrapCredential ?? '')) {
+  throw new Error('Synthetic Telegram mode requires a 64-character VIBEE_TELEGRAM_BOOTSTRAP_CREDENTIAL')
+}
+const recommendationProvider = createRecommendationProvider({
+  provider: process.env.LLM_PROVIDER ?? 'template',
+  apiKey: process.env.LLM_API_KEY,
+  baseUrl: process.env.LLM_BASE_URL,
+  model: process.env.LLM_MODEL,
+})
 const keyPath = resolve(dataDir, 'server.key')
 let secret
 try { secret = readFileSync(keyPath, 'utf8').trim() } catch (error) {
@@ -16,6 +31,9 @@ const app = createApp({
   dbPath: resolve(dataDir, 'vibebot.sqlite'), secret,
   staticDir: resolve('dist'), secureCookies: process.env.COOKIE_SECURE === 'true',
   allowedOrigins: (process.env.APP_ORIGIN ?? 'http://127.0.0.1:5173,http://localhost:5173').split(','),
+  telegramSynthetic,
+  telegramBootstrapCredential,
+  recommendationProvider,
 })
 const host = process.env.HOST ?? '127.0.0.1'
 const port = Number(process.env.PORT ?? 8787)

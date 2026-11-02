@@ -5,7 +5,7 @@ export const SYNTHETIC_METRICS: InsightsMetrics = {
   participationEvenness: 89.8,
   recognitionPercent: 20.0,
   participantCount: 6,
-  messageCount: 45,
+  messageCount: 20,
 };
 
 export const FEW_PARTICIPANTS_METRICS: InsightsMetrics = {
