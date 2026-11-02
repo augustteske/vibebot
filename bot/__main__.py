@@ -13,9 +13,13 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from .flow import CheckinFlow, QUESTIONS
 from .http_transport import HttpTransport, TransportError
 from .intake import ConsentSnapshot, TelegramIntake
+from .voice import LocalWhisperProvider, VoiceError, VoiceTranscription
 
 
-def create_dispatcher(intake: TelegramIntake | None = None) -> Dispatcher:
+def create_dispatcher(
+    intake: TelegramIntake | None = None,
+    voice_transcription: VoiceTranscription | None = None,
+) -> Dispatcher:
     dispatcher = Dispatcher()
     flow = CheckinFlow()
 
@@ -41,10 +45,11 @@ def create_dispatcher(intake: TelegramIntake | None = None) -> Dispatcher:
     @dispatcher.message(Command("stop"))
     async def stop(message: Message):
         flow.cancel(message.from_user.id)
+        if voice_transcription is not None:
+            voice_transcription.cancel(message.from_user.id)
         await message.answer("Участие отменено, черновик удалён из памяти бота. Сообщения в Telegram автоматически не удаляются.")
 
-    @dispatcher.message(F.text)
-    async def intake_message(message: Message) -> None:
+    async def submit_intake_text(message: Message, text: str) -> None:
         if intake is None or message.chat.type == "private" or message.from_user is None:
             return
         update = {
@@ -54,7 +59,7 @@ def create_dispatcher(intake: TelegramIntake | None = None) -> Dispatcher:
                 "from": {"id": message.from_user.id, "is_bot": message.from_user.is_bot},
                 "message_id": message.message_id,
                 "date": int((message.date.replace(tzinfo=timezone.utc) if message.date.tzinfo is None else message.date.astimezone(timezone.utc)).timestamp()),
-                "text": message.text,
+                "text": text,
             },
         }
         try:
@@ -62,6 +67,48 @@ def create_dispatcher(intake: TelegramIntake | None = None) -> Dispatcher:
         except TransportError:
             intake.stop_after_transport_gap()
             logging.getLogger(__name__).warning("Telegram intake paused after delivery failure; pause the binding on the server before resuming")
+
+    @dispatcher.message(F.text)
+    async def intake_message(message: Message) -> None:
+        if message.text is not None:
+            await submit_intake_text(message, message.text)
+
+    @dispatcher.message(F.voice)
+    async def voice_intake_message(message: Message) -> None:
+        if (
+            intake is None
+            or message.chat.type not in {"group", "supergroup"}
+            or message.from_user is None
+            or message.from_user.is_bot
+            or not intake.is_active_chat(message.chat.id)
+        ):
+            return
+        if message.forward_origin is not None:
+            await message.answer("В этом режиме принимаются только новые, непересланные голосовые.")
+            return
+        if voice_transcription is None:
+            await message.answer("Локальная расшифровка голосовых не настроена.")
+            return
+        if intake.is_rate_limited(message.from_user.id):
+            return
+
+        sent_at = int(
+            (message.date.replace(tzinfo=timezone.utc) if message.date.tzinfo is None
+             else message.date.astimezone(timezone.utc)).timestamp()
+        )
+        try:
+            text = await voice_transcription.transcribe_for_intake(
+                user_id=message.from_user.id,
+                sent_at=sent_at,
+                voice=message.voice,
+                download=lambda destination: message.bot.download(
+                    message.voice, destination=destination, timeout=15,
+                ),
+            )
+            if text is not None:
+                await submit_intake_text(message, text)
+        except VoiceError as error:
+            await message.answer(str(error), parse_mode=None)
 
     @dispatcher.callback_query(F.data.startswith("consent:") | F.data.startswith("score:"))
     async def callback(event: CallbackQuery):
@@ -107,11 +154,19 @@ async def main():
     binding_id = os.environ.get("VIBEE_BINDING_ID")
     chat_id_raw = os.environ.get("VIBEE_CHAT_ID")
     api_base_url = os.environ.get("VIBEE_API_BASE_URL", "http://localhost:8787")
+    model_dir = os.environ.get("VIBEE_TRANSCRIPTION_MODEL_DIR")
     if any((api_token, binding_id, chat_id_raw)) and not all((api_token, binding_id, chat_id_raw)):
         raise SystemExit("Set VIBEE_BOT_TOKEN, VIBEE_BINDING_ID and VIBEE_CHAT_ID together.")
 
     transport: HttpTransport | None = None
     intake: TelegramIntake | None = None
+    voice_transcription: VoiceTranscription | None = None
+    if model_dir:
+        try:
+            voice_transcription = VoiceTranscription(LocalWhisperProvider(model_dir))
+        except ValueError as error:
+            raise SystemExit(str(error)) from None
+
     if api_token and binding_id and chat_id_raw:
         try:
             chat_id = int(chat_id_raw)
@@ -141,7 +196,7 @@ async def main():
             roster_verified=True,
             company_accepted=True,
         ), transport)
-    dispatcher, flow = create_dispatcher(intake)
+    dispatcher, flow = create_dispatcher(intake, voice_transcription)
 
     async def cleanup():
         while True:
@@ -157,6 +212,8 @@ async def main():
         with suppress(asyncio.CancelledError):
             await task
         flow.drafts.clear()
+        if voice_transcription is not None:
+            await voice_transcription.close()
         if transport is not None:
             await transport.close()
 
