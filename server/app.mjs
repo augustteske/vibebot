@@ -77,7 +77,6 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         return json(res, 200, recommendation)
       }
       if (url.pathname === '/api/telegram/profile') {
-        if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
         if (req.method === 'POST') checkBrowser(req)
         const actor = store.authenticate(tokenFrom(req))
         if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')

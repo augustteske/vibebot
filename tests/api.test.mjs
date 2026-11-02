@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { resolve, join, sep } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { createApp } from '../server/app.mjs'
 import { DatabaseSync } from 'node:sqlite'
 
@@ -14,6 +15,34 @@ test('current web client header is accepted without the legacy header', async t 
   const result = await client()('/workspaces', { name: 'Synthetic', displayName: 'Owner' },
     { 'X-VibeBot': '', 'X-Vibee': '1' })
   assert.equal(result.status, 201)
+})
+
+test('organizer work schedule is saved and returned while Telegram ingestion remains disabled', async t => {
+  const { owner } = await team(t, 1)
+  assert.deepEqual((await owner('/telegram/profile')).body, {
+    version: 0,
+    timeZone: null,
+    intervals: [],
+  })
+
+  const saved = await owner('/telegram/profile', {
+    requestId: randomUUID(),
+    expectedVersion: 0,
+    timeZone: 'Asia/Omsk',
+    intervals: [
+      { day: 1, start: 600, end: 1140 },
+      { day: 2, start: 600, end: 1140 },
+      { day: 3, start: 600, end: 1140 },
+      { day: 4, start: 600, end: 1140 },
+      { day: 5, start: 600, end: 1140 },
+    ],
+  })
+  assert.equal(saved.status, 200)
+  assert.equal(saved.body.version, 1)
+  assert.equal(saved.body.timeZone, 'Asia/Omsk')
+  assert.equal(saved.body.intervals.length, 5)
+  assert.deepEqual((await owner('/telegram/profile')).body, saved.body)
+  assert.equal((await owner('/telegram/binding-tokens', { requestId: randomUUID() })).body.error.code, 'UNAVAILABLE')
 })
 
 async function start(t, dbPath) {

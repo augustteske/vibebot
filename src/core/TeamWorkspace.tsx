@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { api, ApiError } from './client'
 import type { SessionSnapshot } from './contracts'
 import { SummaryPanels } from './SummaryPanels'
+import { TeamSettings } from './TeamSettings'
 import './team.css'
 
 export type TeamMemberRole = 'lead' | 'developer' | 'designer' | 'manager' | 'other';
@@ -194,6 +195,7 @@ export function TeamWorkspace() {
     </section> : <>
       <div className="team-heading"><div><h2>{snapshot.workspace.name}</h2><p className="muted">{snapshot.member.name} · {snapshot.member.role === 'organizer' ? 'организатор' : 'участник'} · время по Омску</p></div><div className="button-row"><button className="button secondary" onClick={() => void refresh()} disabled={busy}>Обновить</button><button className="text-button" onClick={() => setConfirm('logout')} disabled={busy}>Выйти</button></div></div>
       <SummaryPanels key={snapshot.round.id + ':' + snapshot.round.summary.status}/>
+      {snapshot.member.role === 'organizer' && <TeamSettings key={activeWorkspaceId}/>}
       {confirm === 'logout' && <div className="panel confirmation"><p>Для возвращения понадобится личный код входа. Сохраните его перед выходом.</p><div className="button-row"><button className="button secondary" onClick={() => setConfirm('')} disabled={busy}>Остаться</button><button className="button" onClick={() => void logout()} disabled={busy}>Выйти из пространства</button></div></div>}
       {snapshot.member.role === 'organizer' && <details key={activeWorkspaceId} className="panel team-profile" onToggle={event => {
         if (event.currentTarget.open && teamProfileWorkspaceRef.current !== activeWorkspaceId) loadTeamProfile(activeWorkspaceId)

@@ -396,11 +396,9 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
   return {
     cleanup,
     profile(actor) {
-      unavailable()
       return organizerProfile(actor)
     },
     updateProfile(actor, input) {
-      unavailable()
       organizerProfile(actor)
       const next = validatedProfile(input)
       return tx(() => {
