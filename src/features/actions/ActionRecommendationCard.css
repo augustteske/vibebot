@@ -93,3 +93,4 @@
   .vibee-arc { padding: 12px; }
   .vibee-arc__btn { flex: 1 1 100%; text-align: center; }
 }
+.vibee-arc{border-radius:var(--radius-card);box-shadow:var(--surface-shadow);padding:clamp(16px,2.4vw,24px);transition:box-shadow .24s ease,transform .24s ease}.vibee-arc:hover{box-shadow:var(--surface-shadow-hover);transform:translateY(-2px)}.vibee-arc__title{font-weight:750;letter-spacing:-.035em}.vibee-arc__action{border-radius:0 14px 14px 0;background:linear-gradient(110deg,#fff7d9,#fffaea)}
