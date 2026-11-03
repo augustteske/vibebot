@@ -40,7 +40,7 @@
 cp .env.example .env
 ```
 
-Для личного бота задайте в `.env` `TELEGRAM_BOT_TOKEN`. Для внешнего провайдера рекомендаций настройте `LLM_PROVIDER` и `LLM_API_KEY` — ключ передаётся только серверу.
+Для личного бота задайте в `.env` `TELEGRAM_BOT_TOKEN`. Для внешнего провайдера рекомендаций настройте `LLM_PROVIDER` и `LLM_API_KEY` — ключ передаётся только серверу. Значение `COOKIE_SECURE=false` подходит только для локального HTTP; за HTTPS reverse proxy задайте `COOKIE_SECURE=true`.
 
 Запустите веб-приложение и API:
 

@@ -18,6 +18,52 @@ const policyVersion = 'synthetic-v1'
 const DAY = 86400000
 const demoIntervals = [1, 2, 3, 4, 5].map(day => ({ day, start: 540, end: 1080 }))
 
+test('SQLite startup migrates old Telegram bindings without losing persisted profile or binding data', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'vibee-telegram-migration-test-'))
+  const dbPath = join(dir, 'legacy.sqlite')
+  t.after(() => rm(dir, { recursive: true, force: true }))
+
+  const first = createStore({ path: dbPath, secret })
+  const token = first.createWorkspace({ name: 'Persistent team', displayName: 'Organizer' })
+  const owner = first.authenticate(token)
+  const profile = first.telegram.updateProfile(owner, {
+    requestId: randomUUID(),
+    expectedVersion: 0,
+    timeZone: 'Asia/Omsk',
+    intervals: demoIntervals,
+  })
+  const bindingId = randomUUID()
+  first.close()
+
+  const legacyDb = new DatabaseSync(dbPath)
+  legacyDb.prepare('INSERT INTO telegram_bindings(id,workspace_id,chat_id,state) VALUES(?,?,?,?)')
+    .run(bindingId, owner.workspace_id, '-1001234567890', '{}')
+  legacyDb.exec('ALTER TABLE telegram_bindings DROP COLUMN migration_blocked')
+  legacyDb.close()
+
+  const reopened = createStore({ path: dbPath, secret })
+  try {
+    const reopenedOwner = reopened.authenticate(token)
+    assert.ok(reopenedOwner)
+    assert.deepEqual(reopened.telegram.profile(reopenedOwner), profile)
+    const persistedDb = new DatabaseSync(dbPath)
+    try {
+      const persistedBinding = persistedDb.prepare(
+        'SELECT id,chat_id,migration_blocked FROM telegram_bindings WHERE id=?',
+      ).get(bindingId)
+      assert.deepEqual({ ...persistedBinding }, {
+        id: bindingId,
+        chat_id: '-1001234567890',
+        migration_blocked: 0,
+      })
+    } finally {
+      persistedDb.close()
+    }
+  } finally {
+    reopened.close()
+  }
+})
+
 async function fixture(t, { enabled = true, seedLinks = true, seedBindings = true,
   recommendationProvider, recommendationTimeoutMs, telegramBotToken, telegramFetch } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'vibee-telegram-test-'))

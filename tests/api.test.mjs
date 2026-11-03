@@ -3,12 +3,46 @@ import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { resolve, join, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { createApp } from '../server/app.mjs'
+import { createApp, resolveSecureCookies } from '../server/app.mjs'
 import { DatabaseSync } from 'node:sqlite'
 
 const secret = 'test-secret-used-only-in-automated-tests-123456789'
 const normal = { energy: 4, clarity: 4, support: 4 }
 const unclear = { energy: 4, clarity: 1, support: 4 }
+
+test('health endpoint returns the Compose readiness response', async t => {
+  const { client } = await start(t)
+  const result = await client()('/health')
+  assert.equal(result.status, 200)
+  assert.deepEqual(result.body, { ok: true })
+})
+
+test('allowed origins and production secure cookies are enforced', async t => {
+  const { client } = await start(t, undefined, {
+    secureCookies: true,
+    allowedOrigins: ['https://app.example'],
+  })
+  const trusted = await client()('/workspaces', { name: 'Synthetic', displayName: 'Owner' },
+    { Origin: 'https://app.example' })
+  assert.equal(trusted.status, 201)
+  assert.match(trusted.setCookie, /; HttpOnly;/)
+  assert.match(trusted.setCookie, /; SameSite=Strict;/)
+  assert.match(trusted.setCookie, /; Secure(?:;|$)/)
+  assert.equal(trusted.headers['access-control-allow-origin'], undefined)
+
+  const rejected = await client()('/workspaces', { name: 'Untrusted', displayName: 'Owner' },
+    { Origin: 'https://untrusted.example' })
+  assert.equal(rejected.status, 403)
+  assert.equal(rejected.body.error.code, 'ORIGIN_REJECTED')
+})
+
+test('secure cookies default on in production and can be disabled for local HTTP', () => {
+  assert.equal(resolveSecureCookies({ NODE_ENV: 'production' }), true)
+  assert.equal(resolveSecureCookies({ NODE_ENV: 'production', COOKIE_SECURE: 'true' }), true)
+  assert.equal(resolveSecureCookies({ NODE_ENV: 'production', COOKIE_SECURE: 'false' }), false)
+  assert.equal(resolveSecureCookies({ NODE_ENV: 'development' }), false)
+  assert.equal(resolveSecureCookies({ NODE_ENV: 'development', COOKIE_SECURE: 'true' }), true)
+})
 
 test('current web client header is accepted without the legacy header', async t => {
   const { client } = await start(t)
@@ -45,8 +79,8 @@ test('organizer work schedule is saved and returned while Telegram ingestion rem
   assert.equal((await owner('/telegram/binding-tokens', { requestId: randomUUID() })).body.error.code, 'UNAVAILABLE')
 })
 
-async function start(t, dbPath) {
-  const app = createApp({ secret, dbPath })
+async function start(t, dbPath, appOptions = {}) {
+  const app = createApp({ ...appOptions, secret, dbPath })
   await new Promise(resolveListen => app.server.listen(0, '127.0.0.1', resolveListen))
   let closed = false
   const close = async () => { if (!closed) { closed = true; await app.close() } }
@@ -62,7 +96,12 @@ async function start(t, dbPath) {
       })
       const setCookie = response.headers.get('set-cookie')
       if (setCookie) cookie = setCookie.split(';')[0]
-      return { status: response.status, body: await response.json(), setCookie }
+      return {
+        status: response.status,
+        body: await response.json(),
+        setCookie,
+        headers: Object.fromEntries(response.headers.entries()),
+      }
     }
   }
   return { client, close }

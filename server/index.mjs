@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
-import { createApp } from './app.mjs'
+import { createApp, resolveSecureCookies } from './app.mjs'
 import { createRecommendationProvider } from './recommendation-provider.mjs'
 
 const dataDir = resolve(process.env.VIBEBOT_DATA_DIR ?? '.data')
@@ -29,8 +29,10 @@ try { secret = readFileSync(keyPath, 'utf8').trim() } catch (error) {
 }
 const app = createApp({
   dbPath: resolve(dataDir, 'vibebot.sqlite'), secret,
-  staticDir: resolve('dist'), secureCookies: process.env.COOKIE_SECURE === 'true',
-  allowedOrigins: (process.env.APP_ORIGIN ?? 'http://127.0.0.1:5173,http://localhost:5173').split(','),
+  staticDir: resolve('dist'),
+  secureCookies: resolveSecureCookies(),
+  allowedOrigins: (process.env.APP_ORIGIN ?? 'http://127.0.0.1:5173,http://localhost:5173')
+    .split(',').map(origin => origin.trim()).filter(Boolean),
   telegramSynthetic,
   telegramBootstrapCredential,
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,

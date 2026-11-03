@@ -203,6 +203,17 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
       PRIMARY KEY(binding_id,period_id,kind,member_id,request_id)
     );
   `)
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    const bindingColumns = db.prepare('PRAGMA table_info(telegram_bindings)').all()
+    if (!bindingColumns.some(column => column.name === 'migration_blocked')) {
+      db.exec('ALTER TABLE telegram_bindings ADD COLUMN migration_blocked INTEGER NOT NULL DEFAULT 0')
+    }
+    db.exec('COMMIT')
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
   const one = (sql, ...args) => db.prepare(sql).get(...args)
   const all = (sql, ...args) => db.prepare(sql).all(...args)
   const run = (sql, ...args) => db.prepare(sql).run(...args)

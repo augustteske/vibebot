@@ -3,6 +3,11 @@ import { readFile } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
 import { AppError, createStore } from './store.mjs'
 
+export function resolveSecureCookies(env = process.env) {
+  const cookieSecure = env.COOKIE_SECURE
+  return cookieSecure === 'true' || (env.NODE_ENV === 'production' && cookieSecure !== 'false')
+}
+
 export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookies = false, allowedOrigins = [], telegramBootstrapCredential, telegramBotToken, telegramFetch = globalThis.fetch, telegramSynthetic = false, now = Date.now, recommendationProvider, recommendationTimeoutMs }) {
   const store = createStore({ path: dbPath, secret, telegramBootstrapCredential, telegramSynthetic, now,
     recommendationProvider, recommendationTimeoutMs })
