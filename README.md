@@ -32,6 +32,22 @@
 
 ## Быстрый старт
 
+### One-Command Deployment
+
+На Ubuntu/Debian или macOS запустите из корня репозитория:
+
+```sh
+bash scripts/deploy.sh
+```
+
+На Windows запустите в PowerShell:
+
+```powershell
+.\scripts\deploy.ps1
+```
+
+Если `.env` отсутствует, скрипт создаст его из `.env.example` и остановится: заполните токены и запустите скрипт снова. Скрипт проверит Docker и Docker Compose, установит их при необходимости и запустит приложение в фоне на порту 8787. Для macOS нужен Homebrew; для Windows — winget и Docker Desktop.
+
 ### Docker
 
 Нужны Docker Engine и Docker Compose v2. Скопируйте пример окружения:
