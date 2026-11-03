@@ -3,6 +3,7 @@ import './LandingPage.css'
 
 interface LandingPageProps {
   onEnter: () => void;
+  onDemo: () => void;
 }
 
 const features = [
@@ -47,7 +48,7 @@ const steps = [
   },
 ]
 
-export function LandingPage({ onEnter }: LandingPageProps) {
+export function LandingPage({ onEnter, onDemo }: LandingPageProps) {
   useEffect(() => {
     const revealElements = Array.from(document.querySelectorAll<HTMLElement>('.landing-reveal'))
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -94,7 +95,10 @@ export function LandingPage({ onEnter }: LandingPageProps) {
           </p>
           <div className="landing-actions">
             <button className="landing-cta" onClick={onEnter}>
-              Перейти к демо <span aria-hidden="true">→</span>
+              Войти в кабинет <span aria-hidden="true">→</span>
+            </button>
+            <button className="landing-demo-link" type="button" onClick={onDemo}>
+              Посмотреть демо <span aria-hidden="true">↗</span>
             </button>
             <a className="landing-github" href="https://gitlab.com/shertwg-group1/vibebot" target="_blank" rel="noreferrer">
               GitLab <span aria-hidden="true">↗</span>
