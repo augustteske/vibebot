@@ -9,9 +9,9 @@
 }
 
 .telegram-summary-state--calibrating {
-  border: 2px solid #000;
+  border: 1px solid var(--line);
   border-radius: 12px;
-  background: #ffd700;
+  background: var(--soft);
   color: #000;
   padding: 20px;
   margin-bottom: 22px;

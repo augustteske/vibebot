@@ -1,16 +1,16 @@
 .vibee-arc {
-  --arc-yellow: #ffc800;
+  --arc-yellow: var(--honey);
   --arc-black: #111111;
   --arc-white: #ffffff;
   --arc-muted: #5a5a5a;
-  --arc-line: #111111;
+  --arc-line: var(--line);
 
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 16px;
-  max-width: 640px;
-  border: 2px solid var(--arc-line);
+  max-width: 100%;
+  border: 1px solid var(--arc-line);
   border-radius: 12px;
   background: var(--arc-white);
   color: var(--arc-black);
@@ -51,7 +51,7 @@
   box-sizing: border-box;
   font: inherit;
   padding: 8px;
-  border: 2px solid var(--arc-line);
+  border: 1px solid var(--arc-line);
   border-radius: 8px;
   resize: vertical;
 }
@@ -61,7 +61,7 @@
 .vibee-arc__btn {
   font: inherit;
   padding: 8px 14px;
-  border: 2px solid var(--arc-line);
+  border: 1px solid var(--arc-line);
   border-radius: 8px;
   background: var(--arc-white);
   color: var(--arc-black);

@@ -1,15 +1,15 @@
 .iw-container {
-  border: 2px solid #000;
+  border: 1px solid var(--line);
   padding: 20px;
   border-radius: 12px;
   background: #fff;
   color: #000;
   font-family: system-ui, sans-serif;
-  max-width: 800px;
+  max-width: 100%;
 }
 
 .iw-state-warn {
-  background: #FFD700;
+  background: var(--soft);
 }
 
 .iw-header {
@@ -25,12 +25,12 @@
 }
 
 .iw-badge {
-  background: #FFD700;
+  background: var(--soft);
   padding: 4px 10px;
   border-radius: 20px;
   font-weight: bold;
   font-size: 0.8rem;
-  border: 1px solid #000;
+  border: 1px solid var(--line);
 }
 
 .iw-period {
@@ -46,7 +46,7 @@
 }
 
 .iw-card {
-  border: 2px solid #000;
+  border: 1px solid var(--line);
   padding: 16px;
   border-radius: 8px;
 }
@@ -105,4 +105,4 @@
 @media (max-width: 400px) {
   .iw-grid { grid-template-columns: 1fr; }
   .iw-value { font-size: 1.5rem; }
-}
+}.iw-header{gap:12px;flex-wrap:wrap}.iw-container{border-radius:18px;color:var(--ink)}.iw-card{background:var(--paper);border-radius:12px}.iw-badge{font-weight:500}.iw-grid{grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr))}

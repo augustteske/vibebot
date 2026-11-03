@@ -48,7 +48,7 @@ export function InsightsCharts({ metric, value }: InsightsChartsProps) {
   return (
     <div className="iw-chart" role="img" aria-label={`Равномерность участия: ${value} процентов`}>
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 24, right: 12, bottom: 4, left: -20 }}>
+          <BarChart data={data} margin={{ top: 24, right: 12, bottom: 4, left: 0 }}>
             <CartesianGrid vertical={false} stroke="#ddd" strokeDasharray="3 3" />
             <XAxis dataKey="name" hide />
             <YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickLine={false}
