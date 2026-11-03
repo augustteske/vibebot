@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { resolve, join, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createApp } from '../server/app.mjs'
@@ -15,6 +15,23 @@ test('current web client header is accepted without the legacy header', async t 
   const result = await client()('/workspaces', { name: 'Synthetic', displayName: 'Owner' },
     { 'X-VibeBot': '', 'X-Vibee': '1' })
   assert.equal(result.status, 201)
+})
+
+test('demo deep link serves the SPA entry point', async t => {
+  const root = resolve('.data')
+  await mkdir(root, { recursive: true })
+  const directory = await mkdtemp(join(root, 'api-static-test-'))
+  t.after(async () => {
+    if (!directory.startsWith(root + sep)) throw new Error('Unexpected test directory')
+    await rm(directory, { recursive: true, force: true })
+  })
+  await writeFile(join(directory, 'index.html'), '<!doctype html><title>Vibee demo shell</title>')
+  const { base } = await start(t, undefined, directory)
+
+  const response = await fetch(base + '/demo')
+  assert.equal(response.status, 200)
+  assert.match(response.headers.get('content-type') ?? '', /text\/html/)
+  assert.match(await response.text(), /Vibee demo shell/)
 })
 
 test('organizer work schedule is saved and returned while Telegram ingestion remains disabled', async t => {
@@ -45,8 +62,8 @@ test('organizer work schedule is saved and returned while Telegram ingestion rem
   assert.equal((await owner('/telegram/binding-tokens', { requestId: randomUUID() })).body.error.code, 'UNAVAILABLE')
 })
 
-async function start(t, dbPath) {
-  const app = createApp({ secret, dbPath })
+async function start(t, dbPath, staticDir) {
+  const app = createApp({ secret, dbPath, staticDir })
   await new Promise(resolveListen => app.server.listen(0, '127.0.0.1', resolveListen))
   let closed = false
   const close = async () => { if (!closed) { closed = true; await app.close() } }
@@ -65,7 +82,7 @@ async function start(t, dbPath) {
       return { status: response.status, body: await response.json(), setCookie }
     }
   }
-  return { client, close }
+  return { client, close, base }
 }
 
 async function team(t, size) {

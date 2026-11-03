@@ -79,7 +79,8 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
       if (!url.pathname.startsWith('/api/')) {
         if (req.method !== 'GET' || !staticDir) throw new AppError(404, 'NOT_FOUND', 'Страница не найдена')
         const root = resolve(staticDir)
-        const file = resolve(root, '.' + decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname))
+        const staticPath = url.pathname === '/' || url.pathname === '/demo' ? '/index.html' : url.pathname
+        const file = resolve(root, '.' + decodeURIComponent(staticPath))
         if (!file.startsWith(root + sep)) throw new AppError(404, 'NOT_FOUND', 'Страница не найдена')
         let data
         try { data = await readFile(file) } catch { throw new AppError(404, 'NOT_FOUND', 'Страница не найдена') }
