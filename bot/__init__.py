@@ -1,3 +1,3 @@
-"""Vibee Telegram bot — Ilian zone (feat/ilian-bot)."""
+"""Vibee Telegram bot."""
 
-__version__ = "0.2.0-ilian"
+__version__ = "0.2.0"

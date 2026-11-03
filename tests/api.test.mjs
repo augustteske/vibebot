@@ -250,7 +250,7 @@ test('SQLite preserves shared state across server restart', async t => {
   const path = join(directory, 'test.sqlite')
   const first = await start(t, path)
   const owner = first.client()
-  const created = await owner('/workspaces', { name: 'Постоянная команда', displayName: 'Август' })
+  const created = await owner('/workspaces', { name: 'Постоянная команда', displayName: 'Организатор' })
   const invitation = await owner('/invitations', {})
   const roundId = created.body.round.id
   await owner('/checkins', { roundId, scores: normal })

@@ -20,7 +20,7 @@ export interface InsightsWidgetProps {
 }
 
 export function InsightsWidget({ state, metrics, teamProfile, periodLabel, demo = false }: InsightsWidgetProps) {
-  // Проверка на недостаток данных (по ТЗ Августа)
+  // Avoid exposing aggregates until the publication threshold is met.
   const isInsufficient = state === 'insufficient' || (metrics && (
     (metrics.participantCount !== undefined && metrics.participantCount < 5)
     || (metrics.messageCount !== undefined && metrics.messageCount < 20)

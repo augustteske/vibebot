@@ -1,16 +1,15 @@
 .iw-container {
-  border: 1px solid var(--line);
-  padding: 20px;
-  border-radius: 12px;
-  background: #fff;
-  color: #000;
-  font-family: system-ui, sans-serif;
-  max-width: 100%;
+  border: 1px solid var(--vibee-line);
+  padding: clamp(20px, 3vw, 28px);
+  border-radius: var(--vibee-radius-card);
+  background: rgba(255, 255, 255, .94);
+  color: var(--vibee-ink);
+  font-family: var(--vibee-font);
+  max-width: none;
+  box-shadow: var(--vibee-shadow-soft);
 }
 
-.iw-state-warn {
-  background: var(--soft);
-}
+.iw-state-warn { background: linear-gradient(135deg, #fff7d4, #ffe982); }
 
 .iw-header {
   display: flex;
@@ -21,16 +20,17 @@
 
 .iw-title {
   margin: 0;
-  font-size: 1.25rem;
+  font-size: clamp(1.25rem, 2vw, 1.65rem);
+  letter-spacing: -.04em;
 }
 
 .iw-badge {
-  background: var(--soft);
+  background: var(--vibee-yellow-soft);
   padding: 4px 10px;
   border-radius: 20px;
   font-weight: bold;
   font-size: 0.8rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--vibee-line);
 }
 
 .iw-period {
@@ -41,14 +41,16 @@
 
 .iw-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   gap: 16px;
 }
 
 .iw-card {
-  border: 1px solid var(--line);
-  padding: 16px;
-  border-radius: 8px;
+  border: 1px solid var(--vibee-line);
+  padding: 18px;
+  border-radius: 18px;
+  background: linear-gradient(145deg, #fff, #fffefa);
+  box-shadow: 0 8px 24px rgba(23, 23, 25, .045);
 }
 
 .iw-card h3 {
@@ -87,7 +89,7 @@
   font-size: 2rem;
   font-weight: 800;
   margin: 0 0 10px 0;
-  color: #000;
+  color: var(--vibee-ink);
 }
 
 .iw-method {
@@ -105,4 +107,7 @@
 @media (max-width: 400px) {
   .iw-grid { grid-template-columns: 1fr; }
   .iw-value { font-size: 1.5rem; }
-}.iw-header{gap:12px;flex-wrap:wrap}.iw-container{border-radius:var(--radius-card);color:var(--ink);box-shadow:var(--surface-shadow);padding:clamp(18px,3vw,26px)}.iw-title{font-weight:750;letter-spacing:-.035em}.iw-card{background:linear-gradient(145deg,#fff,var(--paper));border:1px solid rgba(222,223,216,.8);border-radius:16px;box-shadow:0 8px 24px rgba(23,23,25,.045);padding:18px}.iw-badge{font-weight:500}.iw-grid{grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr))}
+}
+
+.iw-header { gap: 12px; flex-wrap: wrap; }
+.iw-title { font-weight: 750; }
