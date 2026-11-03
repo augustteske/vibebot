@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { CheckinPanel } from './features/checkin/CheckinPanel'
 import { InsightsPanel } from './features/insights/InsightsPanel'
 import { ActionsPanel } from './features/actions/ActionsPanel'
@@ -6,27 +6,59 @@ import { aggregateRound } from './core/rules'
 import { demoRounds } from './demo/fixtures'
 import { TeamWorkspace } from './core/TeamWorkspace'
 import { LandingPage } from './core/LandingPage'
+import { DemoDashboard } from './core/DemoDashboard'
 import './App.css'
 
 export default function App() {
   const [scenario, setScenario] = useState<keyof typeof demoRounds>('clarity')
-  const [team, setTeam] = useState(() => new URLSearchParams(window.location.search).get('mode') === 'team' || window.location.hash.startsWith('#invite='))
-  const [enteredWorkspace, setEnteredWorkspace] = useState(() => new URLSearchParams(window.location.search).get('mode') === 'team' || window.location.hash.startsWith('#invite='))
+  const [demo, setDemo] = useState(() => window.location.pathname === '/demo')
+  const [team, setTeam] = useState(() => window.location.pathname !== '/demo' && (new URLSearchParams(window.location.search).get('mode') === 'team' || window.location.hash.startsWith('#invite=')))
+  const [enteredWorkspace, setEnteredWorkspace] = useState(() => window.location.pathname !== '/demo' && (new URLSearchParams(window.location.search).get('mode') === 'team' || window.location.hash.startsWith('#invite=')))
   const summary = aggregateRound(demoRounds[scenario])
+
+  useEffect(() => {
+    function syncRoute() {
+      const demoRoute = window.location.pathname === '/demo'
+      const teamRoute = !demoRoute && (new URLSearchParams(window.location.search).get('mode') === 'team' || window.location.hash.startsWith('#invite='))
+      setDemo(demoRoute)
+      setTeam(teamRoute)
+      setEnteredWorkspace(teamRoute)
+    }
+    window.addEventListener('popstate', syncRoute)
+    return () => window.removeEventListener('popstate', syncRoute)
+  }, [])
+
   function mode(next: boolean) {
+    setDemo(false)
     setTeam(next)
     setEnteredWorkspace(true)
-    window.history.replaceState(null, '', window.location.pathname + (next ? '?mode=team' : '') + window.location.hash)
+    window.history.pushState(null, '', '/' + (next ? '?mode=team' : '') + window.location.hash)
+  }
+
+  function openDemo() {
+    window.history.pushState(null, '', '/demo')
+    setDemo(true)
+    setTeam(false)
+    setEnteredWorkspace(false)
+  }
+
+  function openHome() {
+    window.history.pushState(null, '', '/')
+    setDemo(false)
+    setTeam(false)
+    setEnteredWorkspace(false)
+  }
+
+  if (demo) {
+    return <DemoDashboard onBack={openHome} onEnter={() => mode(true)} onCreateTeam={() => mode(true)} />
   }
   if (!enteredWorkspace) {
-    return <LandingPage onEnter={() => mode(true)} />
+    return <LandingPage onEnter={() => mode(true)} onDemo={openDemo} />
   }
   return <main className="workspace">
     <header><a className="brand" href="/" onClick={event => {
       event.preventDefault()
-      setEnteredWorkspace(false)
-      setTeam(false)
-      window.history.replaceState(null, '', window.location.pathname)
+      openHome()
     }}><img src="/bee.svg" alt=""/>Vibee</a><span className="badge">{team ? 'Пространство команды' : 'Демонстрация · вымышленные данные'}</span></header>
     <section className="intro"><span className="eyebrow">ПРОСТРАНСТВО КОМАНДЫ</span><h1>Почувствовать команду.<br/>Сделать следующий шаг.</h1><p>Ресурс, ясность и поддержка — повод договориться о том, что поможет сегодня. Утилита для рабочих чатов — в разработке.</p></section>
     <nav className="mode-switch" aria-label="Режим"><button className="button secondary" aria-pressed={!team} onClick={() => mode(false)}>Демо для питча</button><button className="button secondary" aria-pressed={team} onClick={() => mode(true)}>Моя команда</button></nav>
