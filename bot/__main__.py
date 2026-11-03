@@ -13,7 +13,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from .flow import CheckinFlow, QUESTIONS
-from .http_transport import HttpTransport, TransportError
+from .http_transport import HttpTransport, OrganizerRequiredError, TransportError
 from .intake import ConsentSnapshot, TelegramIntake
 from .pause_state import PauseState
 from .voice import LocalWhisperProvider, VoiceError, VoiceTranscription, install_voice_handlers
@@ -22,6 +22,7 @@ from .voice import LocalWhisperProvider, VoiceError, VoiceTranscription, install
 def create_dispatcher(
     intake: TelegramIntake | None = None,
     voice: VoiceTranscription | None = None,
+    notification_transport: HttpTransport | None = None,
 ) -> Dispatcher:
     dispatcher = Dispatcher()
     flow = CheckinFlow()
@@ -55,6 +56,27 @@ def create_dispatcher(
         if voice_transcription is not None:
             voice_transcription.cancel(message.from_user.id)
         await message.answer("Участие отменено, черновик удалён. Разрешение на расшифровку отозвано, текущая обработка останавливается. Сообщения в Telegram автоматически не удаляются.")
+
+    @dispatcher.message(Command("subscribe"))
+    async def subscribe(message: Message):
+        if (message.chat.type != "private" or message.from_user is None
+                or message.from_user.is_bot or message.chat.id != message.from_user.id):
+            return
+        if notification_transport is None:
+            await message.answer("Уведомления не настроены. Обратитесь к администратору команды.")
+            return
+        try:
+            result = await notification_transport.subscribe_notifications(message.from_user.id)
+        except OrganizerRequiredError:
+            await message.answer("Подписаться может только организатор, чей Telegram-аккаунт связан с этой командой.")
+            return
+        except TransportError:
+            await message.answer("Не удалось включить уведомления. Проверьте подключение бота и настройки сервера.")
+            return
+        if result.get("notificationsEnabled") is True:
+            await message.answer("Подписка включена. Уведомления о закрытых опубликованных периодах будут приходить сюда.")
+        else:
+            await message.answer("Подписка сохранена, но серверная отправка уведомлений пока не настроена.")
 
     async def submit_intake_text(message: Message, text: str) -> None:
         if intake is None or message.chat.type == "private" or message.from_user is None:
@@ -213,7 +235,7 @@ async def main():
             company_accepted=True,
         ), transport, PauseState(pause_path))
         await intake.reconcile_pause()
-    dispatcher, flow = create_dispatcher(intake, voice_transcription)
+    dispatcher, flow = create_dispatcher(intake, voice_transcription, transport)
 
     async def cleanup():
         while True:

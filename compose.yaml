@@ -10,6 +10,7 @@ services:
       VIBEBOT_DATA_DIR: /app/.data
       COOKIE_SECURE: "false"
       APP_ORIGIN: "${APP_ORIGIN:-http://127.0.0.1:8787}"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
       LLM_PROVIDER: "${LLM_PROVIDER:-template}"
       LLM_API_KEY: "${LLM_API_KEY:-}"
       LLM_BASE_URL: "${LLM_BASE_URL:-}"

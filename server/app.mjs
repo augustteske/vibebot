@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
 import { AppError, createStore } from './store.mjs'
 
-export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookies = false, allowedOrigins = [], telegramBootstrapCredential, telegramSynthetic = false, now = Date.now, recommendationProvider, recommendationTimeoutMs }) {
+export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookies = false, allowedOrigins = [], telegramBootstrapCredential, telegramBotToken, telegramFetch = globalThis.fetch, telegramSynthetic = false, now = Date.now, recommendationProvider, recommendationTimeoutMs }) {
   const store = createStore({ path: dbPath, secret, telegramBootstrapCredential, telegramSynthetic, now,
     recommendationProvider, recommendationTimeoutMs })
   const cleanupTimer = setInterval(() => {
@@ -18,6 +18,41 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
     const origin = req.headers.origin
     const sameOrigin = (secureCookies ? 'https://' : 'http://') + req.headers.host
     if (origin && origin !== sameOrigin && !allowedOrigins.includes(origin)) throw new AppError(403, 'ORIGIN_REJECTED', 'Запрос с другого сайта запрещён')
+  }
+  async function notifyOrganizer(actor, bindingId, periodId, reauthenticate) {
+    if (typeof telegramBotToken !== 'string' || !telegramBotToken.trim()) return
+    const target = store.telegram.claimOrganizerNotification(actor, bindingId, periodId)
+    if (!target) return
+    let delivered = false
+    try {
+      const recommendation = await store.telegram.recommendation(actor, bindingId, periodId, reauthenticate)
+      const metrics = target.metrics
+      const text = [
+        'Период закрыт.',
+        `Вне рабочего времени: ${metrics.outsideHoursPercent.toFixed(1)}%.`,
+        `Участие: ${metrics.participationEvenness.toFixed(1)}%.`,
+        `Благодарности: ${metrics.recognitionPercent.toFixed(1)}%.`,
+        `Рекомендация: ${recommendation.body}`,
+      ].join('\n')
+      const response = await telegramFetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: target.chatId, text, disable_web_page_preview: true }),
+        signal: AbortSignal.timeout(5000),
+      })
+      const result = await response.json()
+      if (!response.ok || result?.ok !== true) throw new Error('Telegram rejected notification')
+      delivered = true
+    } catch (error) {
+      console.warn('Vibee: organizer Telegram notification delivery failed (' +
+        (error instanceof Error ? error.name : 'unknown error') + ')')
+    } finally {
+      try { store.telegram.completeOrganizerNotification(actor, bindingId, periodId, delivered) }
+      catch (error) {
+        console.error('Vibee: could not update organizer Telegram notification status (' +
+          (error instanceof Error ? error.name : 'unknown error') + ')')
+      }
+    }
   }
   async function body(req, invalidCode = 'INVALID_JSON') {
     if (!req.headers['content-type']?.startsWith('application/json')) throw new AppError(415, 'JSON_REQUIRED', 'Нужен запрос JSON')
@@ -84,6 +119,19 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
           ? store.telegram.updateProfile(actor, await body(req, 'INVALID_INPUT'))
           : store.telegram.profile(actor))
       }
+      const notificationSubscribeRoute = url.pathname.match(/^\/api\/bot\/v1\/bindings\/([a-f0-9-]+)\/notifications\/subscribe$/)
+      if (notificationSubscribeRoute) {
+        if (req.method !== 'POST') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
+        if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
+        const actor = store.telegram.authenticate(req.headers.authorization)
+        if (!actor) throw new AppError(401, 'BOT_AUTH_REQUIRED', 'Нужна авторизация бота')
+        const subscription = store.telegram.subscribeNotifications(
+          actor, notificationSubscribeRoute[1], await body(req, 'INVALID_INPUT'))
+        return json(res, 200, {
+          ...subscription,
+          notificationsEnabled: typeof telegramBotToken === 'string' && telegramBotToken.trim().length > 0,
+        })
+      }
       if (['/api/telegram/link-tokens', '/api/bot/v1/links', '/api/telegram/binding-tokens', '/api/bot/v1/bindings'].includes(url.pathname)) {
         if (req.method !== 'POST') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
         if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
@@ -106,9 +154,13 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         if (closing) checkBrowser(req)
         const actor = store.authenticate(tokenFrom(req))
         if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
-        return json(res, 200, closing
-          ? store.telegram.closePeriod(actor, periodRoute[1], await body(req, 'INVALID_INPUT'))
-          : store.telegram.summary(actor, periodRoute[1]))
+        if (!closing) return json(res, 200, store.telegram.summary(actor, periodRoute[1]))
+        const input = await body(req, 'INVALID_INPUT')
+        const result = store.telegram.closePeriod(actor, periodRoute[1], input)
+        if (result.status === 'published') {
+          await notifyOrganizer(actor, periodRoute[1], input.periodId, () => store.authenticate(tokenFrom(req)))
+        }
+        return json(res, 200, result)
       }
       const recommendationRoute = url.pathname.match(/^\/api\/telegram\/bindings\/([a-f0-9-]+)\/periods\/([a-f0-9-]+)\/(recommendation|action)$/)
       if (recommendationRoute) {

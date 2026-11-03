@@ -33,6 +33,7 @@ const app = createApp({
   allowedOrigins: (process.env.APP_ORIGIN ?? 'http://127.0.0.1:5173,http://localhost:5173').split(','),
   telegramSynthetic,
   telegramBootstrapCredential,
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
   recommendationProvider,
 })
 const host = process.env.HOST ?? '127.0.0.1'
