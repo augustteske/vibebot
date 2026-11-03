@@ -9,11 +9,12 @@
 }
 
 .telegram-summary-state--calibrating {
-  border: 2px solid #000;
-  border-radius: 12px;
-  background: #ffd700;
-  color: #000;
-  padding: 20px;
+  border: 1px solid rgba(190, 150, 0, .18);
+  border-radius: var(--vibee-radius-card);
+  background: linear-gradient(135deg, #fff7d4, #ffe982);
+  color: var(--vibee-ink);
+  padding: 26px;
+  box-shadow: var(--vibee-shadow-soft);
   margin-bottom: 22px;
 }
 

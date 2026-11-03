@@ -1,27 +1,16 @@
-# GitLab — перенос завершён
+# GitLab repository
 
-Основной репозиторий: https://gitlab.com/shertwg-group1/vibebot
-Видимость при создании: Private. Project ID: 88326699.
+Основной репозиторий Shertwg group: https://gitlab.com/shertwg-group1/vibebot. GitLab используется для merge requests и CI. GitHub сохранён как зеркало истории; ориентируйтесь на GitLab при получении актуальных изменений.
 
-История и шесть веток загружены и проверены через git ls-remote:
-- main
-- develop
-- feat/august-core — сохранённая серверная версия
-- feat/ilian-checkin
-- feat/arina-actions
-- feat/alisa-insights-demo
-
-Локальный origin указывает на GitLab. Прежний GitHub сохранён как remote github. В main/develop пока первоначальная демонстрационная версия; серверная итерация находится в ветке Августа и должна попасть в develop через merge request.
-
-GitLab CI и шаблон MR подготовлены в ветке Августа. Результат удалённого pipeline пока не проверен. Локально 14 тестов и production-сборка прошли.
-
-Осталось: проверить pipeline, создать/просмотреть MR в develop, выдать доступ ребятам по точным GitLab-логинам. Приглашения пока не отправлены.
+`main` — стабильная демонстрационная версия, `develop` — интеграционная. Изменения вносите в feature-ветку и отправляйте merge request в `develop`; не отправляйте напрямую в `main` или `develop`.
 
 Для нового клонирования:
+
 ```sh
 git clone https://gitlab.com/shertwg-group1/vibebot.git
 cd vibebot
-git switch feat/august-core
 npm ci
 npm run dev
 ```
+
+Для переноса существующего checkout проверьте `git remote -v` и убедитесь, что `origin` указывает на GitLab. При необходимости GitHub можно оставить дополнительным remote для зеркалирования.

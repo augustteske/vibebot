@@ -1,99 +1,113 @@
 <div align="center">
-  <img src="public/bee.svg" alt="Vibee bee mascot" width="112">
-  <h1>Vibee</h1>
+  <img src="public/bee-mascot.png" alt="3D-маскот Vibee — улыбающаяся пчёлка" width="240">
+  <h1>🐝 Vibee</h1>
   <p><strong>Почувствовать команду. Сделать следующий шаг.</strong></p>
+  <p>Общие сигналы для бережного разговора и командных решений.</p>
   <p>
-    <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
-    <img alt="Node.js 24.x" src="https://img.shields.io/badge/Node.js-24.x%2B-339933?logo=node.js&logoColor=white">
+    <a href="https://gitlab.com/shertwg-group1/vibebot/-/pipelines"><img alt="CI · Node tests" src="https://gitlab.com/shertwg-group1/vibebot/badges/develop/pipeline.svg?job=verify"></a>
+    <a href="https://gitlab.com/shertwg-group1/vibebot/-/pipelines"><img alt="CI · Python tests" src="https://gitlab.com/shertwg-group1/vibebot/badges/develop/pipeline.svg?job=verify-bot"></a>
+    <a href="LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/License-MIT-FFD638.svg"></a>
+    <a href="https://nodejs.org/"><img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24.x-339933?logo=node.js&amp;logoColor=white"></a>
   </p>
 </div>
 
-Vibee — open-source прототип для бережной аналитики командной коммуникации. Он помогает смотреть на общие сигналы команды и обсуждать практические шаги, не оценивая отдельных людей.
+---
 
-Подробнее о целях и текущих границах проекта — в [контексте проекта](docs/PROJECT_CONTEXT.md).
+<h2 align="center">Возможности</h2>
 
-## Features
+- 🔒 **Приватность по умолчанию** — явные согласия, ограниченные сроки хранения и отсутствие персональных рейтингов.
+- 📊 **Умные метрики** — общение вне расписания, равномерность участия и распознанные благодарности; публикуются только разрешённые агрегаты.
+- 🎙️ **Голосовые** — серверный синтетический контур проверяет только ограниченные метаданные. Загрузка аудио и расшифровка речи не реализованы.
+- 🔔 **Уведомления** — есть прототип уведомления организатора о закрытом периоде; реальная доставка требует настройки и не включена в обычный запуск.
+- 📱 **Telegram-бот** — Python/aiogram transport и личный демо-сценарий. Реальные групповые чаты не подключены.
+- 💡 **Следующий шаг** — объяснимая шаблонная рекомендация, подтверждаемое действие и два вида обратной связи.
 
-- **Telegram communication insights:** прототип API и UI для агрегированного обзора командной переписки; полный production-поток подключения групп пока не готов.
-- **Three aggregate metrics:** доля сообщений вне рабочих часов, равномерность участия и доля сообщений с благодарностью/признанием.
-- **Recommendations:** шаблонная рекомендация по умолчанию; опционально можно настроить Groq, OpenAI или Ollama. Внешнему LLM передаются только опубликованные метрики, не тексты чата и не личности.
-- **Privacy by design:** добровольное участие, проверка согласий и порог публикации агрегатов. Это ранний прототип, не медицинский инструмент, система оценки сотрудников или обещание полной анонимности.
-- **Python Telegram bot:** личное демо на aiogram; синтетический API доступен для локальной QA. Реальная групповая интеграция и production-привязка пока не готовы.
+> **Статус:** исследовательский прототип. Групповой Telegram-контур работает только в закрытом синтетическом режиме; обычный сервер не обрабатывает реальные чаты. Не добавляйте реальные сообщения, идентификаторы или токены в демо, репозиторий и логи. Внешний ИИ по умолчанию не используется.
 
-## Quick Start
+---
 
-### Web app and API
+<h2 align="center">Быстрый старт</h2>
 
-Requirements: Node.js 24.x and npm. Python 3.12 is needed for the bot. Docker Compose v2 is optional.
+### Развёртывание одной командой
 
-```sh
-npm ci
-cp .env.example .env
-npm run dev
-```
-
-Open <http://127.0.0.1:5173>. The dev command starts the React/Vite UI and Node API. See `.env.example` for server, bot, and optional LLM settings.
-
-### Telegram bot
-
-Install the bot dependencies once:
+На Ubuntu/Debian или macOS запустите из корня репозитория:
 
 ```sh
-python -m venv bot/.venv
-source bot/.venv/bin/activate
-python -m pip install -r bot/requirements.txt
+bash scripts/deploy.sh
 ```
 
-Set `TELEGRAM_BOT_TOKEN` in the same shell that runs the bot, then start the personal demo:
+На Windows запустите в PowerShell:
 
-```sh
-export TELEGRAM_BOT_TOKEN="<token from BotFather>"
-python -m bot
+```powershell
+.\scripts\deploy.ps1
 ```
 
-In PowerShell, activate with `.\bot\.venv\Scripts\Activate.ps1` and set the token with `$env:TELEGRAM_BOT_TOKEN = "<token from BotFather>"`. The bot answers `/start` and `/stop` in private chat; it does not yet deliver real group analytics to the dashboard. Do not configure it to collect real group messages.
+Если `.env` отсутствует, скрипт создаст его из `.env.example` и остановится. Заполните необходимые значения и запустите его повторно. Скрипт проверяет Docker Compose, при необходимости выполняет установку поддерживаемым системным способом, затем собирает и запускает приложение в фоне на порту 8787. Подробнее: [`scripts/deploy.sh`](scripts/deploy.sh) и [`scripts/deploy.ps1`](scripts/deploy.ps1).
 
 ### Docker Compose
 
-Start the web app and API:
+Нужны Docker Engine и Docker Compose v2:
 
 ```sh
-docker compose up --build
+docker compose up
 ```
 
-For the personal bot demo, set `TELEGRAM_BOT_TOKEN` in `.env`, then run:
+Откройте <http://127.0.0.1:8787>. Для пересборки после изменения кода используйте `docker compose up --build`. Compose запускает веб-приложение и API; профиль Telegram-бота по умолчанию выключен. SQLite хранится в Docker volume. Остановить — `Ctrl+C` или `docker compose down`.
+
+Настройки берутся из необязательного `.env`. `TELEGRAM_BOT_TOKEN` нужен только для отдельно разрешённой доставки уведомлений; внешний провайдер рекомендаций настраивается через `LLM_PROVIDER` и `LLM_API_KEY` и по умолчанию не вызывается. `COOKIE_SECURE=false` допустим только для локального HTTP; за HTTPS reverse proxy установите `COOKIE_SECURE=true`. Обычный Compose не включает реальный групповой Telegram-контур.
+
+### Node.js и npm
+
+Нужны Node.js **24.x** и npm. Из корня репозитория:
 
 ```sh
-docker compose --profile bot-demo up --build
+npm ci
+npm run dev
 ```
 
-The Node service owns SQLite storage in a persistent volume. The bot communicates over the Compose network and does not access the database directly. Compose does not enable the unfinished production group-binding workflow.
+Откройте <http://127.0.0.1:5173>. Команда запускает Vite и локальный Node.js API. Она не включает реальную Telegram-интеграцию.
 
-## Architecture
+---
+
+<h2 align="center">Архитектура</h2>
 
 ```text
-Telegram → Python / aiogram → Node.js API → SQLite
-                                  ↑
-                           React web app
+Telegram updates ──→ Python 3.12 / aiogram ──→ Node.js 24 API ──→ SQLite
+                                                    │
+                                                    └──→ React / TypeScript
 ```
 
-React provides the web UI; Node.js owns the API, consent checks, aggregation, and SQLite persistence. The Python/aiogram bot is a separate HTTP client and never connects to SQLite. Current Telegram group flows are synthetic/local QA only; the private polling demo is not connected to team analytics.
+Это схема компонентов, а не заявление о готовом подключении живого чата. Локальная HTTP-интеграция проверена синтетическими тестами. Реальные Telegram ID, полномочия инициатора и полный состав группы ещё не подтверждены — реальный групповой контур выключен. API отвечает за авторизацию, согласия, хранение и публикацию агрегатов; интерфейс показывает только разрешённые результаты. См. [контракт API и Telegram](docs/CONTRACTS.md) и [обзор стека](docs/STACK.md).
 
-## Development checks
+---
 
-```sh
-npm run doctor
-npm run check
-npm test
-```
+<h2 align="center">Приватность и согласия</h2>
 
-Python checks:
+Обработка групповых сообщений требует согласия компании и **каждого** участника проверенного состава. Отказ, отзыв согласия, неизвестный отправитель или сбой доставки останавливают обработку чата. До подтверждения состава и полномочий никакие реальные рабочие чаты подключать нельзя.
 
-```sh
-python -m unittest discover -s bot/tests -v
-python -m bot --check
-```
+В синтетическом Telegram-контуре действуют сроки: сырые тексты — до **15 минут**, производные записи сообщений и техническая дедупликация — до **24 часов**, закрытые агрегаты, рекомендации и обратная связь — до **7 дней**. Отзыв согласия немедленно останавливает обработку и удаляет связанные данные, не дожидаясь TTL. Эти правила не обещают физического стирания страниц SQLite/WAL или копий сообщений в Telegram.
 
-## License
+Голосовые данные в текущем срезе не скачиваются и не расшифровываются. Внешняя модель отключена по умолчанию; рекомендации работают по шаблонам. Агрегаты уменьшают раскрытие данных, но не гарантируют абсолютную анонимность. Vibee — не медицинский или HR-инструмент.
 
-Distributed under the [MIT License](LICENSE).
+Подробнее: [границы и хранение Telegram-данных](docs/CONTRACTS.md), [проверки и ограничения](docs/QA.md), [контекст продукта](docs/PROJECT_CONTEXT.md).
+
+---
+
+<h2 align="center">Документация</h2>
+
+- [Контракт API и Telegram](docs/CONTRACTS.md)
+- [QA и сценарии проверки](docs/QA.md)
+- [Архитектура стека](docs/STACK.md)
+- [Продуктовый контекст](docs/PROJECT_CONTEXT.md)
+- [План команды](docs/TEAM_PLAN.md)
+- [Правила бренда](docs/BRAND.md)
+- [Руководство Python-бота](bot/README.md)
+- [Compose-конфигурация](compose.yaml)
+- [Развёртывание одной командой](scripts/deploy.sh) ([PowerShell](scripts/deploy.ps1))
+- [GitLab CI](https://gitlab.com/shertwg-group1/vibebot/-/pipelines)
+
+---
+
+<h2 align="center">Лицензия</h2>
+
+Этот проект распространяется по лицензии [MIT](LICENSE).

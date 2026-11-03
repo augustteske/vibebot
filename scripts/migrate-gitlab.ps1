@@ -11,6 +11,9 @@ if ($LASTEXITCODE -eq 0) {
 $vibeRemoteRefs = & git ls-remote gitlab
 if ($LASTEXITCODE -ne 0) { throw 'Cannot access GitLab. Sign in using your regular Git authentication.' }
 if ($vibeRemoteRefs) { throw 'The target repository is not empty. Review its history before merging; no force-push was attempted.' }
-Invoke-VibeGit push gitlab main develop feat/august-core feat/ilian-checkin feat/arina-actions feat/alisa-insights-demo
+$vibeBranches = @(& git branch --format='%(refname:short)' --list main develop 'feat/*')
+if ($LASTEXITCODE -ne 0) { throw 'Cannot list local branches. Check the displayed Git error.' }
+if ($vibeBranches.Count -eq 0) { throw 'No main, develop, or feature branches were found locally.' }
+Invoke-VibeGit push gitlab @vibeBranches
 Invoke-VibeGit ls-remote --heads gitlab
-Write-Output 'Six branches uploaded. Verify the GitLab pipeline before changing the primary remote.'
+Write-Output "$($vibeBranches.Count) project branches uploaded. Verify the GitLab pipeline before changing the primary remote."

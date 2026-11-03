@@ -8,7 +8,10 @@ function stop(code = 0) {
   for (const child of children) child.kill()
   process.exitCode = code
 }
-for (const args of [['--watch', 'server/index.mjs'], [resolve('node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--strictPort']]) {
+for (const args of [
+  ['--watch', 'server/index.mjs'],
+  [resolve('node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--strictPort', ...process.argv.slice(2)],
+]) {
   const child = spawn(process.execPath, args, { stdio: 'inherit', windowsHide: true })
   children.push(child)
   child.on('error', () => stop(1))

@@ -157,6 +157,19 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
       workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id), version INTEGER NOT NULL,
       time_zone TEXT, intervals TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS telegram_notification_subscriptions(
+      workspace_id TEXT NOT NULL, member_id TEXT NOT NULL, telegram_user_id TEXT NOT NULL,
+      chat_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+      PRIMARY KEY(workspace_id,member_id), UNIQUE(workspace_id,telegram_user_id),
+      FOREIGN KEY(workspace_id,member_id) REFERENCES members(workspace_id,id)
+    );
+    CREATE TABLE IF NOT EXISTS telegram_notification_deliveries(
+      binding_id TEXT NOT NULL REFERENCES telegram_bindings(id), period_id TEXT NOT NULL,
+      member_id TEXT NOT NULL REFERENCES members(id), status TEXT NOT NULL
+        CHECK(status IN ('sending','pending','sent')),
+      updated_at INTEGER NOT NULL, expires INTEGER NOT NULL,
+      PRIMARY KEY(binding_id,period_id,member_id)
+    );
     CREATE TABLE IF NOT EXISTS telegram_profile_requests(
       workspace_id TEXT NOT NULL REFERENCES workspaces(id), member_id TEXT NOT NULL,
       request_id TEXT NOT NULL, digest TEXT NOT NULL, response TEXT NOT NULL, expires INTEGER NOT NULL,
@@ -190,6 +203,17 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
       PRIMARY KEY(binding_id,period_id,kind,member_id,request_id)
     );
   `)
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    const bindingColumns = db.prepare('PRAGMA table_info(telegram_bindings)').all()
+    if (!bindingColumns.some(column => column.name === 'migration_blocked')) {
+      db.exec('ALTER TABLE telegram_bindings ADD COLUMN migration_blocked INTEGER NOT NULL DEFAULT 0')
+    }
+    db.exec('COMMIT')
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
   const one = (sql, ...args) => db.prepare(sql).get(...args)
   const all = (sql, ...args) => db.prepare(sql).all(...args)
   const run = (sql, ...args) => db.prepare(sql).run(...args)
@@ -327,6 +351,7 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
     run('DELETE FROM telegram_event_ids WHERE expires<=?', time)
     run('DELETE FROM telegram_message_ids WHERE expires<=?', time)
     run('DELETE FROM telegram_closed_periods WHERE expires<=?', time)
+    run('DELETE FROM telegram_notification_deliveries WHERE expires<=?', time)
     run('DELETE FROM telegram_chat_actions WHERE expires<=?', time)
     run('DELETE FROM telegram_feedback_votes WHERE (binding_id,period_id,kind) IN (SELECT binding_id,period_id,kind FROM telegram_feedback_collections WHERE expires<=?)', time)
     run('DELETE FROM telegram_feedback_collections WHERE expires<=?', time)
@@ -396,11 +421,9 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
   return {
     cleanup,
     profile(actor) {
-      unavailable()
       return organizerProfile(actor)
     },
     updateProfile(actor, input) {
-      unavailable()
       organizerProfile(actor)
       const next = validatedProfile(input)
       return tx(() => {
@@ -564,6 +587,68 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
         createHash('sha256').update(match[1]).digest('hex'))
       if (!credential) fail(401, 'BOT_AUTH_REQUIRED', 'Нужна авторизация бота')
       return { ...credential, kind: 'bot' }
+    },
+    subscribeNotifications(actor, id, input) {
+      unavailable()
+      if (!input || Array.isArray(input) || typeof input !== 'object'
+        || Object.keys(input).length !== 2 || !telegramId(input.telegramUserId)
+        || input.chatId !== input.telegramUserId) invalid()
+      return tx(() => {
+        const binding = bindingFor(actor, id)
+        if (actor.kind !== 'bot') fail(403, 'FORBIDDEN', 'Нужен scoped credential бота')
+        const member = one(`SELECT m.id,m.role FROM telegram_links l
+          JOIN members m ON m.workspace_id=l.workspace_id AND m.id=l.member_id
+          WHERE l.binding_id=? AND l.workspace_id=? AND l.telegram_user_id=?`,
+          id, actor.workspace_id, input.telegramUserId)
+        if (!member || member.role !== 'organizer') {
+          fail(403, 'ORGANIZER_REQUIRED', 'Уведомления доступны только связанному организатору')
+        }
+        const existing = one(`SELECT member_id FROM telegram_notification_subscriptions
+          WHERE workspace_id=? AND telegram_user_id=?`, actor.workspace_id, input.telegramUserId)
+        if (existing && existing.member_id !== member.id) {
+          fail(409, 'SUBSCRIPTION_CONFLICT', 'Этот Telegram-аккаунт связан с другим организатором')
+        }
+        run(`INSERT INTO telegram_notification_subscriptions
+          (workspace_id,member_id,telegram_user_id,chat_id,created_at) VALUES(?,?,?,?,?)
+          ON CONFLICT(workspace_id,member_id) DO UPDATE SET
+          telegram_user_id=excluded.telegram_user_id,chat_id=excluded.chat_id,created_at=excluded.created_at`,
+          actor.workspace_id, member.id, input.telegramUserId, input.chatId, now())
+        return { subscribed: true }
+      })
+    },
+    claimOrganizerNotification(actor, id, periodId) {
+      unavailable()
+      return tx(() => {
+        organizerProfile(actor)
+        const { row } = publishedPeriod(actor, id, periodId)
+        const subscription = one(`SELECT s.chat_id FROM telegram_notification_subscriptions s
+          JOIN members m ON m.workspace_id=s.workspace_id AND m.id=s.member_id
+          JOIN telegram_links l ON l.workspace_id=s.workspace_id AND l.member_id=s.member_id
+            AND l.telegram_user_id=s.telegram_user_id
+          WHERE s.workspace_id=? AND s.member_id=? AND m.role='organizer' AND l.binding_id=?`,
+          actor.workspace_id, actor.id, id)
+        if (!subscription) return null
+        const delivery = one(`SELECT status,updated_at FROM telegram_notification_deliveries
+          WHERE binding_id=? AND period_id=? AND member_id=?`, id, periodId, actor.id)
+        if (delivery?.status === 'sent' || (delivery?.status === 'sending' && delivery.updated_at > now() - 30000)) {
+          return null
+        }
+        run(`INSERT INTO telegram_notification_deliveries
+          (binding_id,period_id,member_id,status,updated_at,expires) VALUES(?,?,?,'sending',?,?)
+          ON CONFLICT(binding_id,period_id,member_id) DO UPDATE SET
+          status='sending',updated_at=excluded.updated_at,expires=excluded.expires`,
+          id, periodId, actor.id, now(), row.expires)
+        return { chatId: subscription.chat_id, metrics: JSON.parse(row.metrics) }
+      })
+    },
+    completeOrganizerNotification(actor, id, periodId, delivered) {
+      if (typeof delivered !== 'boolean') invalid()
+      unavailable()
+      organizerProfile(actor)
+      bindingFor(actor, id)
+      run(`UPDATE telegram_notification_deliveries SET status=?,updated_at=?
+        WHERE binding_id=? AND period_id=? AND member_id=? AND status='sending'`,
+        delivered ? 'sent' : 'pending', now(), id, periodId, actor.id)
     },
     acceptText(actor, id, input) {
       unavailable()

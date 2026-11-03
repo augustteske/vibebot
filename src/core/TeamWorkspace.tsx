@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { api, ApiError } from './client'
 import type { SessionSnapshot } from './contracts'
 import { SummaryPanels } from './SummaryPanels'
+import { TeamSettings } from './TeamSettings'
 import './team.css'
 
 export type TeamMemberRole = 'lead' | 'developer' | 'designer' | 'manager' | 'other';
@@ -185,15 +186,17 @@ export function TeamWorkspace() {
   return <section className="team-space" aria-label="Моя команда">
     <div className="feedback-messages" aria-live="polite">{error && <div className="error" role="alert">{error} <button type="button" onClick={() => void refresh()} disabled={busy}>Обновить</button></div>}{notice && <p className="status">{notice}</p>}</div>
     {!initialized ? <div className="panel"><p role="status">Открываем пространство…</p></div> : !snapshot ? <section className="panel entrance">
+      <div className="entrance__brand"><img src="/bee.svg" alt=""/><span>Vibee</span></div>
       <h2>{restore ? 'Вернуться в команду' : join ? 'Присоединиться к команде' : 'Создать пространство'}</h2>
       <p className="muted">Собирайте добровольные сигналы и выбирайте полезный следующий шаг.</p>
       <form onSubmit={authenticate}><fieldset disabled={busy}>{restore ? <label className="team-field">Личный код входа<input name="accessKey" type="password" autoComplete="off" maxLength={64} required/></label> : <><label className="team-field">Ваше имя<input name="displayName" autoComplete="given-name" maxLength={60} required/></label>
-        {join ? <label className="team-field">Приглашение<input value={invite} onChange={e => setInvite(e.target.value)} autoComplete="off" required placeholder="Ссылка или код приглашения"/></label> : <label className="team-field">Название команды<input name="name" maxLength={80} required placeholder="Например, Команда Августа"/></label>}
-        </>}<button className="button" type="submit">{busy ? 'Сохраняем…' : restore ? 'Войти по коду' : join ? 'Войти по приглашению' : 'Создать команду'}</button>
+        {join ? <label className="team-field">Приглашение<input value={invite} onChange={e => setInvite(e.target.value)} autoComplete="off" required placeholder="Ссылка или код приглашения"/></label> : <label className="team-field">Название команды<input name="name" maxLength={80} required placeholder="Например, команда продукта"/></label>}
+        </>}<button className="button entrance__submit" type="submit">{busy ? 'Сохраняем…' : restore ? 'Войти по коду' : join ? 'Войти по приглашению' : 'Создать команду'}</button>
       </fieldset></form><div className="button-row"><button className="text-button" onClick={() => { setRestore(false); setJoin(!join) }} disabled={busy}>{join ? 'Создать новую команду' : 'У меня есть приглашение'}</button><button className="text-button" onClick={() => setRestore(!restore)} disabled={busy}>{restore ? 'Обычный вход' : 'У меня есть личный код входа'}</button></div>
     </section> : <>
       <div className="team-heading"><div><h2>{snapshot.workspace.name}</h2><p className="muted">{snapshot.member.name} · {snapshot.member.role === 'organizer' ? 'организатор' : 'участник'} · время по Омску</p></div><div className="button-row"><button className="button secondary" onClick={() => void refresh()} disabled={busy}>Обновить</button><button className="text-button" onClick={() => setConfirm('logout')} disabled={busy}>Выйти</button></div></div>
       <SummaryPanels key={snapshot.round.id + ':' + snapshot.round.summary.status}/>
+      {snapshot.member.role === 'organizer' && <TeamSettings key={activeWorkspaceId}/>}
       {confirm === 'logout' && <div className="panel confirmation"><p>Для возвращения понадобится личный код входа. Сохраните его перед выходом.</p><div className="button-row"><button className="button secondary" onClick={() => setConfirm('')} disabled={busy}>Остаться</button><button className="button" onClick={() => void logout()} disabled={busy}>Выйти из пространства</button></div></div>}
       {snapshot.member.role === 'organizer' && <details key={activeWorkspaceId} className="panel team-profile" onToggle={event => {
         if (event.currentTarget.open && teamProfileWorkspaceRef.current !== activeWorkspaceId) loadTeamProfile(activeWorkspaceId)

@@ -13,11 +13,13 @@
     "dev:server": "node --env-file-if-exists=.env --watch server/index.mjs",
     "start": "node --env-file-if-exists=.env server/index.mjs",
     "doctor": "node scripts/doctor.mjs",
-    "check": "node scripts/check.mjs"
+    "check": "node scripts/check.mjs",
+    "analyze:synthetic": "node --env-file-if-exists=.env scripts/analyze-synthetic.mjs"
   },
   "dependencies": {
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "recharts": "^3.10.1"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

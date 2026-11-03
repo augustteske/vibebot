@@ -18,8 +18,54 @@ const policyVersion = 'synthetic-v1'
 const DAY = 86400000
 const demoIntervals = [1, 2, 3, 4, 5].map(day => ({ day, start: 540, end: 1080 }))
 
+test('SQLite startup migrates old Telegram bindings without losing persisted profile or binding data', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'vibee-telegram-migration-test-'))
+  const dbPath = join(dir, 'legacy.sqlite')
+  t.after(() => rm(dir, { recursive: true, force: true }))
+
+  const first = createStore({ path: dbPath, secret })
+  const token = first.createWorkspace({ name: 'Persistent team', displayName: 'Organizer' })
+  const owner = first.authenticate(token)
+  const profile = first.telegram.updateProfile(owner, {
+    requestId: randomUUID(),
+    expectedVersion: 0,
+    timeZone: 'Asia/Omsk',
+    intervals: demoIntervals,
+  })
+  const bindingId = randomUUID()
+  first.close()
+
+  const legacyDb = new DatabaseSync(dbPath)
+  legacyDb.prepare('INSERT INTO telegram_bindings(id,workspace_id,chat_id,state) VALUES(?,?,?,?)')
+    .run(bindingId, owner.workspace_id, '-1001234567890', '{}')
+  legacyDb.exec('ALTER TABLE telegram_bindings DROP COLUMN migration_blocked')
+  legacyDb.close()
+
+  const reopened = createStore({ path: dbPath, secret })
+  try {
+    const reopenedOwner = reopened.authenticate(token)
+    assert.ok(reopenedOwner)
+    assert.deepEqual(reopened.telegram.profile(reopenedOwner), profile)
+    const persistedDb = new DatabaseSync(dbPath)
+    try {
+      const persistedBinding = persistedDb.prepare(
+        'SELECT id,chat_id,migration_blocked FROM telegram_bindings WHERE id=?',
+      ).get(bindingId)
+      assert.deepEqual({ ...persistedBinding }, {
+        id: bindingId,
+        chat_id: '-1001234567890',
+        migration_blocked: 0,
+      })
+    } finally {
+      persistedDb.close()
+    }
+  } finally {
+    reopened.close()
+  }
+})
+
 async function fixture(t, { enabled = true, seedLinks = true, seedBindings = true,
-  recommendationProvider, recommendationTimeoutMs } = {}) {
+  recommendationProvider, recommendationTimeoutMs, telegramBotToken, telegramFetch } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'vibee-telegram-test-'))
   const dbPath = join(dir, 'synthetic.sqlite')
   const store = createStore({ path: dbPath, secret })
@@ -59,7 +105,8 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
   let app, base
   const launch = async () => {
     app = createApp({ dbPath, secret, telegramBootstrapCredential: bootstrapCredential,
-      telegramSynthetic: enabled, now: () => clock, recommendationProvider, recommendationTimeoutMs })
+      telegramSynthetic: enabled, now: () => clock, recommendationProvider, recommendationTimeoutMs,
+      telegramBotToken, telegramFetch })
     await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve))
     base = 'http://127.0.0.1:' + app.server.address().port + '/api'
   }
@@ -85,6 +132,9 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
   const bindingToken = (token = ownerToken, input = { requestId: randomUUID() }) => request('/telegram/binding-tokens',
     input, { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1' })
   const bind = (input, auth = bootstrapCredential) => request('/bot/v1/bindings', input, { Authorization: 'Bearer ' + auth })
+  const subscribeNotifications = (input, bindingId = id, token = credential) => request(
+    '/bot/v1/bindings/' + bindingId + '/notifications/subscribe', input,
+    { Authorization: 'Bearer ' + token })
   const closePeriod = (input, token = ownerToken, bindingId = id) => request('/telegram/bindings/' + bindingId + '/periods/close',
     input, { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1' })
   const summary = (token = ownerToken, bindingId = id) => request('/telegram/bindings/' + bindingId + '/summary',
@@ -137,7 +187,7 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
     assert.equal(result.body.phase, 'active')
     return result.body
   }
-  return { db, id, otherBindingId, owner, people, tokens, foreignToken, foreignOwner, foreignPeople, request, web, bot, linkToken, link, bindingToken, bind, closePeriod, summary, currentSummary, currentRecommendation, recommendation, confirmAction, chatFeedback, closeChatFeedback, profile, setProfile, command, status,
+  return { db, id, otherBindingId, owner, people, tokens, foreignToken, foreignOwner, foreignPeople, request, web, bot, linkToken, link, bindingToken, bind, subscribeNotifications, closePeriod, summary, currentSummary, currentRecommendation, recommendation, confirmAction, chatFeedback, closeChatFeedback, profile, setProfile, command, status,
     mutate, decision, prepare, activate, time: () => clock, advance: ms => { clock += ms }, setTime: ms => { clock = ms },
     restart: async () => { await app.close(); await launch() } }
 }
@@ -172,16 +222,75 @@ const publishForRecommendation = async f => {
   assert.equal((await f.setProfile()).status, 200)
   const base = Date.parse('2026-11-02T03:00:00.000Z')
   let periodId
+  let closeInput
   for (let day = 0; day < 3; day++) {
     f.setTime(base + day * DAY)
     await sendMany(f, active.revision, 20, 5, 3000 + day * 100, 4)
     periodId = randomUUID()
-    const closed = await f.closePeriod({ requestId: randomUUID(), expectedRevision: active.revision, periodId })
+    closeInput = { requestId: randomUUID(), expectedRevision: active.revision, periodId }
+    const closed = await f.closePeriod(closeInput)
     assert.equal(closed.body.status, day === 2 ? 'published' : 'calibrating')
     if (day < 2) error(await f.recommendation(periodId), 409, 'STALE_PERIOD')
   }
-  return { periodId, revision: active.revision }
+  return { periodId, revision: active.revision, closeInput }
 }
+
+test('closing a published period notifies only the linked organizer and does not duplicate on replay', async t => {
+  const sent = []
+  const f = await fixture(t, {
+    telegramBotToken: 'test-telegram-bot-token',
+    telegramFetch: async (url, options) => {
+      sent.push({ url, body: JSON.parse(options.body) })
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 7 } }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      })
+    },
+  })
+
+  error(await f.subscribeNotifications({ telegramUserId: '100000002', chatId: '100000002' }),
+    403, 'ORGANIZER_REQUIRED')
+  error(await f.subscribeNotifications({ telegramUserId: '100000001', chatId: '100000002' }),
+    400, 'INVALID_INPUT')
+  assert.deepEqual((await f.subscribeNotifications({
+    telegramUserId: '100000001', chatId: '100000001',
+  })).body, { subscribed: true, notificationsEnabled: true })
+
+  const published = await publishForRecommendation(f)
+  const summary = await f.summary()
+  const recommendation = await f.recommendation(published.periodId)
+  assert.equal(summary.body.status, 'published')
+  assert.equal(sent.length, 1)
+  assert.equal(sent[0].url, 'https://api.telegram.org/bottest-telegram-bot-token/sendMessage')
+  assert.deepEqual(sent[0].body, {
+    chat_id: '100000001',
+    text: [
+      'Период закрыт.',
+      `Вне рабочего времени: ${summary.body.metrics.outsideHoursPercent.toFixed(1)}%.`,
+      `Участие: ${summary.body.metrics.participationEvenness.toFixed(1)}%.`,
+      `Благодарности: ${summary.body.metrics.recognitionPercent.toFixed(1)}%.`,
+      `Рекомендация: ${recommendation.body.body}`,
+    ].join('\n'),
+    disable_web_page_preview: true,
+  })
+
+  const replay = await f.closePeriod(published.closeInput)
+  assert.equal(replay.status, 200)
+  assert.equal(replay.body.status, 'published')
+  assert.equal(sent.length, 1)
+})
+
+test('period closure succeeds and skips Telegram delivery when the server token is unset', async t => {
+  let sends = 0
+  const f = await fixture(t, { telegramFetch: async () => { sends++; throw new Error('must not fetch') } })
+  assert.equal((await f.subscribeNotifications({
+    telegramUserId: '100000001', chatId: '100000001',
+  })).status, 200)
+  const published = await publishForRecommendation(f)
+  assert.equal((await f.summary()).body.status, 'published')
+  assert.equal(sends, 0)
+  assert.equal((await f.closePeriod(published.closeInput)).body.status, 'published')
+  assert.equal(sends, 0)
+})
 const activateForeign = async f => {
   const bindingId = randomUUID(), botCredential = '4'.repeat(64), chatId = '-100000000009'
   const state = transitionConsent(initialConsentState(), { type: 'bind', policyVersion }, 0)
@@ -238,7 +347,7 @@ test('SQLite: adding Telegram tables preserves existing workspace, member and ch
   assert.equal(reopened.prepare('SELECT name FROM members WHERE id=?').get(memberId).name, 'Legacy member')
   assert.deepEqual({ ...reopened.prepare('SELECT energy,clarity,support FROM checkins WHERE round_id=?').get(roundId) },
     { energy: 2, clarity: 3, support: 4 })
-  assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 23)
+  assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 25)
   reopened.close()
 })
 
@@ -1235,5 +1344,5 @@ test('Telegram synthetic gate defaults off and unfinished summary routes remain 
   error(await f.recommendation(randomUUID()), 503, 'UNAVAILABLE')
   error(await f.chatFeedback(randomUUID(), 'interpretation', undefined), 503, 'UNAVAILABLE')
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_requests').get().n, 0)
-  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 23)
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 25)
 })
