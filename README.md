@@ -1,6 +1,6 @@
 <div align="center">
   <h1>🐝 Vibee</h1>
-  <img src="public/bee.svg" alt="Маскот Vibee — пчёлка" width="180">
+  <img src="public/bee-mascot.png" alt="3D-маскот Vibee — пчёлка" width="240">
   <p><strong>Почувствовать команду. Сделать следующий шаг.</strong></p>
   <p>
     <a href="https://github.com/augustteske/vibebot/actions/workflows/ci.yml"><img alt="Node tests" src="https://github.com/augustteske/vibebot/actions/workflows/ci.yml/badge.svg?branch=main&amp;job=node-tests"></a>
