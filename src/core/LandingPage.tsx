@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import './LandingPage.css'
 
 interface LandingPageProps {
@@ -26,6 +27,28 @@ const steps = [
 ]
 
 export function LandingPage({ onEnter }: LandingPageProps) {
+  useEffect(() => {
+    const revealElements = Array.from(document.querySelectorAll<HTMLElement>('.landing-reveal'))
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+    if (reducedMotion || typeof IntersectionObserver === 'undefined') {
+      revealElements.forEach(element => element.classList.add('is-visible'))
+      return
+    }
+
+    const observer = new IntersectionObserver((entries, currentObserver) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-visible')
+          currentObserver.unobserve(entry.target)
+        }
+      })
+    }, { threshold: 0.14, rootMargin: '0px 0px -8% 0px' })
+
+    revealElements.forEach(element => observer.observe(element))
+    return () => observer.disconnect()
+  }, [])
+
   return (
     <main className="landing">
       <header className="landing-header">
@@ -41,7 +64,7 @@ export function LandingPage({ onEnter }: LandingPageProps) {
       </header>
 
       <section className="landing-hero">
-        <div className="landing-copy">
+        <div className="landing-copy landing-reveal landing-reveal--hero">
           <span className="landing-eyebrow"><span className="landing-eyebrow-dot" /> КОМАНДНАЯ АНАЛИТИКА С УВАЖЕНИЕМ К ЛЮДЯМ</span>
           <h1>Почувствовать команду.<br /><span>Сделать следующий шаг.</span></h1>
           <p>
@@ -62,7 +85,7 @@ export function LandingPage({ onEnter }: LandingPageProps) {
             <span>Только с согласия команды · без чтения личных сообщений</span>
           </div>
         </div>
-        <div className="landing-mascot" aria-hidden="true">
+        <div className="landing-mascot landing-reveal landing-reveal--mascot" aria-hidden="true">
           <div className="landing-orbit landing-orbit--outer" />
           <div className="landing-orbit landing-orbit--inner" />
           <div className="landing-mascot-glow" />
@@ -78,7 +101,7 @@ export function LandingPage({ onEnter }: LandingPageProps) {
         </div>
       </section>
 
-      <section className="landing-how" id="how-it-works" aria-labelledby="landing-how-title">
+      <section className="landing-how landing-reveal" id="how-it-works" aria-labelledby="landing-how-title">
         <div className="landing-section-heading">
           <div>
             <span className="landing-eyebrow">ТРИ ШАГА К ЯСНОСТИ</span>
@@ -88,7 +111,7 @@ export function LandingPage({ onEnter }: LandingPageProps) {
         </div>
         <div className="landing-step-grid">
           {steps.map(step => (
-            <article className="landing-step-card" key={step.number}>
+            <article className={`landing-step-card landing-reveal landing-step-card--${step.number}`} key={step.number}>
               <div className="landing-step-top">
                 <span className="landing-step-number">{step.number}</span>
                 <span className="landing-step-line" />
@@ -101,7 +124,7 @@ export function LandingPage({ onEnter }: LandingPageProps) {
         </div>
       </section>
 
-      <section className="landing-privacy" id="privacy" aria-labelledby="landing-privacy-title">
+      <section className="landing-privacy landing-reveal" id="privacy" aria-labelledby="landing-privacy-title">
         <div className="landing-lock" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none">
             <path d="M7.5 10V7.5a4.5 4.5 0 0 1 9 0V10M6.75 10h10.5c.97 0 1.75.78 1.75 1.75v7.5c0 .97-.78 1.75-1.75 1.75H6.75C5.78 21 5 20.22 5 19.25v-7.5C5 10.78 5.78 10 6.75 10Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
@@ -120,7 +143,7 @@ export function LandingPage({ onEnter }: LandingPageProps) {
         <span className="landing-privacy-stamp">СОГЛАСИЕ<br />ПРЕЖДЕ ВСЕГО</span>
       </section>
 
-      <footer className="landing-footer">
+      <footer className="landing-footer landing-reveal">
         <a className="landing-footer-brand" href="/" aria-label="Vibee — главная">
           <img src="/bee.svg" alt="" />
           <span>vibee</span>
