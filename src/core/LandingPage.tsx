@@ -80,7 +80,7 @@ export function LandingPage({ onEnter }: LandingPageProps) {
         <nav className="landing-nav" aria-label="Навигация по странице">
           <a href="#features">Преимущества</a>
           <a href="#how-it-works">Как это работает</a>
-          <button className="landing-nav-cta" onClick={onEnter}>Открыть кабинет</button>
+          <button className="landing-nav-cta" onClick={onEnter}>Войти в кабинет</button>
         </nav>
       </header>
 
@@ -96,6 +96,9 @@ export function LandingPage({ onEnter }: LandingPageProps) {
             <button className="landing-cta" onClick={onEnter}>
               Перейти к демо <span aria-hidden="true">→</span>
             </button>
+            <a className="landing-github" href="https://github.com/augustteske/vibebot" target="_blank" rel="noreferrer">
+              GitHub <span aria-hidden="true">↗</span>
+            </a>
             <span className="landing-demo-note">Демонстрация на вымышленных данных</span>
           </div>
         </div>
