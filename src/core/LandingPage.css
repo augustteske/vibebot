@@ -382,10 +382,10 @@
 }
 
 .landing-feature-card.is-visible:hover {
-  transform: translateY(-9px);
-  border-color: rgba(255, 214, 56, .52);
+  transform: translateY(-9px) scale(1.02);
+  border-color: rgba(255, 214, 56, .82);
   background: linear-gradient(145deg, rgba(255, 255, 255, .15), rgba(255, 255, 255, .055));
-  box-shadow: 0 30px 70px rgba(0, 0, 0, .3), 0 0 42px rgba(255, 214, 56, .24);
+  box-shadow: 0 30px 70px rgba(0, 0, 0, .3), 0 0 46px rgba(255, 214, 56, .3);
 }
 
 .landing-feature-top {
