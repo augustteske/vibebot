@@ -4,9 +4,9 @@
 
 .landing {
   --landing-gutter: max(24px, calc((100vw - 1240px) / 2));
-  --landing-ink: #171719;
-  --landing-muted: #64646a;
-  --landing-yellow: #ffd638;
+  --landing-ink: var(--vibee-ink);
+  --landing-muted: var(--vibee-muted);
+  --landing-yellow: var(--vibee-yellow);
   min-height: 100vh;
   overflow: hidden;
   padding: 18px var(--landing-gutter) 0;
