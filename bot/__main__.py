@@ -23,11 +23,18 @@ def create_dispatcher(
     intake: TelegramIntake | None = None,
     voice: VoiceTranscription | None = None,
     notification_transport: HttpTransport | None = None,
+    checkin_transport: HttpTransport | None = None,
 ) -> Dispatcher:
     dispatcher = Dispatcher()
     flow = CheckinFlow()
     voice_transcription = voice
     install_voice_handlers(dispatcher, voice_transcription)
+
+    def menu_keyboard():
+        rows = [[InlineKeyboardButton(text="Пройти личный чек-ин", callback_data="menu:checkin")]]
+        if voice_transcription is not None:
+            rows.append([InlineKeyboardButton(text="Расшифровать голосовое", callback_data="menu:voice")])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
 
     async def question(message, nonce, step):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
@@ -36,7 +43,7 @@ def create_dispatcher(
         ]])
         await message.answer(
             f"{step + 1}/3 · {QUESTIONS[step][1]}\n"
-            "Выберите оценку от 1 до 5. Отмена в любой момент: /stop.",
+            "1 — мало, 5 — много. Отмена: /stop.",
             reply_markup=keyboard,
         )
 
@@ -51,22 +58,10 @@ def create_dispatcher(
         if message.from_user is None or message.from_user.is_bot:
             return
         flow.cancel(message.from_user.id)
-        rows = [[InlineKeyboardButton(text="Пройти личный чек-ин", callback_data="menu:checkin")]]
-        if voice_transcription is not None:
-            rows.append([InlineKeyboardButton(text="Расшифровать одно голосовое", callback_data="menu:voice")])
-        lines = [
-            "Привет! Я Vibee. В личном чате доступны короткие добровольные сценарии:",
-            "• Личный чек-ин — три оценки от 1 до 5; вопросы появятся только после отдельного согласия.",
-        ]
-        if voice_transcription is not None:
-            lines.append("• Расшифровка одной новой голосовой — локальной моделью и только после отдельного согласия.")
-        else:
-            lines.append("• Расшифровка голосовых сейчас недоступна: локальная модель не настроена.")
-        lines.extend([
-            "Эти личные сценарии не запускают групповой сбор.",
-            "Выберите сценарий или откройте /help и /privacy.",
-        ])
-        await message.answer("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+        await message.answer(
+            "Привет! Я Vibee 🐝\nВыберите сценарий. О данных — /privacy.",
+            reply_markup=menu_keyboard(),
+        )
 
     @dispatcher.message(Command("help"))
     async def help_command(message: Message):
@@ -93,7 +88,9 @@ def create_dispatcher(
         await message.answer(
             "Коротко о данных в этом боте:\n"
             "• Личный чек-ин — только три оценки. Черновик хранится в памяти до 5 минут "
-            "и очищается после завершения или /stop; на сервер не отправляется.\n"
+            "и очищается после завершения или /stop. После завершения ответы сохраняются "
+            "на сервере анонимно, без привязки к вашему аккаунту, и используются только "
+            "для общей аналитики команды.\n"
             "• Голосовая расшифровывается только после отдельного согласия на одну новую запись "
             "и только локальной моделью. Аудио и текст не записываются ботом в файл или БД; "
             "результат отправляется только в этот личный чат и остаётся в Telegram.\n"
@@ -109,16 +106,21 @@ def create_dispatcher(
                 or event.from_user.is_bot or not callable(getattr(message, "answer", None))):
             await event.answer("Личный чек-ин доступен только в личном чате.", show_alert=True)
             return
-        nonce = flow.begin(event.from_user.id)
+        user_id = event.from_user.id
+        flow.expire()
+        if user_id in flow.drafts:
+            await event.answer("Чек-ин уже открыт. Продолжите по последним кнопкам или нажмите /stop.", show_alert=True)
+            return
+        nonce = flow.begin(user_id)
         await event.answer()
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="Согласен на личный демо-чек-ин", callback_data=f"consent:{nonce}:yes"),
+            InlineKeyboardButton(text="Согласен", callback_data=f"consent:{nonce}:yes"),
             InlineKeyboardButton(text="Отказаться", callback_data=f"consent:{nonce}:no"),
         ]])
         await message.answer(
-            "Перед первым вопросом нужно отдельное согласие. Бот задаст три оценки от 1 до 5. "
-            "Черновик хранится только в памяти до 5 минут и будет очищен после завершения или /stop. "
-            "Ответы не отправляются на веб-платформу и не анализируются ИИ.",
+            "Чек-ин: три оценки от 1 до 5. Нужно ваше согласие.\n"
+            "Черновик живёт до 5 минут и удаляется при завершении или /stop. "
+            "Ответы остаются вне кабинета команды.",
             reply_markup=keyboard,
         )
 
@@ -244,16 +246,31 @@ def create_dispatcher(
                 if accepted:
                     await question(message, parts[1], 0)
                 else:
-                    await message.answer("Отказ принят. Черновик удалён; вопросы не отправлены.")
+                    await message.answer("Отказ принят. Черновик удалён. Меню — /start.")
             elif parts[0] == "score" and len(parts) == 4:
                 step = int(parts[2])
                 result = flow.answer(event.from_user.id, parts[1], step, int(parts[3]))
                 await event.answer()
                 if result is not None:
-                    await message.answer(
-                        "Спасибо, личный демо-чек-ин завершён. Черновик очищен из памяти; "
-                        "ответы не отправлялись на веб-платформу."
-                    )
+                    if checkin_transport is not None:
+                        try:
+                            await checkin_transport.submit_personal_checkin(
+                                event.from_user.id, result, parts[1],
+                            )
+                            await message.answer(
+                                "Спасибо, чек-ин завершён. Ответы сохранены анонимно "
+                                "и используются только для общей аналитики. Меню — /start."
+                            )
+                        except TransportError:
+                            await message.answer(
+                                "Чек-ин завершён, но ответы не удалось передать на сервер. "
+                                "Попробуйте позже или обратитесь к организатору. Меню — /start."
+                            )
+                    else:
+                        await message.answer(
+                            "Спасибо, личный демо-чек-ин завершён. Черновик очищен из памяти; "
+                            "ответы не отправлялись на веб-платформу. Меню — /start."
+                        )
                 else:
                     await question(message, parts[1], step + 1)
             else:
@@ -330,7 +347,7 @@ async def main():
             company_accepted=True,
         ), transport, PauseState(pause_path))
         await intake.reconcile_pause()
-    dispatcher, flow = create_dispatcher(intake, voice_transcription, transport)
+    dispatcher, flow = create_dispatcher(intake, voice_transcription, transport, transport)
 
     async def cleanup():
         while True:
@@ -344,6 +361,7 @@ async def main():
     task = asyncio.create_task(cleanup())
     try:
         async with Bot(token=token) as bot:
+            print("Vibee: запускаю подключение к Telegram. Для проверки отправьте /start.", flush=True)
             await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types(), handle_signals=True)
     finally:
         task.cancel()

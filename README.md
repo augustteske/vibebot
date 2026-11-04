@@ -4,8 +4,8 @@
   <p><strong>Почувствовать команду. Сделать следующий шаг.</strong></p>
   <p>Общие сигналы для бережного разговора и командных решений.</p>
   <p>
-    <a href="https://gitlab.com/shertwg-group1/vibebot/-/pipelines"><img alt="CI · Node tests" src="https://gitlab.com/shertwg-group1/vibebot/badges/develop/pipeline.svg?job=verify"></a>
-    <a href="https://gitlab.com/shertwg-group1/vibebot/-/pipelines"><img alt="CI · Python tests" src="https://gitlab.com/shertwg-group1/vibebot/badges/develop/pipeline.svg?job=verify-bot"></a>
+    <a href="https://github.com/augustteske/vibebot/actions/workflows/ci.yml"><img alt="CI · Node tests" src="https://github.com/augustteske/vibebot/actions/workflows/ci.yml/badge.svg?branch=develop&amp;job=node-tests"></a>
+    <a href="https://github.com/augustteske/vibebot/actions/workflows/ci.yml"><img alt="CI · Python tests" src="https://github.com/augustteske/vibebot/actions/workflows/ci.yml/badge.svg?branch=develop&amp;job=python-tests"></a>
     <a href="LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/License-MIT-FFD638.svg"></a>
     <a href="https://nodejs.org/"><img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24.x-339933?logo=node.js&amp;logoColor=white"></a>
   </p>
@@ -75,7 +75,7 @@ npm run dev
 
    ```sh
    ssh YOUR_SSH_USER@109.194.123.17
-   git clone --branch feat/august-core https://gitlab.com/shertwg-group1/vibebot.git
+   git clone --branch feat/august-core https://github.com/augustteske/vibebot.git
    cd vibebot
    ```
 
@@ -177,7 +177,9 @@ Telegram updates ──→ Python 3.12 / aiogram ──→ Node.js 24 API ──
 - [Compose-конфигурация](compose.yaml)
 - [Временный HTTPS-туннель с Windows: установка, запуск и остановка](docs/WINDOWS_TUNNEL.md)
 - [Развёртывание одной командой](scripts/deploy.sh) ([PowerShell](scripts/deploy.ps1))
-- [GitLab CI](https://gitlab.com/shertwg-group1/vibebot/-/pipelines)
+- [Справка внутри сайта](public/docs.html)
+- [Проект условий пилота и политики обработки данных](docs/LEGAL_DRAFT.md)
+- [GitHub Actions](https://github.com/augustteske/vibebot/actions/workflows/ci.yml)
 
 ---
 

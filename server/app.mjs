@@ -137,6 +137,33 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
           notificationsEnabled: typeof telegramBotToken === 'string' && telegramBotToken.trim().length > 0,
         })
       }
+      const transcriptionJobRoute = url.pathname.match(/^\/api\/bot\/v1\/bindings\/([a-f0-9-]+)\/transcription-jobs$/)
+      if (transcriptionJobRoute) {
+        if (req.method !== 'POST') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
+        if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
+        const actor = store.telegram.authenticate(req.headers.authorization)
+        if (!actor) throw new AppError(401, 'BOT_AUTH_REQUIRED', 'Нужна авторизация бота')
+        return json(res, 200, store.telegram.createTranscriptionJob(
+          actor, transcriptionJobRoute[1], await body(req, 'INVALID_INPUT')))
+      }
+      const transcriptionRoute = url.pathname.match(/^\/api\/bot\/v1\/bindings\/([a-f0-9-]+)\/transcriptions$/)
+      if (transcriptionRoute) {
+        if (req.method !== 'POST') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
+        if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
+        const actor = store.telegram.authenticate(req.headers.authorization)
+        if (!actor) throw new AppError(401, 'BOT_AUTH_REQUIRED', 'Нужна авторизация бота')
+        return json(res, 200, store.telegram.submitTranscription(
+          actor, transcriptionRoute[1], await body(req, 'INVALID_INPUT')))
+      }
+      const transcriptionJobStatusRoute = url.pathname.match(/^\/api\/bot\/v1\/bindings\/([a-f0-9-]+)\/transcription-jobs\/([a-f0-9-]+)$/)
+      if (transcriptionJobStatusRoute) {
+        if (req.method !== 'GET') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
+        if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
+        const actor = store.telegram.authenticate(req.headers.authorization)
+        if (!actor) throw new AppError(401, 'BOT_AUTH_REQUIRED', 'Нужна авторизация бота')
+        return json(res, 200, store.telegram.transcriptionJobStatus(
+          actor, transcriptionJobStatusRoute[1], transcriptionJobStatusRoute[2]))
+      }
       if (['/api/telegram/link-tokens', '/api/bot/v1/links', '/api/telegram/binding-tokens', '/api/bot/v1/bindings'].includes(url.pathname)) {
         if (req.method !== 'POST') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
         if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
@@ -195,11 +222,11 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
             : store.telegram.chatFeedback(actor, bindingId, periodId, kind))
       }
       if (url.pathname.startsWith('/api/bot/') || url.pathname.startsWith('/api/telegram/')) {
-        const route = url.pathname.match(/^\/api\/(bot\/v1|telegram)\/bindings\/([a-f0-9-]+)(?:\/(roster|company|consents|control|pause|events|media-observations))?$/)
+        const route = url.pathname.match(/^\/api\/(bot\/v1|telegram)\/bindings\/([a-f0-9-]+)(?:\/(roster|company|consents|control|pause|events|media-observations|checkins))?$/)
         const bot = route?.[1] === 'bot/v1'
         const operation = route?.[3]
         const supported = route && (bot
-          ? (req.method === 'GET' && !operation) || (req.method === 'POST' && ['consents', 'pause', 'events', 'media-observations'].includes(operation))
+          ? (req.method === 'GET' && !operation) || (req.method === 'POST' && ['consents', 'pause', 'events', 'media-observations', 'checkins'].includes(operation))
           : req.method === 'POST' && ['roster', 'company', 'control'].includes(operation))
         if (!supported) throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
         if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
@@ -209,6 +236,7 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         const result = req.method === 'GET' ? store.telegram.status(actor, route[2])
           : operation === 'events' ? store.telegram.acceptText(actor, route[2], await body(req, 'INVALID_INPUT'))
           : operation === 'media-observations' ? store.telegram.acceptMedia(actor, route[2], await body(req, 'INVALID_INPUT'))
+          : operation === 'checkins' ? store.telegram.acceptCheckin(actor, route[2], await body(req, 'INVALID_INPUT'))
           : store.telegram.mutate(actor, route[2], operation, await body(req, 'INVALID_INPUT'))
         return json(res, 200, result)
       }
@@ -225,6 +253,7 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
       if (!member) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, store.snapshot(member))
       if (req.method === 'GET' && url.pathname === '/api/summary') return json(res, 200, store.summary(member))
+      if (req.method === 'GET' && url.pathname === '/api/telegram-checkin-stats') return json(res, 200, store.telegramCheckinStats(member))
       if (req.method === 'POST') {
         if (url.pathname === '/api/logout') {
           store.logout(token); res.setHeader('Set-Cookie', cookie('')); return json(res, 200, { ok: true })

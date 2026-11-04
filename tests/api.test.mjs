@@ -110,13 +110,13 @@ async function start(t, dbPath, appOptions = {}) {
 async function team(t, size) {
   const env = await start(t)
   const owner = env.client()
-  const created = await owner('/workspaces', { name: 'Тестовая команда', displayName: 'Организатор' })
+  const created = await owner('/workspaces', { name: 'РўРµСЃС‚РѕРІР°СЏ РєРѕРјР°РЅРґР°', displayName: 'РћСЂРіР°РЅРёР·Р°С‚РѕСЂ' })
   assert.equal(created.status, 201)
   const people = [owner]
   for (let i = 1; i < size; i++) {
     const invitation = await owner('/invitations', {})
     const person = env.client()
-    assert.equal((await person('/join', { token: invitation.body.token, displayName: 'Участник ' + i })).status, 201)
+    assert.equal((await person('/join', { token: invitation.body.token, displayName: 'РЈС‡Р°СЃС‚РЅРёРє ' + i })).status, 201)
     people.push(person)
   }
   return { ...env, owner, people, roundId: created.body.round.id }
@@ -140,11 +140,11 @@ test('complete shared flow: private check-ins, frozen summary, confirmed action 
   assert.equal(closed.body.round.summary.means.clarity, 2.5)
   assert.doesNotMatch(JSON.stringify(closed.body), /voter_key|token_hash|"answers"|"scores"|"participants"/)
   assert.equal((await people[0]('/checkins', { roundId, scores: normal })).status, 409)
-  const accepted = await people[2]('/actions', { roundId, suggestionId: 'clarity', goal: 'Сегодня доводим основной сценарий до демо' })
+  const accepted = await people[2]('/actions', { roundId, suggestionId: 'clarity', goal: 'РЎРµРіРѕРґРЅСЏ РґРѕРІРѕРґРёРј РѕСЃРЅРѕРІРЅРѕР№ СЃС†РµРЅР°СЂРёР№ РґРѕ РґРµРјРѕ' })
   assert.equal(accepted.status, 200)
   const actionId = accepted.body.actions[0].id
-  assert.equal((await people[4]('/session')).body.actions[0].goal, 'Сегодня доводим основной сценарий до демо')
-  assert.equal((await owner('/actions', { roundId, suggestionId: 'clarity', goal: 'Дубль' })).status, 409)
+  assert.equal((await people[4]('/session')).body.actions[0].goal, 'РЎРµРіРѕРґРЅСЏ РґРѕРІРѕРґРёРј РѕСЃРЅРѕРІРЅРѕР№ СЃС†РµРЅР°СЂРёР№ РґРѕ РґРµРјРѕ')
+  assert.equal((await owner('/actions', { roundId, suggestionId: 'clarity', goal: 'Р”СѓР±Р»СЊ' })).status, 409)
   for (let i = 0; i < people.length; i++) {
     const result = await people[i]('/actions/' + actionId + '/feedback', { helpful: i < 5 })
     assert.equal(result.status, 200)
@@ -181,7 +181,7 @@ test('editing one answer replaces it instead of increasing its weight', async t 
 
 test('feedback below threshold remains hidden after closure', async t => {
   const { owner, people, roundId } = await team(t, 4)
-  const accepted = await owner('/actions', { roundId, suggestionId: 'recognition', goal: 'Назовём конкретный вклад коллеги' })
+  const accepted = await owner('/actions', { roundId, suggestionId: 'recognition', goal: 'РќР°Р·РѕРІС‘Рј РєРѕРЅРєСЂРµС‚РЅС‹Р№ РІРєР»Р°Рґ РєРѕР»Р»РµРіРё' })
   const id = accepted.body.actions[0].id
   for (const person of people) await person('/actions/' + id + '/feedback', { helpful: true })
   const closed = await owner('/actions/' + id + '/close-feedback', {})
@@ -191,7 +191,7 @@ test('feedback below threshold remains hidden after closure', async t => {
 test('invitations are single-use and ordinary participants cannot create them', async t => {
   const { owner, client, people } = await team(t, 2)
   const invite = await owner('/invitations', {})
-  const results = await Promise.all([client(), client()].map(person => person('/join', { token: invite.body.token, displayName: 'Новый участник' })))
+  const results = await Promise.all([client(), client()].map(person => person('/join', { token: invite.body.token, displayName: 'РќРѕРІС‹Р№ СѓС‡Р°СЃС‚РЅРёРє' })))
   assert.deepEqual(results.map(r => r.status).sort(), [201, 400])
   assert.equal((await people[1]('/invitations', {})).status, 403)
 })
@@ -205,8 +205,8 @@ test('session, JSON values, request origin and workspace boundaries are enforced
   assert.equal((await owner('/checkins', { roundId, scores: { ...normal, energy: 2.5 } })).status, 400)
   assert.equal((await owner('/checkins', { roundId, scores: normal }, { Origin: 'https://other.example' })).status, 403)
   assert.equal((await owner('/checkins', { roundId, scores: normal }, { 'X-VibeBot': '' })).status, 403)
-  const accepted = await owner('/actions', { roundId, suggestionId: 'recognition', goal: 'Спасибо команде' })
-  await outsider('/workspaces', { name: 'Другая команда', displayName: 'Другой организатор' })
+  const accepted = await owner('/actions', { roundId, suggestionId: 'recognition', goal: 'РЎРїР°СЃРёР±Рѕ РєРѕРјР°РЅРґРµ' })
+  await outsider('/workspaces', { name: 'Р”СЂСѓРіР°СЏ РєРѕРјР°РЅРґР°', displayName: 'Р”СЂСѓРіРѕР№ РѕСЂРіР°РЅРёР·Р°С‚РѕСЂ' })
   assert.equal((await outsider('/actions/' + accepted.body.actions[0].id + '/feedback', { helpful: true })).status, 404)
   assert.equal((await owner('/checkins')).status, 404)
   await owner('/logout', {})
@@ -215,13 +215,13 @@ test('session, JSON values, request origin and workspace boundaries are enforced
 
 test('accepted actions are capped at two per workspace in a rolling day', async t => {
   const { owner, roundId } = await team(t, 1)
-  await owner('/actions', { roundId, suggestionId: 'recognition', goal: 'Первый шаг' })
+  await owner('/actions', { roundId, suggestionId: 'recognition', goal: 'РџРµСЂРІС‹Р№ С€Р°Рі' })
   await owner('/rounds/close', { roundId })
   const second = (await owner('/rounds/open', {})).body.round.id
-  await owner('/actions', { roundId: second, suggestionId: 'recognition', goal: 'Второй шаг' })
+  await owner('/actions', { roundId: second, suggestionId: 'recognition', goal: 'Р’С‚РѕСЂРѕР№ С€Р°Рі' })
   await owner('/rounds/close', { roundId: second })
   const third = (await owner('/rounds/open', {})).body.round.id
-  assert.equal((await owner('/actions', { roundId: third, suggestionId: 'recognition', goal: 'Третий шаг' })).body.error.code, 'DAILY_LIMIT')
+  assert.equal((await owner('/actions', { roundId: third, suggestionId: 'recognition', goal: 'РўСЂРµС‚РёР№ С€Р°Рі' })).body.error.code, 'DAILY_LIMIT')
 })
 
 test('personal access key restores the same identity and role; rotation invalidates the old key', async t => {
@@ -250,25 +250,100 @@ test('SQLite preserves shared state across server restart', async t => {
   const path = join(directory, 'test.sqlite')
   const first = await start(t, path)
   const owner = first.client()
-  const created = await owner('/workspaces', { name: 'Постоянная команда', displayName: 'Организатор' })
+  const created = await owner('/workspaces', { name: 'РџРѕСЃС‚РѕСЏРЅРЅР°СЏ РєРѕРјР°РЅРґР°', displayName: 'РћСЂРіР°РЅРёР·Р°С‚РѕСЂ' })
   const invitation = await owner('/invitations', {})
   const roundId = created.body.round.id
   await owner('/checkins', { roundId, scores: normal })
   await owner('/rounds/close', { roundId })
-  const action = await owner('/actions', { roundId, suggestionId: 'recognition', goal: 'Сохранённый шаг' })
+  const action = await owner('/actions', { roundId, suggestionId: 'recognition', goal: 'РЎРѕС…СЂР°РЅС‘РЅРЅС‹Р№ С€Р°Рі' })
   const actionId = action.body.actions[0].id
   await owner('/actions/' + actionId + '/feedback', { helpful: true })
   await owner('/actions/' + actionId + '/close-feedback', {})
   await first.close()
   const second = await start(t, path)
   const participant = second.client()
-  const joined = await participant('/join', { token: invitation.body.token, displayName: 'Участник' })
-  assert.equal(joined.body.workspace.name, 'Постоянная команда')
-  assert.equal(joined.body.actions[0].goal, 'Сохранённый шаг')
+  const joined = await participant('/join', { token: invitation.body.token, displayName: 'РЈС‡Р°СЃС‚РЅРёРє' })
+  assert.equal(joined.body.workspace.name, 'РџРѕСЃС‚РѕСЏРЅРЅР°СЏ РєРѕРјР°РЅРґР°')
+  assert.equal(joined.body.actions[0].goal, 'РЎРѕС…СЂР°РЅС‘РЅРЅС‹Р№ С€Р°Рі')
   await second.close()
   const inspection = new DatabaseSync(path)
   try {
     assert.equal(inspection.prepare('SELECT COUNT(*) AS n FROM checkins').get().n, 0)
     assert.equal(inspection.prepare('SELECT COUNT(*) AS n FROM feedback').get().n, 0)
   } finally { inspection.close() }
+})
+
+
+test('anonymous Telegram check-in stats: organizer-only, k-anonymity, workspace isolation and TTL', async t => {
+  const root = resolve('.data')
+  await mkdir(root, { recursive: true })
+  const directory = await mkdtemp(join(root, 'stats-test-'))
+  t.after(async () => { if (!directory.startsWith(root + sep)) throw new Error('Unexpected test directory'); await rm(directory, { recursive: true, force: true }) })
+  const path = join(directory, 'test.sqlite')
+  const env = await start(t, path)
+  const owner = env.client()
+  const created = await owner('/workspaces', { name: 'Команда статистики', displayName: 'Организатор' })
+  assert.equal(created.status, 201)
+  const person = env.client()
+  const invitation = await owner('/invitations', {})
+  assert.equal((await person('/join', { token: invitation.body.token, displayName: 'Участник' })).status, 201)
+
+  // Прямые вставки в БД делаем короткими сессиями: открыли соединение, записали,
+  // закрыли — чтобы не держать второе соединение к WAL-базе параллельно с сервером.
+  const seed = fn => {
+    const db = new DatabaseSync(path)
+    try { return fn(db) } finally { db.close() }
+  }
+  const bindingId = randomUUID()
+  seed(db => {
+    const workspaceId = db.prepare('SELECT id FROM workspaces LIMIT 1').get().id
+    db.prepare('INSERT INTO telegram_bindings(id,workspace_id,chat_id,state) VALUES(?,?,?,?)')
+      .run(bindingId, workspaceId, null, '{}')
+    const insert = db.prepare('INSERT INTO telegram_checkins(binding_id,nonce,digest,energy,clarity,support,created_at,expires) VALUES(?,?,?,?,?,?,?,?)')
+    for (let i = 0; i < 4; i++) insert.run(bindingId, 'a' + i + 'b' + i, 'd' + i, 4, 3, 5, Date.now(), Date.now() + 86400000)
+  })
+
+  // Меньше пяти ответов — показатели скрыты.
+  const hidden = await owner('/telegram-checkin-stats')
+  assert.equal(hidden.status, 200)
+  assert.deepEqual(hidden.body, { status: 'hidden', reason: 'insufficient_responses', total: 4 })
+
+  // Пятый ответ открывает агрегаты.
+  seed(db => db.prepare('INSERT INTO telegram_checkins(binding_id,nonce,digest,energy,clarity,support,created_at,expires) VALUES(?,?,?,?,?,?,?,?)')
+    .run(bindingId, 'a4b4', 'd4', 2, 4, 1, Date.now(), Date.now() + 86400000))
+  const visible = await owner('/telegram-checkin-stats')
+  assert.equal(visible.status, 200)
+  assert.equal(visible.body.status, 'visible')
+  assert.equal(visible.body.total, 5)
+  assert.deepEqual(visible.body.metrics.energy, { average: 3.6, distribution: { 1: 0, 2: 1, 3: 0, 4: 4, 5: 0 } })
+  assert.equal(visible.body.metrics.clarity.average, 3.2)
+  assert.equal(visible.body.metrics.support.average, 4.2)
+  const serialized = JSON.stringify(visible.body)
+  assert.ok(!serialized.includes('nonce') && !serialized.includes('digest') && !serialized.includes('binding'))
+
+  // Участник не имеет доступа.
+  const denied = await person('/telegram-checkin-stats')
+  assert.equal(denied.status, 403)
+  assert.equal(denied.body.error.code, 'FORBIDDEN')
+
+  // Без сессии — 401.
+  assert.equal((await env.client()('/telegram-checkin-stats')).status, 401)
+
+  // Чек-ины другой команды не попадают в статистику: отдельный workspace,
+  // свой binding и свой чек-ин.
+  seed(db => {
+    const foreignWorkspace = randomUUID()
+    db.prepare('INSERT INTO workspaces(id,name) VALUES(?,?)').run(foreignWorkspace, 'Чужая команда')
+    const foreignBinding = randomUUID()
+    db.prepare('INSERT INTO telegram_bindings(id,workspace_id,chat_id,state) VALUES(?,?,?,?)')
+      .run(foreignBinding, foreignWorkspace, null, '{}')
+    db.prepare('INSERT INTO telegram_checkins(binding_id,nonce,digest,energy,clarity,support,created_at,expires) VALUES(?,?,?,?,?,?,?,?)')
+      .run(foreignBinding, 'z0', 'z0', 1, 1, 1, Date.now(), Date.now() + 86400000)
+  })
+  assert.equal((await owner('/telegram-checkin-stats')).body.total, 5)
+
+  // Просроченные записи не учитываются.
+  seed(db => db.prepare("UPDATE telegram_checkins SET expires=? WHERE binding_id=? AND nonce='a0b0'").run(Date.now() - 1, bindingId))
+  const afterExpiry = await owner('/telegram-checkin-stats')
+  assert.deepEqual(afterExpiry.body, { status: 'hidden', reason: 'insufficient_responses', total: 4 })
 })

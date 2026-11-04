@@ -134,6 +134,27 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
       const round = roundFor(member)
       return round.closed_at ? JSON.parse(round.summary) : { status: 'open' }
     },
+    telegramCheckinStats(member) {
+      // Анонимная агрегация личных чек-инов из Telegram. Никаких nonce, digest
+      // или дат по отдельным ответам наружу — только агрегаты по workspace.
+      requireOrganizer(member)
+      const rows = all(`SELECT c.energy,c.clarity,c.support FROM telegram_checkins c
+        JOIN telegram_bindings b ON b.id=c.binding_id
+        WHERE b.workspace_id=? AND c.expires>?`, member.workspace_id, now())
+      const total = rows.length
+      if (total < 5) return { status: 'hidden', reason: 'insufficient_responses', total }
+      const roundOne = value => Math.round(value * 10) / 10
+      const metrics = {}
+      for (const metric of ['energy', 'clarity', 'support']) {
+        const values = rows.map(row => row[metric])
+        metrics[metric] = {
+          average: roundOne(values.reduce((sum, value) => sum + value, 0) / total),
+          distribution: values.reduce((acc, value) => { acc[value] += 1; return acc },
+            { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }),
+        }
+      }
+      return { status: 'visible', total, metrics }
+    },
     checkin(member, input) {
       const round = roundFor(member)
       if (input.roundId !== round.id) fail(409, 'STALE_ROUND', 'Раунд изменился. Обновите страницу перед отправкой.')

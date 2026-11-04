@@ -68,6 +68,26 @@ class ExperienceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(flow.drafts[message.from_user.id].step, 0)
         self.assertTrue(message.answer.await_args.args[0].startswith("1/3"))
 
+        answer_count = message.answer.await_count
+        await handler(dispatcher.callback_query, "select_checkin")(event)
+        self.assertIn("Чек-ин уже открыт", event.answer.await_args.args[0])
+        self.assertEqual(message.answer.await_count, answer_count)
+        self.assertEqual(flow.drafts[message.from_user.id].nonce, nonce)
+
+        for step in range(3):
+            score_button = message.answer.await_args.kwargs["reply_markup"].inline_keyboard[0][0]
+            self.assertEqual(score_button.callback_data, f"score:{nonce}:{step}:1")
+            await handler(dispatcher.callback_query, "callback")(SimpleNamespace(
+                message=message,
+                from_user=message.from_user,
+                data=score_button.callback_data,
+                answer=AsyncMock(),
+            ))
+
+        self.assertNotIn(message.from_user.id, flow.drafts)
+        self.assertIn("завершён", message.answer.await_args.args[0])
+        self.assertNotIn("reply_markup", message.answer.await_args.kwargs)
+
     async def test_decline_clears_draft_without_showing_a_question(self):
         dispatcher, flow = create_dispatcher()
         message = FakeMessage(user_id=42)

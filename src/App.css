@@ -302,3 +302,11 @@
   .panel,
   .button { transition: none; }
 }
+
+/* Анонимная статистика чек-инов из Telegram */
+.telegram-checkins .metric-row { margin-bottom: 12px; }
+.telegram-checkins .metric-row strong { display: block; margin-bottom: 4px; font-size: 0.95rem; }
+.telegram-checkins .metric-bars { display: flex; align-items: flex-end; gap: 6px; height: 72px; }
+.telegram-checkins .metric-bar { flex: 1; min-width: 24px; background: var(--accent, #f5b942); border-radius: 4px 4px 0 0; position: relative; min-height: 2px; }
+.telegram-checkins .metric-bar span { position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%); font-size: 0.75rem; color: var(--muted, #777); }
+.telegram-checkins .metric-bars { margin-bottom: 20px; }

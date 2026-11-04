@@ -347,7 +347,7 @@ test('SQLite: adding Telegram tables preserves existing workspace, member and ch
   assert.equal(reopened.prepare('SELECT name FROM members WHERE id=?').get(memberId).name, 'Legacy member')
   assert.deepEqual({ ...reopened.prepare('SELECT energy,clarity,support FROM checkins WHERE round_id=?').get(roundId) },
     { energy: 2, clarity: 3, support: 4 })
-  assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 25)
+  assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 26)
   reopened.close()
 })
 
@@ -1344,5 +1344,48 @@ test('Telegram synthetic gate defaults off and unfinished summary routes remain 
   error(await f.recommendation(randomUUID()), 503, 'UNAVAILABLE')
   error(await f.chatFeedback(randomUUID(), 'interpretation', undefined), 503, 'UNAVAILABLE')
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_requests').get().n, 0)
-  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 25)
+  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 26)
+})
+
+test('HTTP: bot submits an anonymous personal check-in and the Telegram id is not persisted', async t => {
+  const f = await fixture(t)
+  await f.activate()
+  const submittedAt = new Date(f.time()).toISOString()
+  const payload = {
+    telegramUserId: '100000001',
+    nonce: 'a1b2c3d4e5f60718',
+    scores: { energy: 4, clarity: 3, support: 5 },
+    submittedAt,
+  }
+  const ok = await f.bot('checkins', payload)
+  assert.equal(ok.status, 200)
+  assert.deepEqual(ok.body, { accepted: true, duplicate: false })
+  const row = f.db.prepare('SELECT * FROM telegram_checkins WHERE binding_id=? AND nonce=?').get(f.id, payload.nonce)
+  assert.deepEqual({ energy: row.energy, clarity: row.clarity, support: row.support },
+    { energy: 4, clarity: 3, support: 5 })
+  assert.ok(!JSON.stringify(row).includes('100000001'), 'telegram id must not be stored')
+
+  // Идемпотентный повтор той же отправки тем же участником.
+  const repeat = await f.bot('checkins', payload)
+  assert.equal(repeat.status, 200)
+  assert.deepEqual(repeat.body, { accepted: true, duplicate: true })
+
+  // Тот же nonce с другим содержимым отклоняется.
+  error(await f.bot('checkins', { ...payload, scores: { energy: 1, clarity: 1, support: 1 } }), 409, 'EVENT_CONFLICT')
+
+  // Другой nonce от другого связанного участника принимается.
+  const second = await f.bot('checkins', { ...payload, telegramUserId: '100000002', nonce: 'b2c3d4e5f6071819' })
+  assert.equal(second.status, 200)
+
+  // Несвязанный пользователь отклоняется и не попадает в таблицу.
+  error(await f.bot('checkins', { ...payload, telegramUserId: '999999999', nonce: 'c3d4e5f607181920' }), 403, 'FORBIDDEN')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_checkins WHERE binding_id=?').get(f.id).n, 2)
+
+  // Некорректные оценки и неверные поля отклоняются.
+  error(await f.bot('checkins', { ...payload, scores: { energy: 0, clarity: 3, support: 5 }, nonce: 'd4e5f60718192021' }), 400, 'INVALID_INPUT')
+  error(await f.bot('checkins', { ...payload, nonce: 'short' }), 400, 'INVALID_INPUT')
+
+  // Блокировка чата запрещает приём.
+  await f.bot('pause', f.command((await f.status()).revision, { reason: 'manual' }))
+  error(await f.bot('checkins', { ...payload, nonce: 'e5f6071819202122' }), 409, 'CONSENT_REQUIRED')
 })
