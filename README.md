@@ -175,6 +175,7 @@ Telegram updates ──→ Python 3.12 / aiogram ──→ Node.js 24 API ──
 - [Правила бренда](docs/BRAND.md)
 - [Руководство Python-бота](bot/README.md)
 - [Compose-конфигурация](compose.yaml)
+- [Временный HTTPS-туннель с Windows: установка, запуск и остановка](docs/WINDOWS_TUNNEL.md)
 - [Развёртывание одной командой](scripts/deploy.sh) ([PowerShell](scripts/deploy.ps1))
 - [GitLab CI](https://gitlab.com/shertwg-group1/vibebot/-/pipelines)
 
