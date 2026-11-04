@@ -88,6 +88,10 @@ export function SummaryPanels() {
       observation={recommendation.observation}
       explanation={recommendation.explanation}
       limitation={recommendation.limitation}
+      metrics={{
+        outsideHoursPercent: view.metrics.outsideHoursPercent,
+        participationEvenness: view.metrics.participationEvenness,
+      }}
       suggestedAction={recommendation.action}
       dataSource={recommendation.dataSource}
       generationSource={recommendation.source}
