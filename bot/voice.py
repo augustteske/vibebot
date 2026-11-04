@@ -212,32 +212,52 @@ def install_voice_handlers(dispatcher, service: VoiceTranscription | None):
     from aiogram.filters import Command
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-    @dispatcher.message(Command("transcribe"))
-    async def begin(message: Message):
-        if message.chat.type != "private" or message.from_user is None or message.from_user.is_bot:
-            return
+    async def ask_consent(message: Message, user_id: int):
         if service is None:
-            await message.answer("Локальная расшифровка пока не настроена.")
+            await message.answer(
+                "Личная расшифровка сейчас недоступна: локальная модель не настроена. "
+                "Голосовое не скачивается и не обрабатывается."
+            )
             return
-        nonce = service.begin(message.from_user.id, message.chat.id)
+        nonce = service.begin(user_id, message.chat.id)
         await message.answer(
-            "Расшифруем одно новое голосовое до 60 секунд и 2 МиБ. После согласия бот скачает его из Telegram "
-            "и обработает локально на сервере без внешнего ИИ. Аудио и текст не записываются в файлы или БД; "
-            "результат отправится только в этот личный чат и останется в Telegram. Не присылайте чужую речь "
-            "без разрешения. Согласие действует 5 минут на одну запись. Отмена: /stop.",
+            "Отправьте отдельное согласие на обработку одной новой голосовой записи до 60 секунд и 2 МиБ. "
+            "После согласия запись будет распознана локально настроенной моделью: без внешнего ИИ, "
+            "без сохранения аудио или текста в файл/БД. Результат появится только в этом личном чате "
+            "и останется в Telegram. Не присылайте чужую речь без разрешения. Согласие действует "
+            "5 минут и только на одну запись. Отмена: /stop.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(text="Разрешаю одну расшифровку", callback_data=f"voice:{nonce}"),
             ]]),
         )
 
-    @dispatcher.callback_query(F.data.startswith("voice:"))
-    async def consent(event):
-        if (service is None or not isinstance(event.message, Message) or event.message.chat.type != "private"
-                or not service.accept(event.from_user.id, event.message.chat.id, event.data[6:])):
-            await event.answer("Разрешение устарело. Начните заново: /transcribe", show_alert=True)
+    @dispatcher.message(Command("transcribe"))
+    async def begin(message: Message):
+        if message.chat.type != "private" or message.from_user is None or message.from_user.is_bot:
+            return
+        await ask_consent(message, message.from_user.id)
+
+    @dispatcher.callback_query(F.data == "menu:voice")
+    async def begin_from_menu(event):
+        message = event.message
+        if (message is None or getattr(getattr(message, "chat", None), "type", None) != "private"
+                or event.from_user.is_bot or not callable(getattr(message, "answer", None))):
+            await event.answer("Расшифровка доступна только в личном чате.", show_alert=True)
             return
         await event.answer()
-        await event.message.answer("Отправьте одно новое голосовое. Отмена: /stop.")
+        await ask_consent(message, event.from_user.id)
+
+    @dispatcher.callback_query(F.data.startswith("voice:"))
+    async def consent(event):
+        message = event.message
+        if (service is None or message is None
+                or getattr(getattr(message, "chat", None), "type", None) != "private"
+                or event.from_user.is_bot
+                or not service.accept(event.from_user.id, message.chat.id, event.data[6:])):
+            await event.answer("Разрешение устарело. Откройте /start и запросите новое согласие.", show_alert=True)
+            return
+        await event.answer()
+        await message.answer("Согласие принято. Теперь отправьте одно новое голосовое. Отмена: /stop.")
 
     @dispatcher.message(F.voice, F.chat.type == "private")
     async def voice_message(message: Message):
