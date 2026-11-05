@@ -1405,3 +1405,187 @@ test('HTTP: bot submits an anonymous personal check-in and the Telegram id is no
   await f.bot('pause', f.command((await f.status()).revision, { reason: 'manual' }))
   error(await f.bot('checkins', { ...payload, nonce: 'e5f6071819202122' }), 409, 'CONSENT_REQUIRED')
 })
+
+const transcriptionPolicyVersion = 'synthetic-transcription-v1'
+
+// Seeds a binding already fully consented under synthetic-transcription-v1 and
+// activates it, mirroring activate() but for the transcription policy version.
+async function activateTranscription(f) {
+  const bindingId = f.id, chatId = '-100000000001'
+  const state = transitionConsent(initialConsentState(), { type: 'bind', policyVersion: transcriptionPolicyVersion }, 0)
+  f.db.prepare('UPDATE telegram_bindings SET state=? WHERE id=?').run(JSON.stringify(state), bindingId)
+  const current = await f.status()
+  await f.mutate('roster', { memberIds: f.people.map(person => person.id), verified: true })
+  await f.mutate('company', { accepted: true, authorityConfirmed: true, policyVersion: transcriptionPolicyVersion })
+  for (let i = 0; i < f.people.length; i++) {
+    await f.bot('consents', f.command((await f.status()).revision, {
+      telegramUserId: String(100000001 + i), policyVersion: transcriptionPolicyVersion,
+      rosterVersion: (await f.status()).rosterVersion, decision: 'accepted' }))
+  }
+  const active = await f.mutate('control', { action: 'resume' })
+  assert.equal(active.body.phase, 'active')
+  return active.body
+}
+
+const transcriptionJob = (f, revision, fields = {}) => ({
+  requestId: randomUUID(), expectedRevision: revision, chatId: '-100000000001',
+  mediaMessageId: '90000001', senderId: '100000001',
+  sentAt: new Date(f.time()).toISOString(), ...fields })
+
+test('HTTP/SQLite: transcription requires the dedicated policy version and full consent', async t => {
+  const f = await fixture(t)
+  // Active under synthetic-v1 must NOT admit transcription jobs.
+  const active = await f.activate()
+  error(await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, active.revision), { Authorization: 'Bearer ' + credential }),
+    409, 'CONSENT_REQUIRED')
+  // Before any consent at all, same policy gate plus consent gate.
+  const fresh = await fixture(t)
+  error(await fresh.request('/bot/v1/bindings/' + fresh.id + '/transcription-jobs',
+    transcriptionJob(fresh, (await fresh.status()).revision), { Authorization: 'Bearer ' + credential }),
+    409, 'CONSENT_REQUIRED')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_jobs').get().n, 0)
+})
+
+test('HTTP/SQLite: transcription job and result deduplicate across keys and conflict on change', async t => {
+  const f = await fixture(t)
+  const active = await activateTranscription(f)
+  const input = transcriptionJob(f, active.revision)
+  const created = await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs', input,
+    { Authorization: 'Bearer ' + credential })
+  assert.equal(created.status, 200)
+  assert.equal(created.body.status, 'queued')
+  assert.match(created.body.jobId, /^[0-9a-f-]{36}$/)
+  assert.equal(created.body.revision, active.revision)
+  // Replay the same requestId returns the same job without a second row.
+  const replay = await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs', input,
+    { Authorization: 'Bearer ' + credential })
+  assert.deepEqual(replay, created)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_jobs').get().n, 1)
+  // A different requestId with the same mediaMessageId resolves to the same job.
+  const sameMedia = await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, active.revision, { mediaMessageId: input.mediaMessageId, requestId: randomUUID() }),
+    { Authorization: 'Bearer ' + credential })
+  assert.equal(sameMedia.body.jobId, created.body.jobId)
+  // Changed body with the same requestId conflicts.
+  error(await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    { ...input, senderId: '100000002' }, { Authorization: 'Bearer ' + credential }), 409, 'EVENT_CONFLICT')
+  // Same mediaMessageId with different content conflicts.
+  error(await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, active.revision, { mediaMessageId: input.mediaMessageId, senderId: '100000002' }),
+    { Authorization: 'Bearer ' + credential }), 409, 'EVENT_CONFLICT')
+
+  // Submit the transcript.
+  const submit = { requestId: randomUUID(), expectedRevision: active.revision, jobId: created.body.jobId,
+    text: 'Спасибо за помощь с расшифровкой.', sentAt: new Date(f.time()).toISOString() }
+  const result = await f.request('/bot/v1/bindings/' + f.id + '/transcriptions', submit,
+    { Authorization: 'Bearer ' + credential })
+  assert.equal(result.status, 200)
+  assert.deepEqual(result.body, { jobId: created.body.jobId, result: 'accepted', revision: active.revision })
+  // Status reflects accepted.
+  const status = await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs/' + created.body.jobId,
+    undefined, { Authorization: 'Bearer ' + credential })
+  assert.deepEqual(status.body, { jobId: created.body.jobId, status: 'accepted', revision: active.revision })
+  // Replay the same requestId returns the original accepted result without a new text row.
+  const replayResult = await f.request('/bot/v1/bindings/' + f.id + '/transcriptions', submit,
+    { Authorization: 'Bearer ' + credential })
+  assert.deepEqual(replayResult.body, { jobId: created.body.jobId, result: 'accepted', revision: active.revision })
+  // A different requestId for an already-accepted job returns duplicate.
+  const duplicateSubmit = await f.request('/bot/v1/bindings/' + f.id + '/transcriptions',
+    { ...submit, requestId: randomUUID() }, { Authorization: 'Bearer ' + credential })
+  assert.deepEqual(duplicateSubmit.body, { jobId: created.body.jobId, result: 'duplicate', revision: active.revision })
+  // Changed text for the same job conflicts.
+  error(await f.request('/bot/v1/bindings/' + f.id + '/transcriptions',
+    { ...submit, text: 'Другой текст' }, { Authorization: 'Bearer ' + credential }), 409, 'EVENT_CONFLICT')
+  // Unknown job returns 404.
+  error(await f.request('/bot/v1/bindings/' + f.id + '/transcriptions',
+    { ...submit, requestId: randomUUID(), jobId: randomUUID() }, { Authorization: 'Bearer ' + credential }), 404, 'NOT_FOUND')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_texts').get().n, 1)
+})
+
+test('HTTP/SQLite: transcription gates revision, freshness, schema and bot scope', async t => {
+  const f = await fixture(t)
+  const active = await activateTranscription(f)
+  const post = (path, input, bindingId = f.id) => f.request(path, input, { Authorization: 'Bearer ' + credential })
+  // Stale revision.
+  error(await post('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, active.revision - 1)), 409, 'STALE_REVISION')
+  // Freshness window.
+  error(await post('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, active.revision, { sentAt: new Date(f.time() - 60001).toISOString() })), 400, 'INVALID_INPUT')
+  error(await post('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, active.revision, { sentAt: new Date(f.time() + 30001).toISOString() })), 400, 'INVALID_INPUT')
+  // Unknown extra fields rejected.
+  error(await post('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    { ...transcriptionJob(f, active.revision), workspaceId: f.owner.workspace_id }), 400, 'INVALID_INPUT')
+  // Foreign binding / bootstrap credential.
+  error(await post('/bot/v1/bindings/' + f.otherBindingId + '/transcription-jobs',
+    transcriptionJob(f, active.revision)), 404, 'NOT_FOUND')
+  error(await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, active.revision), { Authorization: 'Bearer ' + bootstrapCredential }), 401, 'BOT_AUTH_REQUIRED')
+  // Wrong chat.
+  error(await post('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, active.revision, { chatId: '-100000000002' })), 404, 'NOT_FOUND')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_jobs').get().n, 0)
+})
+
+test('HTTP/SQLite: unknown sender pauses the chat and rejects transcription text without storing', async t => {
+  const f = await fixture(t)
+  const active = await activateTranscription(f)
+  const input = transcriptionJob(f, active.revision, { senderId: '999999999' })
+  const result = await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs', input,
+    { Authorization: 'Bearer ' + credential })
+  assert.equal(result.status, 200)
+  assert.equal(result.body.result, 'paused')
+  assert.equal(result.body.revision, active.revision + 1)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_jobs').get().n, 0)
+})
+
+test('HTTP/SQLite: transcript text expires after 15 minutes and dedup survives to 24h', async t => {
+  const f = await fixture(t)
+  const active = await activateTranscription(f)
+  const created = await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, active.revision), { Authorization: 'Bearer ' + credential })
+  const jobId = created.body.jobId
+  const submit = { requestId: randomUUID(), expectedRevision: active.revision, jobId,
+    text: 'Временный текст расшифровки.', sentAt: new Date(f.time()).toISOString() }
+  assert.equal((await f.request('/bot/v1/bindings/' + f.id + '/transcriptions', submit,
+    { Authorization: 'Bearer ' + credential })).body.result, 'accepted')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_texts').get().n, 1)
+  f.advance(900001)
+  await f.restart()
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_texts').get().n, 0)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_jobs').get().n, 1)
+  f.advance(86400000)
+  await f.restart()
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_jobs').get().n, 0)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_requests').get().n, 0)
+})
+
+test('HTTP/SQLite: consent withdrawal clears transcription text and blocks new jobs', async t => {
+  const f = await fixture(t)
+  const active = await activateTranscription(f)
+  const created = await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, active.revision), { Authorization: 'Bearer ' + credential })
+  const submit = { requestId: randomUUID(), expectedRevision: active.revision, jobId: created.body.jobId,
+    text: 'Расшифровка до отзыва.', sentAt: new Date(f.time()).toISOString() }
+  assert.equal((await f.request('/bot/v1/bindings/' + f.id + '/transcriptions', submit,
+    { Authorization: 'Bearer ' + credential })).body.result, 'accepted')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_texts').get().n, 1)
+  assert.equal((await f.decision(0, 'withdrawn')).status, 200)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_texts').get().n, 0)
+  error(await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, (await f.status()).revision), { Authorization: 'Bearer ' + credential }),
+    409, 'CONSENT_REQUIRED')
+})
+
+test('HTTP/SQLite: transcription routes are absent when the synthetic gate is off', async t => {
+  const f = await fixture(t, { enabled: false })
+  error(await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, 0), { Authorization: 'Bearer ' + credential }), 503, 'UNAVAILABLE')
+  error(await f.request('/bot/v1/bindings/' + f.id + '/transcriptions',
+    { requestId: randomUUID(), expectedRevision: 0, jobId: randomUUID(), text: 'x', sentAt: new Date().toISOString() },
+    { Authorization: 'Bearer ' + credential }), 503, 'UNAVAILABLE')
+  error(await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs/' + randomUUID(),
+    undefined, { Authorization: 'Bearer ' + credential }), 503, 'UNAVAILABLE')
+})
