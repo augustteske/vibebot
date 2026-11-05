@@ -9,4 +9,9 @@ a { color: #684400; text-underline-offset: .2em; }
 a:focus-visible { outline: 2px solid #684400; outline-offset: 3px; }
 code { font-size: .9em; overflow-wrap: anywhere; }
 li + li { margin-top: .35rem; }
+details { border-top: 1px solid #ded6c9; padding: .65rem 0; }
+details:last-of-type { border-bottom: 1px solid #ded6c9; }
+summary { cursor: pointer; font-weight: 600; }
+summary:focus-visible { outline: 2px solid #684400; outline-offset: 3px; }
+details p { margin: .5rem 0 0; }
 .note { border-left: .25rem solid #bf8200; background: #fff1ce; padding: .7rem 1rem; }
