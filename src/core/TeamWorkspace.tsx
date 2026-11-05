@@ -196,7 +196,7 @@ export function TeamWorkspace() {
       </fieldset></form><div className="button-row"><button className="text-button" onClick={() => { setRestore(false); setJoin(!join) }} disabled={busy}>{join ? 'Создать новую команду' : 'У меня есть приглашение'}</button><button className="text-button" onClick={() => setRestore(!restore)} disabled={busy}>{restore ? 'Обычный вход' : 'У меня есть личный код входа'}</button></div>
     </section> : <>
       <div className="team-heading"><div><h2>{snapshot.workspace.name}</h2><p className="muted">{snapshot.member.name} · {snapshot.member.role === 'organizer' ? 'организатор' : 'участник'} · время по Омску</p></div><div className="button-row"><button className="button secondary" onClick={() => void refresh()} disabled={busy}>Обновить</button><button className="text-button" onClick={() => setConfirm('logout')} disabled={busy}>Выйти</button></div></div>
-      <SummaryPanels key={snapshot.round.id + ':' + snapshot.round.summary.status}/>
+      {snapshot.member.role === 'organizer' && <SummaryPanels key={snapshot.round.id + ':' + snapshot.round.summary.status}/>}
       {snapshot.member.role === 'organizer' && <TelegramCheckinsPanel key={activeWorkspaceId}/>}
       {snapshot.member.role === 'organizer' && <TeamSettings key={activeWorkspaceId}/>}
       {confirm === 'logout' && <div className="panel confirmation"><p>Для возвращения понадобится личный код входа. Сохраните его перед выходом.</p><div className="button-row"><button className="button secondary" onClick={() => setConfirm('')} disabled={busy}>Остаться</button><button className="button" onClick={() => void logout()} disabled={busy}>Выйти из пространства</button></div></div>}

@@ -1,0 +1,36 @@
+.team-pulse { min-width: 0; }
+
+.team-pulse__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.team-pulse__header h2 { margin: 0; }
+
+.team-pulse__period {
+  display: grid;
+  gap: 6px;
+  max-width: 100%;
+  font-weight: 650;
+}
+
+.team-pulse__period select {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid #777;
+  border-radius: var(--vibee-radius-control);
+  background: #fff;
+  color: var(--vibee-ink);
+}
+
+.team-pulse__hint { color: #555; }
+.team-pulse__demo { font-weight: 650; }
+.team-pulse > .iw-container { padding: 0; border: 0; box-shadow: none; background: none; }
+
+@media (max-width: 480px) {
+  .team-pulse__period { width: 100%; }
+}
