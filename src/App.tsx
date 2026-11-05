@@ -7,6 +7,7 @@ import { demoRounds } from './demo/fixtures'
 import { TeamWorkspace } from './core/TeamWorkspace'
 import { LandingPage } from './core/LandingPage'
 import { DemoDashboard } from './core/DemoDashboard'
+import { NotFoundPage } from './core/NotFoundPage'
 import './App.css'
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
   const [team, setTeam] = useState(() => window.location.pathname !== '/demo' && (new URLSearchParams(window.location.search).get('mode') === 'team' || window.location.hash.startsWith('#invite=')))
   const [enteredWorkspace, setEnteredWorkspace] = useState(() => window.location.pathname !== '/demo' && (new URLSearchParams(window.location.search).get('mode') === 'team' || window.location.hash.startsWith('#invite=')))
   const summary = aggregateRound(demoRounds[scenario])
+  const knownPath = window.location.pathname === '/' || window.location.pathname === '/demo'
 
   useEffect(() => {
     function syncRoute() {
@@ -52,6 +54,7 @@ export default function App() {
   if (demo) {
     return <DemoDashboard onBack={openHome} onEnter={() => mode(true)} onCreateTeam={() => mode(true)} />
   }
+  if (!knownPath) return <NotFoundPage />
   if (!enteredWorkspace) {
     return <LandingPage onEnter={() => mode(true)} onDemo={openDemo} />
   }

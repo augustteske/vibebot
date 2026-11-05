@@ -1,5 +1,6 @@
 import { useId } from 'react'
 import type { CommunicationView } from '../../core/telegram'
+import { RequestError } from '../../core/RequestError'
 import { InsightsWidget } from './InsightsWidget'
 import './TeamPulse.css'
 
@@ -20,11 +21,13 @@ const explanations = {
   error: 'Анализ чата временно недоступен. Показатели скрыты.',
 }
 
-export function TeamPulse({ view, loading, error, onRetry }: {
+export function TeamPulse({ view, loading, error, onRetry, retrying = false, onLogin }: {
   view: CommunicationView | null
   loading: boolean
-  error: string
+  error: unknown
   onRetry: () => void
+  retrying?: boolean
+  onLogin?: () => void
 }) {
   const id = useId()
   return <section className="panel team-pulse" aria-labelledby={`${id}-title`}>
@@ -39,9 +42,8 @@ export function TeamPulse({ view, loading, error, onRetry }: {
       </label>
     </div>
     <p className="team-pulse__hint" id={`${id}-history`}>История за неделю и месяц недоступна: API возвращает только текущую сводку. Сравнение и динамика не рассчитываются.</p>
-    {loading ? <p role="status">Загружаем текущую сводку…</p> : error ? <>
-      <p className="error" role="alert">Не удалось загрузить сводку. {error}</p>
-      <button type="button" className="button secondary" onClick={onRetry}>Повторить</button>
+    {loading ? <p role="status">{retrying ? 'Повторяем запрос сводки…' : 'Загружаем текущую сводку…'}</p> : error ? <>
+      <RequestError error={error} action="Просматривать сводку может только организатор." onRetry={onRetry} retrying={retrying} onLogin={onLogin}/>
     </> : view?.status === 'published' ? <>
       <p>Данные доступны за опубликованный период. Это текущая сводка, а не итог за неделю или месяц.</p>
       {view.demo && <p className="team-pulse__demo">Демо: вымышленные данные, не реальные сообщения команды.</p>}

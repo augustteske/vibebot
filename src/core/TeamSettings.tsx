@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { api, ApiError } from './client'
+import { api } from './client'
+import { RequestError } from './RequestError'
 import './team-settings.css'
 
 interface WorkInterval {
@@ -45,7 +46,7 @@ const toMinutes = (time: string) => {
 
 const toTime = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
 
-export function TeamSettings() {
+export function TeamSettings({ onLogin }: { onLogin?: () => void }) {
   const [schedule, setSchedule] = useState<WorkSchedule | null>(null)
   const [timeZone, setTimeZone] = useState('Asia/Omsk')
   const [selectedDays, setSelectedDays] = useState<number[]>([1, 2, 3, 4, 5])
@@ -54,7 +55,7 @@ export function TeamSettings() {
   const [loading, setLoading] = useState(true)
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useState<unknown>(null)
   const [status, setStatus] = useState('')
 
   useEffect(() => {
@@ -68,10 +69,11 @@ export function TeamSettings() {
         setStartTime(toTime(profile.intervals[0].start))
         setEndTime(toTime(profile.intervals[0].end))
       }
+      if (loadAttempt > 0) setStatus('Расписание обновлено.')
       setLoading(false)
     }).catch(failure => {
       if (!active) return
-      setError(failure instanceof ApiError ? failure.message : 'Не удалось загрузить расписание.')
+      setError(failure)
       setLoading(false)
     })
     return () => { active = false }
@@ -107,7 +109,7 @@ export function TeamSettings() {
       setSchedule(updated)
       setStatus('Рабочее расписание сохранено.')
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Не удалось сохранить расписание.')
+      setError(failure)
     } finally {
       setSaving(false)
     }
@@ -115,14 +117,20 @@ export function TeamSettings() {
 
   const usesDifferentIntervals = schedule?.intervals.some(interval =>
     interval.start !== schedule.intervals[0]?.start || interval.end !== schedule.intervals[0]?.end) ?? false
+  const retryLoad = () => {
+    if (loading) return
+    setError(null)
+    setLoading(true)
+    setLoadAttempt(attempt => attempt + 1)
+  }
 
   return <section className="panel team-settings" aria-labelledby="team-settings-title">
     <h2 id="team-settings-title">Рабочее расписание</h2>
     <p className="muted">Расписание используется для расчёта сообщений вне рабочих часов. При изменении сервер пересчитает производные показатели.</p>
-    {loading ? <p role="status">Загружаем расписание…</p> : error && !schedule
-      ? <div className="error" role="alert">{error} <button type="button" onClick={() => { setError(''); setLoading(true); setLoadAttempt(attempt => attempt + 1) }}>Повторить загрузку</button></div>
+    {loading ? <p role="status">{loadAttempt ? 'Повторяем запрос расписания…' : 'Загружаем расписание…'}</p> : error && !schedule
+      ? <RequestError error={error} action="Изменять расписание могут только организаторы." onRetry={retryLoad} retrying={loading} onLogin={onLogin}/>
       : schedule && <>
-        {error && <p className="error" role="alert">{error}</p>}
+        <RequestError error={error} action="Изменять расписание могут только организаторы." onLogin={onLogin} mutation/>
         {status && <p className="team-settings__status" role="status">{status}</p>}
         {usesDifferentIntervals && <p className="team-settings__note">Сейчас заданы разные часы для отдельных дней. Сохранение заменит их единым интервалом для выбранных дней.</p>}
         <form onSubmit={event => void save(event)}>

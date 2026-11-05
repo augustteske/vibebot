@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { api, ApiError } from './client'
+import { api } from './client'
+import { RequestError } from './RequestError'
 import type { SessionSnapshot } from './contracts'
 import { SummaryPanels } from './SummaryPanels'
 import { TeamSettings } from './TeamSettings'
@@ -65,21 +66,28 @@ function invitationToken(value: string) {
 export function TeamWorkspace() {
   const [snapshot, setSnapshot] = useState<SessionSnapshot | null>(null)
   const [initialized, setInitialized] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useState<unknown>(null)
+  const [errorMutation, setErrorMutation] = useState(false)
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [join, setJoin] = useState(!!initialToken())
   const [invite, setInvite] = useState(initialToken)
   const [inviteLink, setInviteLink] = useState('')
   const [restore, setRestore] = useState(false)
+  const [showRestore, setShowRestore] = useState(false)
+  const [loginKey, setLoginKey] = useState('')
   const [accessKey, setAccessKey] = useState('')
   const [confirm, setConfirm] = useState('')
   const [teamProfile, setTeamProfile] = useState<TeamProfile>({ members: [] })
   const [teamProfileWorkspaceId, setTeamProfileWorkspaceId] = useState('')
   const [teamProfileLoaded, setTeamProfileLoaded] = useState(false)
   const [teamProfileError, setTeamProfileError] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
   const requestVersion = useRef(0)
   const busyRef = useRef(false)
+  const refreshingRef = useRef(false)
+  const refreshByUser = useRef(false)
+  const hasSnapshot = useRef(false)
   const teamProfileWorkspaceRef = useRef('')
   const activeWorkspaceId = snapshot?.workspace.id ?? ''
   const loadTeamProfile = useCallback((workspaceId: string, force = false) => {
@@ -95,24 +103,43 @@ export function TeamWorkspace() {
       setTeamProfileWorkspaceId(workspaceId)
       setTeamProfileLoaded(true)
     } catch (failure) {
-      setTeamProfileError(failure instanceof Error ? failure.message : 'Не удалось прочитать профиль команды из этого браузера.')
+      setTeamProfileError('Не удалось прочитать профиль команды в этом браузере.')
     }
   }, [])
   const refresh = useCallback(async () => {
+    if (refreshingRef.current) return
+    refreshingRef.current = true
     const version = ++requestVersion.current
+    setRefreshing(true)
     try {
       const result = await api('/session')
-      if (version === requestVersion.current) { setSnapshot(result); setError('') }
+      if (version === requestVersion.current) {
+        setSnapshot(result)
+        hasSnapshot.current = true
+        setError(null)
+        setErrorMutation(false)
+        if (refreshByUser.current) setNotice('Данные команды обновлены.')
+      }
     } catch (failure) {
       if (version !== requestVersion.current) return
-      if (failure instanceof ApiError && failure.status === 401) { setSnapshot(null); setError('') }
-      else setError(failure instanceof Error ? failure.message : 'Не удалось обновить данные')
-    } finally { if (version === requestVersion.current) setInitialized(true) }
+      if (!hasSnapshot.current) {
+        setSnapshot(null)
+      }
+      setError(failure)
+      setErrorMutation(false)
+    } finally {
+      refreshingRef.current = false
+      setRefreshing(false)
+      refreshByUser.current = false
+      if (version === requestVersion.current) {
+        setInitialized(true)
+      }
+    }
   }, [])
   useEffect(() => {
     void refresh()
     const timer = window.setInterval(() => { if (!busyRef.current && !document.hidden) void refresh() }, 15000)
-    return () => { window.clearInterval(timer); requestVersion.current++ }
+    return () => { window.clearInterval(timer); requestVersion.current++; refreshingRef.current = false }
   }, [refresh])
   function updateTeamProfile(update: (profile: TeamProfile) => TeamProfile, updatedAt: string) {
     const updated = { ...update(teamProfile), updatedAt }
@@ -122,7 +149,7 @@ export function TeamWorkspace() {
       window.localStorage.setItem(teamProfileStorageKey(activeWorkspaceId), JSON.stringify(updated))
       setTeamProfileError('')
     } catch (failure) {
-      setTeamProfileError(failure instanceof Error ? failure.message : 'Не удалось сохранить профиль команды в этом браузере.')
+      setTeamProfileError('Не удалось сохранить профиль команды в этом браузере.')
     }
   }
   function updateTeamMember(userId: string, changes: Partial<TeamMember>, updatedAt: string) {
@@ -138,44 +165,45 @@ export function TeamWorkspace() {
   }
   async function perform(path: string, input: unknown, message: string) {
     if (busyRef.current) return false
-    busyRef.current = true; setBusy(true); setError(''); setNotice(''); requestVersion.current++
+    busyRef.current = true; setBusy(true); setError(null); setErrorMutation(false); setNotice(''); requestVersion.current++
     try {
       const result = await api(path, input)
-      setSnapshot(result); setNotice(message); setConfirm('')
+      setSnapshot(result); hasSnapshot.current = true; setError(null); setErrorMutation(false); setNotice(message); setConfirm(''); setShowRestore(false)
       if (path === '/workspaces' || path === '/join' || path === '/restore') {
         window.history.replaceState(null, '', window.location.pathname + '?mode=team')
         setInvite('')
       }
       return true
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Не удалось выполнить действие')
+      setError(failure)
+      setErrorMutation(true)
       return false
     } finally { busyRef.current = false; setBusy(false) }
   }
   async function issueInvite() {
     if (busyRef.current) return
-    busyRef.current = true; setBusy(true); setError(''); setNotice('')
+    busyRef.current = true; setBusy(true); setError(null); setErrorMutation(false); setNotice('')
     try {
       const result = await api<{ token: string; expiresAt: string }>('/invitations', {})
       setInviteLink(window.location.origin + '/?mode=team#invite=' + result.token)
       setNotice('Приглашение создано на 24 часа. Передайте его одному участнику.')
-    } catch (failure) { setError(failure instanceof Error ? failure.message : 'Приглашение не создано') }
+    } catch (failure) { setError(failure); setErrorMutation(true) }
     finally { busyRef.current = false; setBusy(false) }
   }
   async function logout() {
     if (busyRef.current) return
-    busyRef.current = true; setBusy(true); setError(''); requestVersion.current++
-    try { await api('/logout', {}); setSnapshot(null); setInviteLink(''); setAccessKey(''); setConfirm(''); setNotice('Вы вышли из пространства.') }
-    catch (failure) { setError(failure instanceof Error ? failure.message : 'Не удалось выйти') }
+    busyRef.current = true; setBusy(true); setError(null); setErrorMutation(false); requestVersion.current++
+    try { await api('/logout', {}); setSnapshot(null); hasSnapshot.current = false; setInviteLink(''); setAccessKey(''); setConfirm(''); setNotice('Вы вышли из пространства.') }
+    catch (failure) { setError(failure); setErrorMutation(true) }
     finally { busyRef.current = false; setBusy(false) }
   }
   async function createAccessKey() {
     if (busyRef.current) return
-    busyRef.current = true; setBusy(true); setError('')
+    busyRef.current = true; setBusy(true); setError(null); setErrorMutation(false)
     try {
       const result = await api<{ key: string }>('/recovery-key', {})
       setAccessKey(result.key); setNotice('Личный код входа создан на 30 дней. Сохраните его у себя; не передавайте другим.')
-    } catch (failure) { setError(failure instanceof Error ? failure.message : 'Не удалось создать код входа') }
+    } catch (failure) { setError(failure); setErrorMutation(true) }
     finally { busyRef.current = false; setBusy(false) }
   }
   function authenticate(event: FormEvent<HTMLFormElement>) {
@@ -184,8 +212,14 @@ export function TeamWorkspace() {
     void perform(restore ? '/restore' : join ? '/join' : '/workspaces', restore ? { key: values.get('accessKey') } : join ? { displayName: values.get('displayName'), token: invitationToken(invite) } : { displayName: values.get('displayName'), name: values.get('name') }, restore ? 'Вход восстановлен.' : join ? 'Вы присоединились к команде.' : 'Пространство создано. Пригласите участников и сохраните личный код входа.')
   }
   const status = snapshot?.round.summary
+  const beginLogin = () => {
+    setError(null); setErrorMutation(false)
+    setLoginKey('')
+    if (snapshot) setShowRestore(true)
+    else { setRestore(true); setJoin(false) }
+  }
   return <section className="team-space" aria-label="Моя команда">
-    <div className="feedback-messages" aria-live="polite">{error && <div className="error" role="alert">{error} <button type="button" onClick={() => void refresh()} disabled={busy}>Обновить</button></div>}{notice && <p className="status">{notice}</p>}</div>
+    <div className="feedback-messages" aria-live="polite"><RequestError error={error} action="Это действие доступно только организатору." onRetry={() => { refreshByUser.current = true; void refresh() }} retrying={refreshing || busy} onLogin={beginLogin} mutation={errorMutation}/>{notice && <p className="status" role="status">{notice}</p>}</div>
     {!initialized ? <div className="panel"><p role="status">Открываем пространство…</p></div> : !snapshot ? <section className="panel entrance">
       <div className="entrance__brand"><img src="/bee.svg" alt=""/><span>Vibee</span></div>
       <h2>{restore ? 'Вернуться в команду' : join ? 'Присоединиться к команде' : 'Создать пространство'}</h2>
@@ -195,10 +229,11 @@ export function TeamWorkspace() {
         </>}<button className="button entrance__submit" type="submit">{busy ? 'Сохраняем…' : restore ? 'Войти по коду' : join ? 'Войти по приглашению' : 'Создать команду'}</button>
       </fieldset></form><div className="button-row"><button className="text-button" onClick={() => { setRestore(false); setJoin(!join) }} disabled={busy}>{join ? 'Создать новую команду' : 'У меня есть приглашение'}</button><button className="text-button" onClick={() => setRestore(!restore)} disabled={busy}>{restore ? 'Обычный вход' : 'У меня есть личный код входа'}</button></div>
     </section> : <>
-      <div className="team-heading"><div><h2>{snapshot.workspace.name}</h2><p className="muted">{snapshot.member.name} · {snapshot.member.role === 'organizer' ? 'организатор' : 'участник'} · время по Омску</p></div><div className="button-row"><button className="button secondary" onClick={() => void refresh()} disabled={busy}>Обновить</button><button className="text-button" onClick={() => setConfirm('logout')} disabled={busy}>Выйти</button></div></div>
-      {snapshot.member.role === 'organizer' && <SummaryPanels key={snapshot.round.id + ':' + snapshot.round.summary.status}/>}
-      {snapshot.member.role === 'organizer' && <TelegramCheckinsPanel key={activeWorkspaceId}/>}
-      {snapshot.member.role === 'organizer' && <TeamSettings key={activeWorkspaceId}/>}
+      <div className="team-heading" id="team-overview"><div><h2>{snapshot.workspace.name}</h2><p className="muted">{snapshot.member.name} · {snapshot.member.role === 'organizer' ? 'организатор' : 'участник'} · время по Омску</p></div><div className="button-row"><button className="button secondary" onClick={() => void refresh()} disabled={busy || refreshing}>{refreshing ? 'Обновляем…' : 'Обновить'}</button><button className="text-button" onClick={() => setConfirm('logout')} disabled={busy}>Выйти</button></div></div>
+      {showRestore && <section className="panel entrance" aria-labelledby="session-restore-title"><h2 id="session-restore-title">Войти снова</h2><p className="muted">Введите личный код, чтобы продолжить. Текущая форма останется открытой.</p><form onSubmit={event => { event.preventDefault(); void perform('/restore', { key: loginKey }, 'Вход восстановлен.') }}><label className="team-field">Личный код входа<input type="password" autoComplete="off" maxLength={64} required value={loginKey} onChange={event => setLoginKey(event.target.value)} disabled={busy}/></label><button className="button" type="submit" disabled={busy}>{busy ? 'Входим…' : 'Войти по коду'}</button><button className="text-button" type="button" disabled={busy} onClick={() => { setShowRestore(false); setError(null) }}>Продолжить просмотр</button></form></section>}
+      {snapshot.member.role === 'organizer' && <SummaryPanels key={snapshot.round.id + ':' + snapshot.round.summary.status} onLogin={beginLogin}/>}
+      {snapshot.member.role === 'organizer' && <TelegramCheckinsPanel key={activeWorkspaceId} onLogin={beginLogin}/>}
+      {snapshot.member.role === 'organizer' && <TeamSettings key={activeWorkspaceId} onLogin={beginLogin}/>}
       {confirm === 'logout' && <div className="panel confirmation"><p>Для возвращения понадобится личный код входа. Сохраните его перед выходом.</p><div className="button-row"><button className="button secondary" onClick={() => setConfirm('')} disabled={busy}>Остаться</button><button className="button" onClick={() => void logout()} disabled={busy}>Выйти из пространства</button></div></div>}
       {snapshot.member.role === 'organizer' && <details key={activeWorkspaceId} className="panel team-profile" onToggle={event => {
         if (event.currentTarget.open && teamProfileWorkspaceRef.current !== activeWorkspaceId) loadTeamProfile(activeWorkspaceId)

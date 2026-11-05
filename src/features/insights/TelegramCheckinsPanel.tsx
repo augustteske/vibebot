@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
-import { api, ApiError } from '../../core/client'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { api } from '../../core/client'
+import { RequestError } from '../../core/RequestError'
 
 interface MetricStats {
   average: number
@@ -31,29 +32,38 @@ function isTelegramCheckinStats(value: unknown): value is TelegramCheckinStats {
   })
 }
 
-export function TelegramCheckinsPanel() {
+export function TelegramCheckinsPanel({ onLogin }: { onLogin?: () => void }) {
   const [stats, setStats] = useState<TelegramCheckinStats | null>(null)
-  const [error, setError] = useState('')
+  const [error, setError] = useState<unknown>(null)
   const [loading, setLoading] = useState(true)
+  const [loadAttempt, setLoadAttempt] = useState(0)
+  const [notice, setNotice] = useState('')
+  const loadingRef = useRef(false)
+  const retryRequested = useRef(false)
   const load = useCallback(async () => {
-    setLoading(true); setError('')
+    if (loadingRef.current) return
+    loadingRef.current = true
+    setLoading(true); setError(null)
     try {
       const result = await api<unknown>('/telegram-checkin-stats')
       if (!isTelegramCheckinStats(result)) throw new Error('Сервер вернул статистику в неожиданном формате.')
       setStats(result)
+      setError(null)
+      if (retryRequested.current) setNotice('Сводка чек-инов обновлена.')
+      retryRequested.current = false
     } catch (failure) {
       setStats(null)
-      setError(failure instanceof Error ? failure.message
-        : failure instanceof ApiError ? 'Не удалось загрузить статистику' : 'Не удалось загрузить статистику')
-    } finally { setLoading(false) }
+      setError(failure)
+      setNotice('')
+    } finally { loadingRef.current = false; setLoading(false) }
   }, [])
   useEffect(() => { void load() }, [load])
   return <details className="panel telegram-checkins">
     <summary>Чек-ины из Telegram <span className="muted">· анонимно</span></summary>
     <p className="muted">Агрегированные оценки из личных чек-инов бота. Ответы хранятся без привязки к аккаунтам; при менее пяти ответах показатели остаются скрытыми.</p>
-    {loading ? <p role="status">Загружаем статистику…</p>
-      : error ? <div className="error" role="alert">{error} <button type="button" onClick={() => void load()}>Повторить загрузку</button></div>
-      : stats?.status === 'hidden' ? <p role="status">Пока недостаточно ответов ({stats.total} из 5). Показатели появятся, когда участники завершат больше чек-инов.</p>
+    {loading ? <p role="status">{loadAttempt ? 'Повторяем запрос статистики…' : 'Загружаем статистику…'}</p>
+      : error ? <RequestError error={error} action="Просматривать сводку чек-инов могут только организаторы." onRetry={() => { retryRequested.current = true; setLoadAttempt(value => value + 1); void load() }} retrying={loading} onLogin={onLogin}/>
+      : <>{notice && <p role="status">{notice}</p>}{stats?.status === 'hidden' ? <p role="status">Пока недостаточно ответов ({stats.total} из 5). Показатели появятся, когда участники завершат больше чек-инов.</p>
       : stats?.metrics ? <>
         {metricKeys.map(key => {
           const metric = stats.metrics![key]
@@ -68,7 +78,6 @@ export function TelegramCheckinsPanel() {
           </div>
         })}
         <p className="muted">Всего ответов: {stats.total}</p>
-      </>
-      : null}
+      </> : null}</>}
   </details>
 }
