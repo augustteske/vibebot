@@ -17,6 +17,22 @@ const credentialHash = createHash('sha256').update(credential).digest('hex')
 const policyVersion = 'synthetic-v1'
 const DAY = 86400000
 const demoIntervals = [1, 2, 3, 4, 5].map(day => ({ day, start: 540, end: 1080 }))
+const expectedTelegramTables = [
+  'telegram_binding_requests', 'telegram_binding_tokens', 'telegram_bindings', 'telegram_chat_actions',
+  'telegram_checkins', 'telegram_close_requests', 'telegram_closed_periods', 'telegram_credentials',
+  'telegram_event_ids', 'telegram_feedback_collections', 'telegram_feedback_requests', 'telegram_feedback_votes',
+  'telegram_identities', 'telegram_identity_requests', 'telegram_link_tokens', 'telegram_links',
+  'telegram_media_observations', 'telegram_message_ids', 'telegram_notification_deliveries',
+  'telegram_notification_subscriptions', 'telegram_open_periods', 'telegram_period_authors',
+  'telegram_profile_requests', 'telegram_profiles', 'telegram_requests', 'telegram_texts',
+  'telegram_transcription_jobs', 'telegram_transcription_requests', 'telegram_transcription_texts',
+]
+
+function assertTelegramTables(db) {
+  const actual = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%' ORDER BY name")
+    .all().map(row => row.name)
+  assert.deepEqual(actual, expectedTelegramTables)
+}
 
 test('SQLite startup migrates old Telegram bindings without losing persisted profile or binding data', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'vibee-telegram-migration-test-'))
@@ -347,7 +363,7 @@ test('SQLite: adding Telegram tables preserves existing workspace, member and ch
   assert.equal(reopened.prepare('SELECT name FROM members WHERE id=?').get(memberId).name, 'Legacy member')
   assert.deepEqual({ ...reopened.prepare('SELECT energy,clarity,support FROM checkins WHERE round_id=?').get(roundId) },
     { energy: 2, clarity: 3, support: 4 })
-  assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 26)
+  assertTelegramTables(reopened)
   reopened.close()
 })
 
@@ -1344,7 +1360,7 @@ test('Telegram synthetic gate defaults off and unfinished summary routes remain 
   error(await f.recommendation(randomUUID()), 503, 'UNAVAILABLE')
   error(await f.chatFeedback(randomUUID(), 'interpretation', undefined), 503, 'UNAVAILABLE')
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_requests').get().n, 0)
-  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 26)
+  assertTelegramTables(f.db)
 })
 
 test('HTTP: bot submits an anonymous personal check-in and the Telegram id is not persisted', async t => {

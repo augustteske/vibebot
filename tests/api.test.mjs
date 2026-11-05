@@ -278,9 +278,12 @@ test('anonymous Telegram check-in stats: organizer-only, k-anonymity, workspace 
   const root = resolve('.data')
   await mkdir(root, { recursive: true })
   const directory = await mkdtemp(join(root, 'stats-test-'))
-  t.after(async () => { if (!directory.startsWith(root + sep)) throw new Error('Unexpected test directory'); await rm(directory, { recursive: true, force: true }) })
   const path = join(directory, 'test.sqlite')
   const env = await start(t, path)
+  t.after(async () => {
+    if (!directory.startsWith(root + sep)) throw new Error('Unexpected test directory')
+    await rm(directory, { recursive: true, force: true })
+  })
   const owner = env.client()
   const created = await owner('/workspaces', { name: 'Команда статистики', displayName: 'Организатор' })
   assert.equal(created.status, 201)
