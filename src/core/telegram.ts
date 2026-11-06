@@ -106,3 +106,15 @@ export type CommunicationRecommendation = {
   id: string; periodId: string; profileVersion: number; dataSource: 'chat'; source: 'ai' | 'template'
   observation: string; explanation: string; limitation: string; action: string; demo?: boolean
 }
+
+export type CommunicationHistory = {
+  status: 'active' | 'disconnected' | 'awaiting_consents' | 'paused' | 'calibrating'
+  demo: boolean
+  window: { start: string; end: string }
+  revision?: number
+  profileVersion?: number
+  periods: Array<Extract<CommunicationView, { status: 'published' }> | {
+    status: 'insufficient' | 'calibrating'
+    period: { id: string; start: string; end: string }
+  }>
+}

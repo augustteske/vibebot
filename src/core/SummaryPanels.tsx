@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api } from './client'
 import type { CommunicationRecommendation, CommunicationView } from './telegram'
 import { ActionRecommendationCard } from '../features/actions/ActionRecommendationCard'
@@ -8,6 +8,7 @@ import './SummaryPanels.css'
 
 export function SummaryPanels({ onLogin }: { onLogin?: () => void }) {
   const [view, setView] = useState<CommunicationView | null>(null)
+  const [bindingId, setBindingId] = useState<string | null>(null)
   const [recommendation, setRecommendation] = useState<CommunicationRecommendation | null>(null)
   const [error, setError] = useState<unknown>(null)
   const [recommendationError, setRecommendationError] = useState<unknown>(null)
@@ -16,12 +17,19 @@ export function SummaryPanels({ onLogin }: { onLogin?: () => void }) {
   const [recommendationLoading, setRecommendationLoading] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const [recommendationAttempt, setRecommendationAttempt] = useState(0)
+  const historyUnavailable = useCallback((next: CommunicationView | null, failure?: unknown) => {
+    setView(next)
+    setRecommendation(null)
+    setBindingId(null)
+    if (failure) setError(failure)
+  }, [])
 
   useEffect(() => {
     let active = true
-    void api<CommunicationView>('/telegram/summary').then(
-      result => { if (active) { setView(result); setError(null) } },
-      failure => { if (active) setError(failure) },
+    setBindingId(null)
+    void api<{ bindingId: string | null; view: CommunicationView }>('/telegram/summary?includeBinding=1').then(
+      result => { if (active) { setView(result.view); setBindingId(result.bindingId); setError(null) } },
+      failure => { if (active) { setView(null); setBindingId(null); setError(failure) } },
     ).finally(() => { if (active) { setLoading(false); setRetryingSummary(false) } })
     return () => { active = false }
   }, [attempt])
@@ -40,7 +48,7 @@ export function SummaryPanels({ onLogin }: { onLogin?: () => void }) {
   }, [view?.status === 'published' ? view.period.id : '', recommendationAttempt])
 
   return <div className="telegram-summary">
-    <TeamPulse view={view} loading={loading} error={error} onLogin={onLogin} retrying={retryingSummary} onRetry={() => {
+    <TeamPulse bindingId={bindingId} onHistoryUnavailable={historyUnavailable} view={view} loading={loading} error={error} onLogin={onLogin} retrying={retryingSummary} onRetry={() => {
       setLoading(true)
       setRetryingSummary(true)
       setError(null)

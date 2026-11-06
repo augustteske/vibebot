@@ -100,7 +100,7 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         const actor = store.authenticate(tokenFrom(req))
         if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
         const current = store.telegram.currentSummary(actor)
-        return json(res, 200, current.view)
+        return json(res, 200, url.searchParams.get('includeBinding') === '1' ? current : current.view)
       }
       if (url.pathname === '/api/telegram/recommendation') {
         if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
@@ -178,7 +178,7 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
           : store.telegram.issueLinkToken(actor, input)
         return json(res, bot ? 200 : 201, result)
       }
-      const periodRoute = url.pathname.match(/^\/api\/telegram\/bindings\/([a-f0-9-]+)\/(periods\/close|summary)$/)
+      const periodRoute = url.pathname.match(/^\/api\/telegram\/bindings\/([a-f0-9-]+)\/(periods\/close|summary|history)$/)
       if (periodRoute) {
         if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
         const closing = periodRoute[2] === 'periods/close'
@@ -186,7 +186,8 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         if (closing) checkBrowser(req)
         const actor = store.authenticate(tokenFrom(req))
         if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
-        if (!closing) return json(res, 200, store.telegram.summary(actor, periodRoute[1]))
+        if (!closing) return json(res, 200, periodRoute[2] === 'history'
+          ? store.telegram.history(actor, periodRoute[1]) : store.telegram.summary(actor, periodRoute[1]))
         const input = await body(req, 'INVALID_INPUT')
         const result = store.telegram.closePeriod(actor, periodRoute[1], input)
         if (result.status === 'published') {

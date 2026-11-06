@@ -222,6 +222,19 @@ test('HTTP: current Telegram summary requires an organizer session and handles m
   assert.deepEqual((await f.currentSummary()).body, { status: 'disconnected' })
 })
 
+test('HTTP: summary optionally exposes only the server-selected organizer binding for history', async t => {
+  const f = await fixture(t)
+  const path = '/telegram/summary?includeBinding=1'
+  error(await f.request(path), 401, 'SIGN_IN_REQUIRED')
+  error(await f.request(path, undefined, { Cookie: 'vibebot_session=' + f.tokens[1] }), 403, 'FORBIDDEN')
+  await f.activate()
+  const result = await f.request(path, undefined, { Cookie: 'vibebot_session=' + f.tokens[0] })
+  assert.equal(result.body.bindingId, f.id)
+  assert.deepEqual(result.body.view, (await f.currentSummary()).body)
+  const foreign = await f.request(path, undefined, { Cookie: 'vibebot_session=' + f.foreignToken })
+  assert.deepEqual(foreign.body, { bindingId: null, view: { status: 'disconnected' } })
+})
+
 const sendMany = async (f, revision, count, authors, firstMessageId, thanks = 0,
   { bindingId = f.id, credential: botCredential = credential, chatId = '-100000000001', senderBase = 100000001 } = {}) => {
   for (let i = 0; i < count; i++) {
@@ -250,6 +263,89 @@ const publishForRecommendation = async f => {
   }
   return { periodId, revision: active.revision, closeInput }
 }
+
+const history = (f, token = f.tokens[0], bindingId = f.id) => f.request(
+  '/telegram/bindings/' + bindingId + '/history', undefined,
+  { Cookie: 'vibebot_session=' + token })
+
+test('HTTP/SQLite: seven-day history preserves real boundaries, hidden states, retention and restart', async t => {
+  const f = await fixture(t)
+  const active = await f.activate()
+  await f.setProfile()
+  const base = Date.parse('2026-11-02T03:00:00.000Z')
+  f.setTime(base)
+  assert.deepEqual((await history(f)).body.periods, [])
+  await sendMany(f, active.revision, 1, 1, 8100)
+  await closeCurrent(f, active.revision)
+  const insufficient = (await history(f)).body.periods[0]
+  assert.equal(insufficient.status, 'insufficient')
+  assert.equal(insufficient.period.start, new Date(base).toISOString())
+  assert.equal('metrics' in insufficient, false)
+  for (let day = 1; day <= 3; day++) {
+    f.setTime(base + day * DAY)
+    await sendMany(f, active.revision, 20, 5, 8200 + day * 100, 4)
+    await closeCurrent(f, active.revision)
+    if (day < 3) {
+      const periods = (await history(f)).body.periods
+      assert.equal(periods.at(-1).status, 'calibrating')
+      assert.equal(periods.some(row => 'metrics' in row), false)
+    }
+  }
+  const before = await history(f)
+  assert.equal(before.status, 200)
+  assert.equal(before.body.periods.length, 4)
+  assert.deepEqual(before.body.periods.at(-1), (await f.summary()).body)
+  await f.restart()
+  assert.deepEqual(await history(f), before)
+  // Open work does not replace the already closed history.
+  await sendMany(f, active.revision, 1, 1, 8700)
+  assert.equal((await history(f)).body.periods.length, 4)
+  f.setTime(base + 8 * DAY)
+  const expired = (await history(f)).body
+  assert.equal(expired.periods.length, 2)
+  assert.ok(expired.periods.every(row => row.status === 'calibrating' && !('metrics' in row)))
+  f.setTime(base + 10 * DAY)
+  assert.deepEqual((await history(f)).body.periods, [])
+})
+
+test('HTTP/SQLite: history enforces authentication, workspace, consent, profile and evidence gates', async t => {
+  const f = await fixture(t)
+  const { revision } = await publishForRecommendation(f)
+  error(await f.request('/telegram/bindings/' + f.id + '/history'), 401, 'SIGN_IN_REQUIRED')
+  error(await history(f, f.tokens[1]), 403, 'FORBIDDEN')
+  error(await history(f, f.foreignToken), 404, 'NOT_FOUND')
+  assert.deepEqual((await history(f, f.foreignToken, f.otherBindingId)).body.error.code, 'NOT_FOUND')
+  f.db.prepare('UPDATE telegram_bindings SET evidence_expires=? WHERE id=?').run(f.time(), f.id)
+  assert.equal((await history(f)).body.status, 'paused')
+  assert.deepEqual((await history(f)).body.periods, [])
+  f.db.prepare('UPDATE telegram_bindings SET evidence_expires=NULL WHERE id=?').run(f.id)
+  await f.profile({ requestId: randomUUID(), expectedVersion: 1, timeZone: 'UTC', intervals: demoIntervals })
+  assert.deepEqual((await history(f)).body.periods, [])
+  await sendMany(f, revision, 20, 5, 9100)
+  await closeCurrent(f, revision)
+  await f.decision(0, 'withdrawn')
+  assert.equal((await history(f)).body.status, 'paused')
+  assert.deepEqual((await history(f)).body.periods, [])
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_closed_periods WHERE binding_id=?').get(f.id).n, 0)
+})
+
+test('HTTP/SQLite: history is unavailable outside the synthetic gate', async t => {
+  const f = await fixture(t, { enabled: false })
+  error(await history(f), 503, 'UNAVAILABLE')
+})
+
+test('HTTP/SQLite: history hides paused and prior-revision periods and roster changes delete them', async t => {
+  const f = await fixture(t)
+  await publishForRecommendation(f)
+  await f.mutate('control', { action: 'pause' })
+  assert.equal((await history(f)).body.status, 'paused')
+  assert.deepEqual((await history(f)).body.periods, [])
+  await f.mutate('control', { action: 'resume' })
+  assert.deepEqual((await history(f)).body.periods, [])
+  await f.mutate('roster', { memberIds: f.people.map(person => person.id), verified: true })
+  assert.deepEqual((await history(f)).body.periods, [])
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_closed_periods WHERE binding_id=?').get(f.id).n, 0)
+})
 
 test('closing a published period notifies only the linked organizer and does not duplicate on replay', async t => {
   const sent = []

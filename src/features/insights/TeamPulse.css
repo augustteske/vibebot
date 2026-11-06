@@ -29,6 +29,12 @@
 
 .team-pulse__hint { color: #555; }
 .team-pulse__demo { font-weight: 650; }
+.team-pulse__history { display: grid; gap: 16px; min-width: 0; }
+.team-pulse__history article { min-width: 0; border-top: 1px solid #ddd; padding-top: 16px; }
+.team-pulse__history h3 { font-size: 1rem; overflow-wrap: anywhere; }
+.team-pulse__history summary { cursor: pointer; padding: 10px 0; overflow-wrap: anywhere; }
+.team-pulse__history summary:focus-visible { outline: 2px solid var(--vibee-ink); outline-offset: 3px; }
+.team-pulse__values { display: block; margin-top: 8px; font-size: .9rem; }
 .team-pulse > .iw-container { padding: 0; border: 0; box-shadow: none; background: none; }
 
 @media (max-width: 480px) {

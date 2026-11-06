@@ -971,6 +971,26 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
         return closed ? periodView(closed) : { status: 'insufficient' }
       })
     },
+    history(actor, id) {
+      unavailable()
+      organizerProfile(actor)
+      return tx(() => {
+        const binding = bindingFor(actor, id)
+        const state = JSON.parse(binding.state)
+        const time = now()
+        const window = { start: new Date(time - CLOSED_TTL).toISOString(), end: new Date(time).toISOString() }
+        const empty = status => ({ status, demo: true, window, periods: [] })
+        if (!canProcessChat(state)) return empty(state.phase)
+        if (binding.evidence_expires !== null && binding.evidence_expires <= time) return empty('paused')
+        const profile = profileFor(actor.workspace_id)
+        if (!hasSchedule(profile)) return empty('calibrating')
+        const rows = all('SELECT * FROM telegram_closed_periods WHERE binding_id=? AND revision=? AND profile_version=? AND expires>? AND closed_at>? AND closed_at<=? ORDER BY closed_at ASC,rowid ASC',
+          id, state.revision, profile.version, time, time - CLOSED_TTL, time)
+        return { status: 'active', demo: true, window, revision: state.revision, profileVersion: profile.version,
+          periods: rows.map(row => ({ ...periodView(row),
+            period: { id: row.period_id, start: new Date(row.start_at).toISOString(), end: new Date(row.closed_at).toISOString() } })) }
+      })
+    },
     currentSummary(actor) {
       unavailable()
       organizerProfile(actor)
