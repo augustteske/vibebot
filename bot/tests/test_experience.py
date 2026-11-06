@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from bot.__main__ import create_dispatcher
-from bot.http_transport import OrganizerRequiredError
+from bot.http_transport import OrganizerRequiredError, PausedError, TransportError
 from bot.voice import VoiceTranscription
 
 
@@ -14,11 +14,43 @@ class FakeMessage:
         self.answer = AsyncMock()
 
 
+class RecordingCheckinTransport:
+    def __init__(self, error=None):
+        self.calls = []
+        self.error = error
+
+    async def submit_personal_checkin(self, user_id, scores, nonce):
+        self.calls.append((user_id, scores, nonce))
+        if self.error is not None:
+            raise self.error
+        return {"accepted": True}
+
+
 def handler(observer, name):
     return next(item.callback for item in observer.handlers if item.callback.__name__ == name)
 
 
 class ExperienceTests(unittest.IsolatedAsyncioTestCase):
+    async def complete_checkin(self, dispatcher, message):
+        await handler(dispatcher.message, "start")(message)
+        select_event = SimpleNamespace(
+            message=message, from_user=message.from_user, data="menu:checkin", answer=AsyncMock(),
+        )
+        await handler(dispatcher.callback_query, "select_checkin")(select_event)
+        consent_text = message.answer.await_args.args[0]
+        nonce = message.answer.await_args.kwargs["reply_markup"].inline_keyboard[0][0].callback_data.split(":")[1]
+        await handler(dispatcher.callback_query, "callback")(SimpleNamespace(
+            message=message, from_user=message.from_user,
+            data=f"consent:{nonce}:yes", answer=AsyncMock(),
+        ))
+        for _ in range(3):
+            button = message.answer.await_args.kwargs["reply_markup"].inline_keyboard[0][0]
+            await handler(dispatcher.callback_query, "callback")(SimpleNamespace(
+                message=message, from_user=message.from_user,
+                data=button.callback_data, answer=AsyncMock(),
+            ))
+        return consent_text, message.answer.await_args.args[0]
+
     async def test_start_shows_scenarios_without_starting_questions(self):
         dispatcher, flow = create_dispatcher()
         message = FakeMessage()
@@ -52,6 +84,8 @@ class ExperienceTests(unittest.IsolatedAsyncioTestCase):
         consent_data = consent_keyboard.inline_keyboard[0][0].callback_data
         nonce = consent_data.split(":")[1]
         self.assertIn("согласие", consent_text.lower())
+        self.assertIn("не отправляются в командный кабинет", consent_text)
+        self.assertNotIn("аноним", consent_text.lower())
         self.assertNotIn("1/3", consent_text)
         self.assertEqual(flow.drafts[message.from_user.id].step, -1)
         with self.assertRaisesRegex(ValueError, "устарела"):
@@ -85,7 +119,9 @@ class ExperienceTests(unittest.IsolatedAsyncioTestCase):
             ))
 
         self.assertNotIn(message.from_user.id, flow.drafts)
-        self.assertIn("завершён", message.answer.await_args.args[0])
+        completion_text = message.answer.await_args.args[0]
+        self.assertIn("завершён", completion_text)
+        self.assertIn("не отправлялись на сервер", completion_text)
         self.assertNotIn("reply_markup", message.answer.await_args.kwargs)
 
     async def test_decline_clears_draft_without_showing_a_question(self):
@@ -134,7 +170,9 @@ class ExperienceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn(message.from_user.id, flow.drafts)
         self.assertNotIn(message.from_user.id, service.consents)
-        self.assertIn("Текущий сценарий отменён", message.answer.await_args.args[0])
+        stop_text = message.answer.await_args.args[0]
+        self.assertIn("Текущий сценарий отменён", stop_text)
+        self.assertNotIn("Уже переданные", stop_text)
 
     async def test_help_privacy_and_subscribe_follow_configuration_and_permissions(self):
         dispatcher, _ = create_dispatcher()
@@ -160,7 +198,10 @@ class ExperienceTests(unittest.IsolatedAsyncioTestCase):
         privacy_text = message.answer.await_args.args[0]
         self.assertIn("до 5 минут", privacy_text)
         self.assertIn("локальной моделью", privacy_text)
-        self.assertIn("не удаляет сообщения из Telegram", privacy_text)
+        self.assertIn("не отправляются на сервер", privacy_text)
+        self.assertIn("не удаляет историю Telegram", privacy_text)
+        self.assertNotIn("аноним", privacy_text.lower())
+        self.assertNotIn("без привязки", privacy_text.lower())
 
         await handler(dispatcher.message, "subscribe")(message)
         self.assertIn("не настроены", message.answer.await_args.args[0])
@@ -185,6 +226,65 @@ class ExperienceTests(unittest.IsolatedAsyncioTestCase):
         disabled_text = message.answer.await_args.args[0]
         self.assertIn("отправка уведомлений выключена", disabled_text)
         self.assertNotIn("будут приходить", disabled_text)
+
+    async def test_privacy_with_transport_describes_server_storage_without_full_anonymity(self):
+        dispatcher, _ = create_dispatcher(checkin_transport=RecordingCheckinTransport())
+        message = FakeMessage()
+
+        await handler(dispatcher.message, "privacy")(message)
+
+        text = message.answer.await_args.args[0]
+        self.assertIn("отправляются на сервер", text)
+        self.assertIn("Telegram ID", text)
+        self.assertIn("полной анонимности нет", text)
+        self.assertIn("общую сводку", text)
+        self.assertIn("не удаляет уже переданные данные", text)
+
+    async def test_transport_checkin_explains_transfer_before_questions_and_confirms_success(self):
+        transport = RecordingCheckinTransport()
+        dispatcher, _ = create_dispatcher(checkin_transport=transport)
+        message = FakeMessage(user_id=43)
+
+        consent_text, result_text = await self.complete_checkin(dispatcher, message)
+
+        self.assertIn("уходят на сервер", consent_text)
+        self.assertIn("Telegram ID", consent_text)
+        self.assertIn("общую сводку", consent_text)
+        self.assertIn("/stop не удаляет уже переданные данные", consent_text)
+        self.assertNotIn("аноним", consent_text.lower())
+        self.assertIn("переданы на сервер", result_text)
+        self.assertNotIn("аноним", result_text.lower())
+        self.assertEqual([call[0] for call in transport.calls], [message.from_user.id])
+        self.assertEqual(transport.calls[0][1], {"energy": 1, "clarity": 1, "support": 1})
+
+    async def test_transport_checkin_rejection_does_not_claim_success(self):
+        dispatcher, _ = create_dispatcher(checkin_transport=RecordingCheckinTransport(PausedError("rejected")))
+        message = FakeMessage(user_id=44)
+
+        _, result_text = await self.complete_checkin(dispatcher, message)
+
+        self.assertIn("сервер отклонил", result_text)
+        self.assertNotIn("переданы на сервер", result_text)
+
+    async def test_transport_checkin_uncertain_delivery_does_not_claim_success_or_absence(self):
+        dispatcher, _ = create_dispatcher(checkin_transport=RecordingCheckinTransport(TransportError("timeout")))
+        message = FakeMessage(user_id=45)
+
+        _, result_text = await self.complete_checkin(dispatcher, message)
+
+        self.assertIn("подтвердить передачу на сервер не удалось", result_text)
+        self.assertIn("могли не сохраниться", result_text)
+        self.assertNotIn("переданы на сервер", result_text)
+
+    async def test_stop_with_transport_does_not_claim_deleting_server_data(self):
+        dispatcher, flow = create_dispatcher(checkin_transport=RecordingCheckinTransport())
+        message = FakeMessage(user_id=46)
+        flow.begin(message.from_user.id)
+
+        await handler(dispatcher.message, "stop")(message)
+
+        text = message.answer.await_args.args[0]
+        self.assertIn("Уже переданные на сервер ответы не удаляются", text)
 
     async def test_voice_menu_is_conditional_and_requires_one_recording_consent(self):
         audio = b"OggS synthetic voice sample"
