@@ -1,0 +1,27 @@
+.telegram-summary {
+  display: grid;
+  gap: 18px;
+  margin-bottom: 22px;
+}
+
+.telegram-summary-state {
+  margin-bottom: 22px;
+}
+
+.telegram-summary-state--calibrating {
+  border: 1px solid rgba(190, 150, 0, .18);
+  border-radius: var(--vibee-radius-card);
+  background: linear-gradient(135deg, #fff7d4, #ffe982);
+  color: var(--vibee-ink);
+  padding: 26px;
+  box-shadow: var(--vibee-shadow-soft);
+  margin-bottom: 22px;
+}
+
+.telegram-summary-state--calibrating h2 {
+  margin: 0;
+}
+
+.telegram-summary-state--calibrating p {
+  margin-bottom: 0;
+}

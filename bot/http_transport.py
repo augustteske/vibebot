@@ -28,6 +28,10 @@ class DeliveryUncertainError(TransportError):
     """Delivery may have committed; the binding needs a confirmed server pause."""
 
 
+class OrganizerRequiredError(TransportError):
+    """The Telegram identity is not linked to an organizer in this workspace."""
+
+
 class HttpTransport:
     """Отправляет сообщения и читает статус привязки через HTTP API."""
 
@@ -53,6 +57,10 @@ class HttpTransport:
         """Передаёт только контрактные поля и отображает ответы API."""
         fields = ("eventId", "expectedRevision", "chatId", "messageId", "senderId", "sentAt", "text")
         payload = {field: event[field] for field in fields}
+        text = payload["text"]
+        if not isinstance(text, str):
+            raise TransportError("Telegram event text must be a string")
+        payload["text"] = text[:4096]
         url = f"{self._base_url}/api/bot/v1/bindings/{self._binding_id}/events"
         try:
             sent_at = datetime.fromisoformat(str(payload["sentAt"]).replace("Z", "+00:00"))
@@ -140,6 +148,25 @@ class HttpTransport:
         """Сводка для бота появится после отдельного авторизованного маршрута."""
         self._check_binding_id(binding_id)
         raise TransportError("Telegram summary delivery is not implemented")
+
+    async def subscribe_notifications(self, telegram_user_id: int) -> dict[str, object]:
+        """Subscribes a linked organizer's private Telegram chat to period updates."""
+        if type(telegram_user_id) is not int or telegram_user_id < 1:
+            raise TransportError("Invalid Telegram user")
+        url = f"{self._base_url}/api/bot/v1/bindings/{self._binding_id}/notifications/subscribe"
+        try:
+            response = await self._client.post(url, headers=self._headers(), json={
+                "telegramUserId": str(telegram_user_id),
+                "chatId": str(telegram_user_id),
+            })
+        except (httpx.TimeoutException, httpx.RequestError) as error:
+            raise TransportError("Vibee notification subscription request failed") from error
+        body = self._response_body(response)
+        if response.status_code == 200 and body.get("subscribed") is True:
+            return body
+        if response.status_code == 403 and self._error_code(body) == "ORGANIZER_REQUIRED":
+            raise OrganizerRequiredError("Only a linked organizer can subscribe to notifications")
+        raise TransportError("Vibee rejected notification subscription")
 
     async def close(self) -> None:
         """Закрывает созданный транспортом HTTP-клиент."""

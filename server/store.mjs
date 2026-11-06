@@ -130,6 +130,10 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
         mode: 'templates',
       }
     },
+    summary(member) {
+      const round = roundFor(member)
+      return round.closed_at ? JSON.parse(round.summary) : { status: 'open' }
+    },
     checkin(member, input) {
       const round = roundFor(member)
       if (input.roundId !== round.id) fail(409, 'STALE_ROUND', 'Раунд изменился. Обновите страницу перед отправкой.')

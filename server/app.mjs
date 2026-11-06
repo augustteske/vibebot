@@ -3,7 +3,12 @@ import { readFile } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
 import { AppError, createStore } from './store.mjs'
 
-export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookies = false, allowedOrigins = [], telegramBootstrapCredential, telegramSynthetic = false, now = Date.now, recommendationProvider, recommendationTimeoutMs }) {
+export function resolveSecureCookies(env = process.env) {
+  const cookieSecure = env.COOKIE_SECURE
+  return cookieSecure === 'true' || (env.NODE_ENV === 'production' && cookieSecure !== 'false')
+}
+
+export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookies = false, allowedOrigins = [], telegramBootstrapCredential, telegramBotToken, telegramFetch = globalThis.fetch, telegramSynthetic = false, now = Date.now, recommendationProvider, recommendationTimeoutMs }) {
   const store = createStore({ path: dbPath, secret, telegramBootstrapCredential, telegramSynthetic, now,
     recommendationProvider, recommendationTimeoutMs })
   const cleanupTimer = setInterval(() => {
@@ -18,6 +23,41 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
     const origin = req.headers.origin
     const sameOrigin = (secureCookies ? 'https://' : 'http://') + req.headers.host
     if (origin && origin !== sameOrigin && !allowedOrigins.includes(origin)) throw new AppError(403, 'ORIGIN_REJECTED', 'Запрос с другого сайта запрещён')
+  }
+  async function notifyOrganizer(actor, bindingId, periodId, reauthenticate) {
+    if (typeof telegramBotToken !== 'string' || !telegramBotToken.trim()) return
+    const target = store.telegram.claimOrganizerNotification(actor, bindingId, periodId)
+    if (!target) return
+    let delivered = false
+    try {
+      const recommendation = await store.telegram.recommendation(actor, bindingId, periodId, reauthenticate)
+      const metrics = target.metrics
+      const text = [
+        'Период закрыт.',
+        `Вне рабочего времени: ${metrics.outsideHoursPercent.toFixed(1)}%.`,
+        `Участие: ${metrics.participationEvenness.toFixed(1)}%.`,
+        `Благодарности: ${metrics.recognitionPercent.toFixed(1)}%.`,
+        `Рекомендация: ${recommendation.body}`,
+      ].join('\n')
+      const response = await telegramFetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: target.chatId, text, disable_web_page_preview: true }),
+        signal: AbortSignal.timeout(5000),
+      })
+      const result = await response.json()
+      if (!response.ok || result?.ok !== true) throw new Error('Telegram rejected notification')
+      delivered = true
+    } catch (error) {
+      console.warn('Vibee: organizer Telegram notification delivery failed (' +
+        (error instanceof Error ? error.name : 'unknown error') + ')')
+    } finally {
+      try { store.telegram.completeOrganizerNotification(actor, bindingId, periodId, delivered) }
+      catch (error) {
+        console.error('Vibee: could not update organizer Telegram notification status (' +
+          (error instanceof Error ? error.name : 'unknown error') + ')')
+      }
+    }
   }
   async function body(req, invalidCode = 'INVALID_JSON') {
     if (!req.headers['content-type']?.startsWith('application/json')) throw new AppError(415, 'JSON_REQUIRED', 'Нужен запрос JSON')
@@ -54,14 +94,48 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
       }
       if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true })
       if (!['GET', 'POST'].includes(req.method)) throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Метод не поддерживается')
-      if (url.pathname === '/api/telegram/profile') {
+      if (url.pathname === '/api/telegram/summary') {
         if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
+        if (req.method !== 'GET') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
+        const actor = store.authenticate(tokenFrom(req))
+        if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
+        const current = store.telegram.currentSummary(actor)
+        return json(res, 200, current.view)
+      }
+      if (url.pathname === '/api/telegram/recommendation') {
+        if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
+        if (req.method !== 'GET') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
+        const actor = store.authenticate(tokenFrom(req))
+        if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
+        const periodId = url.searchParams.get('periodId')
+        const current = store.telegram.currentSummary(actor)
+        if (current.view.status !== 'published' || current.view.period.id !== periodId) {
+          throw new AppError(409, 'STALE_PERIOD', 'Период изменился. Обновите страницу.')
+        }
+        const recommendation = await store.telegram.recommendation(actor, current.bindingId, periodId,
+          () => store.authenticate(tokenFrom(req)))
+        return json(res, 200, recommendation)
+      }
+      if (url.pathname === '/api/telegram/profile') {
         if (req.method === 'POST') checkBrowser(req)
         const actor = store.authenticate(tokenFrom(req))
         if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
         return json(res, 200, req.method === 'POST'
           ? store.telegram.updateProfile(actor, await body(req, 'INVALID_INPUT'))
           : store.telegram.profile(actor))
+      }
+      const notificationSubscribeRoute = url.pathname.match(/^\/api\/bot\/v1\/bindings\/([a-f0-9-]+)\/notifications\/subscribe$/)
+      if (notificationSubscribeRoute) {
+        if (req.method !== 'POST') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
+        if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
+        const actor = store.telegram.authenticate(req.headers.authorization)
+        if (!actor) throw new AppError(401, 'BOT_AUTH_REQUIRED', 'Нужна авторизация бота')
+        const subscription = store.telegram.subscribeNotifications(
+          actor, notificationSubscribeRoute[1], await body(req, 'INVALID_INPUT'))
+        return json(res, 200, {
+          ...subscription,
+          notificationsEnabled: typeof telegramBotToken === 'string' && telegramBotToken.trim().length > 0,
+        })
       }
       if (['/api/telegram/link-tokens', '/api/bot/v1/links', '/api/telegram/binding-tokens', '/api/bot/v1/bindings'].includes(url.pathname)) {
         if (req.method !== 'POST') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
@@ -85,9 +159,13 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         if (closing) checkBrowser(req)
         const actor = store.authenticate(tokenFrom(req))
         if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
-        return json(res, 200, closing
-          ? store.telegram.closePeriod(actor, periodRoute[1], await body(req, 'INVALID_INPUT'))
-          : store.telegram.summary(actor, periodRoute[1]))
+        if (!closing) return json(res, 200, store.telegram.summary(actor, periodRoute[1]))
+        const input = await body(req, 'INVALID_INPUT')
+        const result = store.telegram.closePeriod(actor, periodRoute[1], input)
+        if (result.status === 'published') {
+          await notifyOrganizer(actor, periodRoute[1], input.periodId, () => store.authenticate(tokenFrom(req)))
+        }
+        return json(res, 200, result)
       }
       const recommendationRoute = url.pathname.match(/^\/api\/telegram\/bindings\/([a-f0-9-]+)\/periods\/([a-f0-9-]+)\/(recommendation|action)$/)
       if (recommendationRoute) {
@@ -117,11 +195,11 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
             : store.telegram.chatFeedback(actor, bindingId, periodId, kind))
       }
       if (url.pathname.startsWith('/api/bot/') || url.pathname.startsWith('/api/telegram/')) {
-        const route = url.pathname.match(/^\/api\/(bot\/v1|telegram)\/bindings\/([a-f0-9-]+)(?:\/(roster|company|consents|control|pause|events))?$/)
+        const route = url.pathname.match(/^\/api\/(bot\/v1|telegram)\/bindings\/([a-f0-9-]+)(?:\/(roster|company|consents|control|pause|events|media-observations))?$/)
         const bot = route?.[1] === 'bot/v1'
         const operation = route?.[3]
         const supported = route && (bot
-          ? (req.method === 'GET' && !operation) || (req.method === 'POST' && ['consents', 'pause', 'events'].includes(operation))
+          ? (req.method === 'GET' && !operation) || (req.method === 'POST' && ['consents', 'pause', 'events', 'media-observations'].includes(operation))
           : req.method === 'POST' && ['roster', 'company', 'control'].includes(operation))
         if (!supported) throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
         if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
@@ -130,6 +208,7 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
         const result = req.method === 'GET' ? store.telegram.status(actor, route[2])
           : operation === 'events' ? store.telegram.acceptText(actor, route[2], await body(req, 'INVALID_INPUT'))
+          : operation === 'media-observations' ? store.telegram.acceptMedia(actor, route[2], await body(req, 'INVALID_INPUT'))
           : store.telegram.mutate(actor, route[2], operation, await body(req, 'INVALID_INPUT'))
         return json(res, 200, result)
       }
@@ -145,6 +224,7 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
       }
       if (!member) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, store.snapshot(member))
+      if (req.method === 'GET' && url.pathname === '/api/summary') return json(res, 200, store.summary(member))
       if (req.method === 'POST') {
         if (url.pathname === '/api/logout') {
           store.logout(token); res.setHeader('Set-Cookie', cookie('')); return json(res, 200, { ok: true })

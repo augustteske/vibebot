@@ -2,12 +2,47 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { resolve, join, sep } from 'node:path'
-import { createApp } from '../server/app.mjs'
+import { randomUUID } from 'node:crypto'
+import { createApp, resolveSecureCookies } from '../server/app.mjs'
 import { DatabaseSync } from 'node:sqlite'
 
 const secret = 'test-secret-used-only-in-automated-tests-123456789'
 const normal = { energy: 4, clarity: 4, support: 4 }
 const unclear = { energy: 4, clarity: 1, support: 4 }
+
+test('health endpoint returns the Compose readiness response', async t => {
+  const { client } = await start(t)
+  const result = await client()('/health')
+  assert.equal(result.status, 200)
+  assert.deepEqual(result.body, { ok: true })
+})
+
+test('allowed origins and production secure cookies are enforced', async t => {
+  const { client } = await start(t, undefined, {
+    secureCookies: true,
+    allowedOrigins: ['https://app.example'],
+  })
+  const trusted = await client()('/workspaces', { name: 'Synthetic', displayName: 'Owner' },
+    { Origin: 'https://app.example' })
+  assert.equal(trusted.status, 201)
+  assert.match(trusted.setCookie, /; HttpOnly;/)
+  assert.match(trusted.setCookie, /; SameSite=Strict;/)
+  assert.match(trusted.setCookie, /; Secure(?:;|$)/)
+  assert.equal(trusted.headers['access-control-allow-origin'], undefined)
+
+  const rejected = await client()('/workspaces', { name: 'Untrusted', displayName: 'Owner' },
+    { Origin: 'https://untrusted.example' })
+  assert.equal(rejected.status, 403)
+  assert.equal(rejected.body.error.code, 'ORIGIN_REJECTED')
+})
+
+test('secure cookies default on in production and can be disabled for local HTTP', () => {
+  assert.equal(resolveSecureCookies({ NODE_ENV: 'production' }), true)
+  assert.equal(resolveSecureCookies({ NODE_ENV: 'production', COOKIE_SECURE: 'true' }), true)
+  assert.equal(resolveSecureCookies({ NODE_ENV: 'production', COOKIE_SECURE: 'false' }), false)
+  assert.equal(resolveSecureCookies({ NODE_ENV: 'development' }), false)
+  assert.equal(resolveSecureCookies({ NODE_ENV: 'development', COOKIE_SECURE: 'true' }), true)
+})
 
 test('current web client header is accepted without the legacy header', async t => {
   const { client } = await start(t)
@@ -16,8 +51,36 @@ test('current web client header is accepted without the legacy header', async t 
   assert.equal(result.status, 201)
 })
 
-async function start(t, dbPath) {
-  const app = createApp({ secret, dbPath })
+test('organizer work schedule is saved and returned while Telegram ingestion remains disabled', async t => {
+  const { owner } = await team(t, 1)
+  assert.deepEqual((await owner('/telegram/profile')).body, {
+    version: 0,
+    timeZone: null,
+    intervals: [],
+  })
+
+  const saved = await owner('/telegram/profile', {
+    requestId: randomUUID(),
+    expectedVersion: 0,
+    timeZone: 'Asia/Omsk',
+    intervals: [
+      { day: 1, start: 600, end: 1140 },
+      { day: 2, start: 600, end: 1140 },
+      { day: 3, start: 600, end: 1140 },
+      { day: 4, start: 600, end: 1140 },
+      { day: 5, start: 600, end: 1140 },
+    ],
+  })
+  assert.equal(saved.status, 200)
+  assert.equal(saved.body.version, 1)
+  assert.equal(saved.body.timeZone, 'Asia/Omsk')
+  assert.equal(saved.body.intervals.length, 5)
+  assert.deepEqual((await owner('/telegram/profile')).body, saved.body)
+  assert.equal((await owner('/telegram/binding-tokens', { requestId: randomUUID() })).body.error.code, 'UNAVAILABLE')
+})
+
+async function start(t, dbPath, appOptions = {}) {
+  const app = createApp({ ...appOptions, secret, dbPath })
   await new Promise(resolveListen => app.server.listen(0, '127.0.0.1', resolveListen))
   let closed = false
   const close = async () => { if (!closed) { closed = true; await app.close() } }
@@ -33,7 +96,12 @@ async function start(t, dbPath) {
       })
       const setCookie = response.headers.get('set-cookie')
       if (setCookie) cookie = setCookie.split(';')[0]
-      return { status: response.status, body: await response.json(), setCookie }
+      return {
+        status: response.status,
+        body: await response.json(),
+        setCookie,
+        headers: Object.fromEntries(response.headers.entries()),
+      }
     }
   }
   return { client, close }
@@ -59,6 +127,7 @@ test('complete shared flow: private check-ins, frozen summary, confirmed action 
   for (let i = 0; i < people.length; i++) {
     assert.equal((await people[i]('/checkins', { roundId, scores: i < 3 ? unclear : normal })).status, 200)
   }
+  assert.deepEqual((await owner('/summary')).body, { status: 'open' })
   const before = (await people[1]('/session')).body
   assert.deepEqual(before.round.summary, { status: 'open' })
   assert.equal(before.round.mySubmitted, true)
@@ -66,6 +135,7 @@ test('complete shared flow: private check-ins, frozen summary, confirmed action 
   assert.equal((await people[1]('/rounds/close', { roundId })).status, 403)
   const closed = await owner('/rounds/close', { roundId })
   assert.equal(closed.body.round.summary.status, 'published')
+  assert.deepEqual((await owner('/summary')).body, closed.body.round.summary)
   assert.deepEqual(closed.body.round.summary.needs, ['clarity'])
   assert.equal(closed.body.round.summary.means.clarity, 2.5)
   assert.doesNotMatch(JSON.stringify(closed.body), /voter_key|token_hash|"answers"|"scores"|"participants"/)
@@ -130,6 +200,7 @@ test('session, JSON values, request origin and workspace boundaries are enforced
   const { owner, client, roundId } = await team(t, 1)
   const outsider = client()
   assert.equal((await outsider('/session')).status, 401)
+  assert.equal((await outsider('/summary')).status, 401)
   assert.equal((await owner('/checkins', { roundId, scores: { ...normal, energy: 0 } })).status, 400)
   assert.equal((await owner('/checkins', { roundId, scores: { ...normal, energy: 2.5 } })).status, 400)
   assert.equal((await owner('/checkins', { roundId, scores: normal }, { Origin: 'https://other.example' })).status, 403)
@@ -179,7 +250,7 @@ test('SQLite preserves shared state across server restart', async t => {
   const path = join(directory, 'test.sqlite')
   const first = await start(t, path)
   const owner = first.client()
-  const created = await owner('/workspaces', { name: 'Постоянная команда', displayName: 'Август' })
+  const created = await owner('/workspaces', { name: 'Постоянная команда', displayName: 'Организатор' })
   const invitation = await owner('/invitations', {})
   const roundId = created.body.round.id
   await owner('/checkins', { roundId, scores: normal })
