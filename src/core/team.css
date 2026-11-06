@@ -182,3 +182,49 @@
   .team-heading .button-row { flex-direction: column; }
   .team-heading .button-row .button { width: 100%; }
 }
+
+.entrance-privacy {
+  margin-top: 18px;
+  border: 1px solid rgba(23, 23, 25, .12);
+  border-radius: 16px;
+  padding: 14px 18px;
+  color: #4a4a50;
+  background: #fffdf4;
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+
+.entrance-privacy summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--vibee-ink);
+  font-weight: 700;
+}
+
+.entrance-privacy summary::-webkit-details-marker { display: none; }
+
+.entrance-privacy summary::after {
+  content: "+";
+  float: right;
+  color: #8a7a20;
+}
+
+.entrance-privacy[open] summary::after { content: "–"; }
+
+.entrance-privacy summary:focus-visible {
+  border-radius: 6px;
+  outline: 3px solid rgba(255, 214, 56, .8);
+  outline-offset: 3px;
+}
+
+.entrance-privacy ul {
+  margin: 12px 0 10px;
+  padding-left: 18px;
+}
+
+.entrance-privacy li { margin: 6px 0; }
+
+.entrance-privacy a {
+  color: #7a6400;
+  font-weight: 650;
+}

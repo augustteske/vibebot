@@ -192,7 +192,19 @@ export function TeamWorkspace() {
       <form onSubmit={authenticate}><fieldset disabled={busy}>{restore ? <label className="team-field">Личный код входа<input name="accessKey" type="password" autoComplete="off" maxLength={64} required/></label> : <><label className="team-field">Ваше имя<input name="displayName" autoComplete="given-name" maxLength={60} required/></label>
         {join ? <label className="team-field">Приглашение<input value={invite} onChange={e => setInvite(e.target.value)} autoComplete="off" required placeholder="Ссылка или код приглашения"/></label> : <label className="team-field">Название команды<input name="name" maxLength={80} required placeholder="Например, команда продукта"/></label>}
         </>}<button className="button entrance__submit" type="submit">{busy ? 'Сохраняем…' : restore ? 'Войти по коду' : join ? 'Войти по приглашению' : 'Создать команду'}</button>
-      </fieldset></form><div className="button-row"><button className="text-button" onClick={() => { setRestore(false); setJoin(!join) }} disabled={busy}>{join ? 'Создать новую команду' : 'У меня есть приглашение'}</button><button className="text-button" onClick={() => setRestore(!restore)} disabled={busy}>{restore ? 'Обычный вход' : 'У меня есть личный код входа'}</button></div>
+      </fieldset></form>
+      <details className="entrance-privacy">
+        <summary>Что будет с вашими данными</summary>
+        <ul>
+          <li>Ваше имя и роль хранятся на сервере; другие участники не видят их в веб-кабинете. Отдельные ответы не показываются никому, включая организатора.</li>
+          <li>Показатели публикуются только при пяти и более ответах разных участников.</li>
+          <li>Сессия действует 7 дней, приглашение — 24 часа, личный код входа — 30 дней.</li>
+          <li>После закрытия раунда отдельные ответы удаляются, остаётся обезличенный агрегат.</li>
+          <li>Профиль команды хранится только в этом браузере.</li>
+        </ul>
+        <a href="https://gitlab.com/shertwg-group1/vibebot/-/blob/develop/docs/PRIVACY.md" target="_blank" rel="noreferrer">Подробнее о приватности</a>
+      </details>
+      <div className="button-row"><button className="text-button" onClick={() => { setRestore(false); setJoin(!join) }} disabled={busy}>{join ? 'Создать новую команду' : 'У меня есть приглашение'}</button><button className="text-button" onClick={() => setRestore(!restore)} disabled={busy}>{restore ? 'Обычный вход' : 'У меня есть личный код входа'}</button></div>
     </section> : <>
       <div className="team-heading"><div><h2>{snapshot.workspace.name}</h2><p className="muted">{snapshot.member.name} · {snapshot.member.role === 'organizer' ? 'организатор' : 'участник'} · время по Омску</p></div><div className="button-row"><button className="button secondary" onClick={() => void refresh()} disabled={busy}>Обновить</button><button className="text-button" onClick={() => setConfirm('logout')} disabled={busy}>Выйти</button></div></div>
       <SummaryPanels key={snapshot.round.id + ':' + snapshot.round.summary.status}/>
@@ -265,16 +277,16 @@ export function TeamWorkspace() {
           </article>)}
         </section>
       </div><aside>
-        <section className="panel"><h2>Как ты сегодня?</h2><p className="muted">Участие добровольное. Команда увидит только допустимые общие показатели.</p>
+        <section className="panel"><h2>Как ты сегодня?</h2><p className="muted">Участие добровольное. Команда увидит только допустимые общие показатели, а после закрытия раунда отдельные ответы удаляются.</p>
           {snapshot.round.closedAt ? <p>Раунд завершён. Новый чек-ин станет доступен в следующем раунде.</p> : <><p className="status">{snapshot.round.mySubmitted ? 'Ваш чек-ин сохранён. Можно выбрать три оценки заново и заменить его.' : 'Выберите ответ на каждый вопрос.'}</p>
             <form key={snapshot.round.id} onSubmit={event => { event.preventDefault(); const values = new FormData(event.currentTarget); void perform('/checkins', { roundId: snapshot.round.id, scores: { energy: Number(values.get('energy')), clarity: Number(values.get('clarity')), support: Number(values.get('support')) } }, 'Чек-ин сохранён. Повторный ответ заменяет предыдущий.') }}><fieldset disabled={busy}>
               {([['energy','Сколько сил на работу?','Почти нет сил','Много сил'],['clarity','Понятно, что сейчас главное?','Непонятно','Полностью понятно'],['support','Легко попросить помощи?','Трудно','Легко']] as const).map(([key,label,low,high]) => <label className="team-field" key={key}>{label}<select name={key} required defaultValue=""><option value="" disabled>Выберите оценку</option>{[1,2,3,4,5].map(n => <option key={n} value={n}>{n}{n === 1 ? ' — ' + low : n === 5 ? ' — ' + high : ''}</option>)}</select></label>)}
               <button className="button" type="submit">{busy ? 'Сохраняем…' : 'Сохранить чек-ин'}</button></fieldset>
             </form></>}
         </section>
-        {snapshot.member.role === 'organizer' && <section className="panel"><h2>Пригласить участника</h2><p className="muted">Каждая ссылка действует 24 часа и используется один раз. Создавайте отдельное приглашение для каждого человека.</p><button className="button secondary" disabled={busy} onClick={() => void issueInvite()}>Создать приглашение</button>{inviteLink && <><label className="team-field">Ссылка для одного участника<input readOnly value={inviteLink} onFocus={event => event.currentTarget.select()}/></label><button className="text-button" onClick={() => { void navigator.clipboard.writeText(inviteLink).then(() => setNotice('Приглашение скопировано.'), () => setNotice('Выделите ссылку и скопируйте её вручную.')) }}>Скопировать ссылку</button></>}</section>}
+        {snapshot.member.role === 'organizer' && <section className="panel"><h2>Пригласить участника</h2><p className="muted">Каждая ссылка действует 24 часа и используется один раз. Приглашение открывает доступ к пространству и общим показателям, но не к отдельным ответам. Создавайте отдельное приглашение для каждого человека.</p><button className="button secondary" disabled={busy} onClick={() => void issueInvite()}>Создать приглашение</button>{inviteLink && <><label className="team-field">Ссылка для одного участника<input readOnly value={inviteLink} onFocus={event => event.currentTarget.select()}/></label><button className="text-button" onClick={() => { void navigator.clipboard.writeText(inviteLink).then(() => setNotice('Приглашение скопировано.'), () => setNotice('Выделите ссылку и скопируйте её вручную.')) }}>Скопировать ссылку</button></>}</section>}
         <section className="panel"><h2>Вернуться с другого устройства</h2><p className="muted">Сохраните личный код входа. Он действует 30 дней и сохраняет ваши права и участие. Новый код заменяет предыдущий.</p><button className="button secondary" disabled={busy} onClick={() => void createAccessKey()}>Создать личный код входа</button>{accessKey && <label className="team-field">Ваш личный код<input value={accessKey} readOnly onFocus={event => event.currentTarget.select()}/></label>}</section>
-        <div className="note"><strong>Приватность в небольших командах</strong><p>При четырёх участниках статистика скрыта. Добровольные упражнения остаются доступны. Сессия привязана к этому браузеру на семь дней.</p></div>
+        <div className="note"><strong>Приватность в небольших командах</strong><p>При четырёх участниках статистика скрыта, а добровольные упражнения остаются доступны. Сессия привязана к этому браузеру на семь дней, профиль команды хранится только в нём. <a href="https://gitlab.com/shertwg-group1/vibebot/-/blob/develop/docs/PRIVACY.md" target="_blank" rel="noreferrer">Как мы обращаемся с данными</a>.</p></div>
       </aside></div>
     </>}
   </section>
