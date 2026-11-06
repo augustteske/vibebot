@@ -96,6 +96,7 @@ Telegram updates ──→ Python 3.12 / aiogram ──→ Node.js 24 API ──
 <h2 align="center">Документация</h2>
 
 - [Контракт API и Telegram](docs/CONTRACTS.md)
+- [Приватность и данные](docs/PRIVACY.md)
 - [QA и сценарии проверки](docs/QA.md)
 - [Архитектура стека](docs/STACK.md)
 - [Продуктовый контекст](docs/PROJECT_CONTEXT.md)
