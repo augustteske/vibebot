@@ -257,6 +257,17 @@ export function TeamWorkspace() {
     </section> : <>
       <div className="team-heading" id="team-overview"><div><h2>{snapshot.workspace.name}</h2><p className="muted">{snapshot.member.name} · {snapshot.member.role === 'organizer' ? 'организатор' : 'участник'} · время по Омску</p></div><div className="button-row"><button className="button secondary" onClick={() => void refresh()} disabled={busy || refreshing}>{refreshing ? 'Обновляем…' : 'Обновить'}</button><button className="text-button" onClick={() => setConfirm('logout')} disabled={busy}>Выйти</button></div></div>
       {showRestore && <section className="panel entrance" aria-labelledby="session-restore-title"><h2 id="session-restore-title">Войти снова</h2><p className="muted">Введите личный код, чтобы продолжить. Текущая форма останется открытой.</p><form onSubmit={event => { event.preventDefault(); void perform('/restore', { key: loginKey }, 'Вход восстановлен.') }}><SecretField id="restore-key" label="Личный код входа" visible={showLoginKey} onToggle={() => setShowLoginKey(value => !value)} value={loginKey} onChange={event => setLoginKey(event.target.value)} disabled={busy}/><button className="button" type="submit" disabled={busy}>{busy ? 'Входим…' : 'Войти по коду'}</button><button className="text-button" type="button" disabled={busy} onClick={() => { setShowRestore(false); setShowLoginKey(false); setError(null) }}>Продолжить просмотр</button></form></section>}
+      {snapshot.member.role === 'participant' && <details className="panel participant-data">
+        <summary>Мои данные</summary>
+        <h3>Что сохраняется</h3>
+        <p>В веб-кабинете сохраняются ваше имя, участие в команде и три оценки чек-ина: силы, ясность приоритетов и доступность помощи. Оценки хранятся до закрытия раунда, затем удаляются из рабочей базы; остаётся общая сводка. Отзыв о пользе шага хранится до закрытия сбора отзывов, затем также заменяется общим результатом.</p>
+        <h3>Что видит организатор</h3>
+        <p>В кабинете организатор получает общие результаты, без отдельных оценок. Показатели опроса и отзывов скрыты до закрытия соответствующего сбора и при менее пяти ответах. Это ограничение доступа, а не обещание полной анонимности.</p>
+        <h3>Как управлять участием</h3>
+        <p>Участие добровольное: можно не отправлять ответ. Пока раунд или сбор отзывов открыт, повторная отправка заменяет прежний ответ. Самостоятельное удаление аккаунта и отправленных ответов сейчас не реализовано. Выход из кабинета завершает сессию, но не удаляет данные.</p>
+        <p>Личный чек-ин в Telegram — отдельный сценарий: его ответы не попадают в эту командную сводку. Команда <code>/stop</code> отменяет личный сценарий и очищает черновик бота, но не удаляет веб-ответы или сообщения из истории Telegram.</p>
+        <a href="/docs.html#privacy">Подробнее об обработке данных</a>
+      </details>}
       {snapshot.member.role === 'organizer' && <SummaryPanels key={snapshot.workspace.id + ':' + snapshot.round.id + ':' + snapshot.round.summary.status} onLogin={beginLogin}/>}
       {snapshot.member.role === 'organizer' && <TelegramCheckinsPanel key={activeWorkspaceId} onLogin={beginLogin}/>}
       {snapshot.member.role === 'organizer' && <TeamSettings key={activeWorkspaceId} onLogin={beginLogin}/>}
