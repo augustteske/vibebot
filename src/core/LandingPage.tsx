@@ -27,6 +27,33 @@ const features = [
   },
 ]
 
+const faq = [
+  {
+    question: 'Какие данные собирает Vibee?',
+    answer: 'Хранится только необходимое: имя и роль, три добровольные оценки от 1 до 5, подтверждённый общий шаг, отметка «помогло / не помогло» и техническая сессия на 7 дней. Тексты рабочих чатов в веб-кабинете не отображаются.',
+  },
+  {
+    question: 'Кто видит мои ответы?',
+    answer: 'Отдельные ответы не показываются никому, включая организатора. Публикуются только общие показатели, и только если ответили минимум пять разных участников. В маленьких командах статистика скрыта.',
+  },
+  {
+    question: 'Сколько данные хранятся?',
+    answer: 'Сессия — 7 дней, приглашение — 24 часа, личный код входа — 30 дней. После закрытия раунда отдельные ответы удаляются, остаётся только обезличенный агрегат. Отзывы удаляются после закрытия сбора.',
+  },
+  {
+    question: 'Можно ли отказаться?',
+    answer: 'Да. Чек-ин добровольный: можно не отвечать и пользоваться остальным. Отказ или отзыв согласия останавливает обработку данных чата и удаляет связанные данные.',
+  },
+  {
+    question: 'Это анонимно?',
+    answer: 'Нет. Агрегаты уменьшают раскрытие, но не гарантируют полную анонимность, особенно в небольших командах. Vibee — не HR-инструмент и не медицинский сервис.',
+  },
+  {
+    question: 'Что остаётся в браузере?',
+    answer: 'Профиль команды — состав, роли и контекст — хранится в localStorage этого браузера и не отправляется на сервер. Сессия привязана к браузеру на семь дней.',
+  },
+]
+
 const steps = [
   {
     number: '01',
@@ -81,6 +108,7 @@ export function LandingPage({ onEnter, onDemo }: LandingPageProps) {
         <nav className="landing-nav" aria-label="Навигация по странице">
           <a href="#features">Преимущества</a>
           <a href="#how-it-works">Как это работает</a>
+          <a href="#privacy-faq">Приватность</a>
           <button className="landing-nav-cta" onClick={onEnter}>Войти в кабинет</button>
         </nav>
       </header>
@@ -188,6 +216,26 @@ export function LandingPage({ onEnter, onDemo }: LandingPageProps) {
         </div>
       </section>
 
+      <section className="landing-faq" id="privacy-faq" aria-labelledby="landing-faq-title">
+        <div className="landing-section-inner">
+          <div className="landing-section-heading landing-reveal">
+            <div>
+              <span className="landing-eyebrow">ЧАСТЫЕ ВОПРОСЫ</span>
+              <h2 id="landing-faq-title">Что происходит<br /><span>с данными.</span></h2>
+            </div>
+            <p>Коротко о том, что собирается, кто это видит и как отказаться. Полные правила — в документе о приватности.</p>
+          </div>
+          <div className="landing-faq-list">
+            {faq.map(item => (
+              <details className="landing-faq-item landing-reveal" key={item.question}>
+                <summary>{item.question}</summary>
+                <p>{item.answer}</p>
+              </details>
+            ))}
+          </div>
+        </div>
+      </section>
+
       <footer className="landing-footer">
         <div className="landing-footer-inner">
           <a className="landing-footer-brand" href="#top" aria-label="Vibee — наверх">
@@ -198,6 +246,7 @@ export function LandingPage({ onEnter, onDemo }: LandingPageProps) {
           <nav className="landing-footer-links" aria-label="Ссылки">
             <a href="https://gitlab.com/shertwg-group1/vibebot" target="_blank" rel="noreferrer">GitLab <span aria-hidden="true">↗</span></a>
             <a href="https://gitlab.com/shertwg-group1/vibebot/-/tree/main/docs" target="_blank" rel="noreferrer">Документация</a>
+            <a href="https://gitlab.com/shertwg-group1/vibebot/-/blob/develop/docs/PRIVACY.md" target="_blank" rel="noreferrer">Приватность</a>
             <a href="https://opensource.org/license/mit" target="_blank" rel="noreferrer">MIT License</a>
           </nav>
         </div>
