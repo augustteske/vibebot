@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { ChangeEvent, FormEvent } from 'react'
 import { api } from './client'
 import { RequestError } from './RequestError'
 import type { SessionSnapshot } from './contracts'
@@ -63,6 +63,28 @@ function invitationToken(value: string) {
   try { return new URLSearchParams(new URL(value).hash.slice(1)).get('invite') ?? value.trim() } catch { return value.trim() }
 }
 
+interface SecretFieldProps {
+  id: string;
+  label: string;
+  visible: boolean;
+  onToggle: () => void;
+  name?: string;
+  value?: string;
+  onChange?: (event: ChangeEvent<HTMLInputElement>) => void;
+  disabled?: boolean;
+}
+
+function SecretField({ id, label, visible, onToggle, name, value, onChange, disabled }: SecretFieldProps) {
+  const action = visible ? 'Скрыть' : 'Показать'
+  return <div className="team-field">
+    <label htmlFor={id}>{label}</label>
+    <div className="secret-field">
+      <input id={id} name={name} type={visible ? 'text' : 'password'} autoComplete="off" maxLength={64} required value={value} onChange={onChange} disabled={disabled}/>
+      <button className="secret-field__toggle" type="button" aria-controls={id} aria-pressed={visible} aria-label={`${action} ${label.toLowerCase()}`} onClick={onToggle} disabled={disabled}>{action}</button>
+    </div>
+  </div>
+}
+
 export function TeamWorkspace() {
   const [snapshot, setSnapshot] = useState<SessionSnapshot | null>(null)
   const [initialized, setInitialized] = useState(false)
@@ -77,6 +99,8 @@ export function TeamWorkspace() {
   const [showRestore, setShowRestore] = useState(false)
   const [loginKey, setLoginKey] = useState('')
   const [accessKey, setAccessKey] = useState('')
+  const [showAccessKey, setShowAccessKey] = useState(false)
+  const [showLoginKey, setShowLoginKey] = useState(false)
   const [confirm, setConfirm] = useState('')
   const [teamProfile, setTeamProfile] = useState<TeamProfile>({ members: [] })
   const [teamProfileWorkspaceId, setTeamProfileWorkspaceId] = useState('')
@@ -215,6 +239,8 @@ export function TeamWorkspace() {
   const beginLogin = () => {
     setError(null); setErrorMutation(false)
     setLoginKey('')
+    setShowLoginKey(false)
+    setShowAccessKey(false)
     if (snapshot) setShowRestore(true)
     else { setRestore(true); setJoin(false) }
   }
@@ -224,13 +250,13 @@ export function TeamWorkspace() {
       <div className="entrance__brand"><img src="/bee.svg" alt=""/><span>Vibee</span></div>
       <h2>{restore ? 'Вернуться в команду' : join ? 'Присоединиться к команде' : 'Создать пространство'}</h2>
       <p className="muted">Собирайте добровольные сигналы и выбирайте полезный следующий шаг.</p>
-      <form onSubmit={authenticate}><fieldset disabled={busy}>{restore ? <label className="team-field">Личный код входа<input name="accessKey" type="password" autoComplete="off" maxLength={64} required/></label> : <><label className="team-field">Ваше имя<input name="displayName" autoComplete="given-name" maxLength={60} required/></label>
+      <form onSubmit={authenticate}><fieldset disabled={busy}>{restore ? <SecretField id="access-key" name="accessKey" label="Личный код входа" visible={showAccessKey} onToggle={() => setShowAccessKey(value => !value)}/> : <><label className="team-field">Ваше имя<input name="displayName" autoComplete="given-name" maxLength={60} required/></label>
         {join ? <label className="team-field">Приглашение<input value={invite} onChange={e => setInvite(e.target.value)} autoComplete="off" required placeholder="Ссылка или код приглашения"/></label> : <label className="team-field">Название команды<input name="name" maxLength={80} required placeholder="Например, команда продукта"/></label>}
         </>}<button className="button entrance__submit" type="submit">{busy ? 'Сохраняем…' : restore ? 'Войти по коду' : join ? 'Войти по приглашению' : 'Создать команду'}</button>
-      </fieldset></form><div className="button-row"><button className="text-button" onClick={() => { setRestore(false); setJoin(!join) }} disabled={busy}>{join ? 'Создать новую команду' : 'У меня есть приглашение'}</button><button className="text-button" onClick={() => setRestore(!restore)} disabled={busy}>{restore ? 'Обычный вход' : 'У меня есть личный код входа'}</button></div>
+      </fieldset></form><div className="button-row"><button className="text-button" onClick={() => { setRestore(false); setJoin(!join) }} disabled={busy}>{join ? 'Создать новую команду' : 'У меня есть приглашение'}</button><button className="text-button" onClick={() => { setShowAccessKey(false); setRestore(!restore) }} disabled={busy}>{restore ? 'Обычный вход' : 'У меня есть личный код входа'}</button></div>
     </section> : <>
       <div className="team-heading" id="team-overview"><div><h2>{snapshot.workspace.name}</h2><p className="muted">{snapshot.member.name} · {snapshot.member.role === 'organizer' ? 'организатор' : 'участник'} · время по Омску</p></div><div className="button-row"><button className="button secondary" onClick={() => void refresh()} disabled={busy || refreshing}>{refreshing ? 'Обновляем…' : 'Обновить'}</button><button className="text-button" onClick={() => setConfirm('logout')} disabled={busy}>Выйти</button></div></div>
-      {showRestore && <section className="panel entrance" aria-labelledby="session-restore-title"><h2 id="session-restore-title">Войти снова</h2><p className="muted">Введите личный код, чтобы продолжить. Текущая форма останется открытой.</p><form onSubmit={event => { event.preventDefault(); void perform('/restore', { key: loginKey }, 'Вход восстановлен.') }}><label className="team-field">Личный код входа<input type="password" autoComplete="off" maxLength={64} required value={loginKey} onChange={event => setLoginKey(event.target.value)} disabled={busy}/></label><button className="button" type="submit" disabled={busy}>{busy ? 'Входим…' : 'Войти по коду'}</button><button className="text-button" type="button" disabled={busy} onClick={() => { setShowRestore(false); setError(null) }}>Продолжить просмотр</button></form></section>}
+      {showRestore && <section className="panel entrance" aria-labelledby="session-restore-title"><h2 id="session-restore-title">Войти снова</h2><p className="muted">Введите личный код, чтобы продолжить. Текущая форма останется открытой.</p><form onSubmit={event => { event.preventDefault(); void perform('/restore', { key: loginKey }, 'Вход восстановлен.') }}><SecretField id="restore-key" label="Личный код входа" visible={showLoginKey} onToggle={() => setShowLoginKey(value => !value)} value={loginKey} onChange={event => setLoginKey(event.target.value)} disabled={busy}/><button className="button" type="submit" disabled={busy}>{busy ? 'Входим…' : 'Войти по коду'}</button><button className="text-button" type="button" disabled={busy} onClick={() => { setShowRestore(false); setShowLoginKey(false); setError(null) }}>Продолжить просмотр</button></form></section>}
       {snapshot.member.role === 'organizer' && <SummaryPanels key={snapshot.workspace.id + ':' + snapshot.round.id + ':' + snapshot.round.summary.status} onLogin={beginLogin}/>}
       {snapshot.member.role === 'organizer' && <TelegramCheckinsPanel key={activeWorkspaceId} onLogin={beginLogin}/>}
       {snapshot.member.role === 'organizer' && <TeamSettings key={activeWorkspaceId} onLogin={beginLogin}/>}
