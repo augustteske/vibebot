@@ -286,6 +286,31 @@ class ExperienceTests(unittest.IsolatedAsyncioTestCase):
         text = message.answer.await_args.args[0]
         self.assertIn("Уже переданные на сервер ответы не удаляются", text)
 
+    async def test_group_start_without_intake_says_collection_is_not_configured(self):
+        dispatcher, _ = create_dispatcher()
+        message = FakeMessage(chat_type="group")
+
+        await handler(dispatcher.message, "start")(message)
+
+        text = message.answer.await_args.args[0]
+        self.assertIn("не настроен", text)
+        self.assertIn("не обрабатывает", text)
+        self.assertIn("личном диалоге", text)
+
+    async def test_group_start_with_intake_depends_on_server_status_and_consents(self):
+        dispatcher, _ = create_dispatcher(intake=object())
+        message = FakeMessage(chat_type="supergroup")
+
+        await handler(dispatcher.message, "start")(message)
+
+        text = message.answer.await_args.args[0]
+        self.assertIn("согласиях компании и всех участников", text)
+        self.assertIn("итоговый статус определяет сервер", text)
+        self.assertIn("не означает, что сбор активен", text)
+        self.assertNotIn("не собирает", text)
+        self.assertNotIn("не настроен", text)
+        self.assertIn("личном диалоге", text)
+
     async def test_voice_menu_is_conditional_and_requires_one_recording_consent(self):
         audio = b"OggS synthetic voice sample"
 
