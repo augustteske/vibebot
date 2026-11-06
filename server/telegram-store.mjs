@@ -375,6 +375,7 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
     run('DELETE FROM telegram_binding_tokens WHERE expires<=?', time - DAY)
     run('DELETE FROM telegram_binding_requests WHERE expires<=?', time)
     run('DELETE FROM telegram_identity_requests WHERE expires<=?', time)
+    run('DELETE FROM telegram_checkins WHERE expires<=?', time)
     run('DELETE FROM telegram_texts WHERE expires<=?', time)
     run('DELETE FROM telegram_media_observations WHERE expires<=?', time)
     run('DELETE FROM telegram_event_ids WHERE expires<=?', time)
