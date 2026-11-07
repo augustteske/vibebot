@@ -1,0 +1,105 @@
+.error-screen {
+  position: relative;
+  display: grid;
+  min-height: 100vh;
+  min-height: 100dvh;
+  place-items: center;
+  overflow: hidden;
+  padding: clamp(20px, 5vw, 48px);
+  color: var(--vibee-ink);
+  background:
+    radial-gradient(circle at 50% 16%, rgba(255, 214, 56, .34), transparent 42%),
+    radial-gradient(circle at 85% 85%, rgba(255, 214, 56, .14), transparent 34%),
+    var(--vibee-paper);
+  font-family: var(--vibee-font);
+}
+
+.error-screen__card {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  width: min(100%, 540px);
+  border: 1px solid var(--vibee-line);
+  border-radius: 32px;
+  padding: clamp(26px, 5vw, 48px);
+  background: rgba(255, 255, 255, .9);
+  box-shadow: 0 28px 80px rgba(23, 23, 25, .12), 0 4px 16px rgba(23, 23, 25, .04);
+  text-align: center;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.error-screen__mascot {
+  width: clamp(132px, 34vw, 176px);
+  height: auto;
+  margin-bottom: 6px;
+  filter: drop-shadow(0 22px 30px rgba(217, 174, 0, .28));
+  animation: error-screen-float 5s ease-in-out infinite;
+}
+
+.error-screen__eyebrow {
+  margin: 0 0 6px;
+  color: #705d16;
+  font-size: 11px;
+  font-weight: 820;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+}
+
+.error-screen__card h1 {
+  max-width: 15ch;
+  margin: 0;
+  font-size: clamp(1.7rem, 5vw, 2.4rem);
+  font-weight: 800;
+  line-height: 1.06;
+  letter-spacing: -.045em;
+}
+
+.error-screen__text {
+  max-width: 34ch;
+  margin: 14px 0 22px;
+  color: var(--vibee-muted);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.error-screen__button {
+  min-height: 50px;
+  border: 1px solid #e4bb16;
+  border-radius: 999px;
+  padding: 12px 26px;
+  color: var(--vibee-ink);
+  background: linear-gradient(135deg, #ffe982 0%, var(--vibee-yellow) 58%, var(--vibee-yellow-deep) 100%);
+  box-shadow: 0 10px 24px rgba(217, 174, 0, .22);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 760;
+  cursor: pointer;
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+
+.error-screen__button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgba(217, 174, 0, .3);
+}
+
+.error-screen__button:active { transform: translateY(0) scale(.985); }
+
+.error-screen__note {
+  margin: 16px 0 0;
+  color: var(--vibee-muted);
+  font-size: 12.5px;
+}
+
+@keyframes error-screen-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+@media (max-width: 420px) {
+  .error-screen__card {
+    border-radius: 24px;
+    padding: 24px 20px 28px;
+  }
+  .error-screen__button { width: 100%; }
+}
