@@ -22,15 +22,22 @@ fi
 
 APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$APP_DIR"
+mkdir -p .data
 
 if [[ ! -f .env ]]; then
-  if [[ ! -f .env.example ]]; then
+  if [[ -f .env.production ]]; then
+    cp .env.production .env
+    chmod 600 .env || true
+    printf '%s\n' "Создан .env из .env.production."
+  elif [[ -f .env.example ]]; then
+    cp .env.example .env
+    chmod 600 .env || true
+    printf '%s\n' "Заполните токены в .env и запустите скрипт снова"
+    exit 1
+  else
     printf '%s\n' "Не найден .env.example — невозможно подготовить .env." >&2
     exit 1
   fi
-  cp .env.example .env
-  printf '%s\n' "Заполните токены в .env и запустите скрипт снова"
-  exit 1
 fi
 
 run_privileged() {
