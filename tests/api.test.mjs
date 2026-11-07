@@ -301,3 +301,52 @@ test('SQLite preserves shared state across server restart', async t => {
     assert.equal(inspection.prepare('SELECT COUNT(*) AS n FROM feedback').get().n, 0)
   } finally { inspection.close() }
 })
+
+test('unhandled 500 error logs error name and stack without sensitive request data', async t => {
+  const originalError = console.error
+  const logged = []
+  console.error = (...args) => {
+    logged.push(args)
+  }
+  t.after(() => {
+    console.error = originalError
+  })
+
+  const root = resolve('.data')
+  await mkdir(root, { recursive: true })
+  const directory = await mkdtemp(join(root, 'api-err-'))
+  const dbPath = join(directory, 'corrupt.sqlite')
+
+  const { client, close } = await start(t, dbPath)
+  t.after(async () => {
+    await close()
+    await rm(directory, { recursive: true, force: true })
+  })
+
+  // Corrupt the database table so store.workspace throws an unexpected SqliteError
+  const db = new DatabaseSync(dbPath)
+  db.exec('DROP TABLE workspaces;')
+  db.close()
+
+  const sensitivePayload = 'sensitive-password-12345'
+  const sensitiveCookie = 'vibebot_session=sensitive-secret-token'
+  const sensitiveHeader = 'sensitive-secret-header'
+
+  const res = await client()('/workspaces', { name: sensitivePayload, displayName: 'Test' }, {
+    Cookie: sensitiveCookie,
+    'X-Custom-Secret': sensitiveHeader,
+  })
+
+  assert.equal(res.status, 500)
+  assert.equal(res.body.error.code, 'INTERNAL_ERROR')
+
+  assert.ok(logged.length > 0, 'console.error should have been called')
+  const loggedString = logged.map(args => args.map(a => String(a?.stack ?? a)).join(' ')).join('\n')
+
+  assert.ok(loggedString.includes('SqliteError') || loggedString.includes('Error'), 'Should log error name')
+  assert.ok(loggedString.includes('no such table: workspaces'), 'Should log error message/stack')
+  assert.ok(!loggedString.includes(sensitivePayload), 'Should not log request body')
+  assert.ok(!loggedString.includes(sensitiveCookie), 'Should not log cookies')
+  assert.ok(!loggedString.includes(sensitiveHeader), 'Should not log request headers')
+})
+

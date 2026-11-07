@@ -247,7 +247,7 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
     } catch (error) {
       if (res.headersSent) return res.end()
       if (error instanceof AppError) return json(res, error.status, { error: { code: error.code, message: error.message } })
-      console.error('Vibee: request failed without logging request data')
+      console.error(error?.name ?? 'Error', error?.stack ?? error)
       return json(res, 500, { error: { code: 'INTERNAL_ERROR', message: 'Не удалось выполнить действие. Попробуйте ещё раз.' } })
     }
   })
