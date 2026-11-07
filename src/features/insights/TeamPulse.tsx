@@ -6,10 +6,11 @@ import { InsightsWidget } from './InsightsWidget'
 import './TeamPulse.css'
 
 export function pulsePeriodLabel(view: { period: { start: string; end: string } }) {
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
   const format = (date: string) => new Date(date).toLocaleString('ru-RU', {
-    day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Omsk',
+    day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone,
   })
-  return `${format(view.period.start)} — ${format(view.period.end)} (Омск)`
+  return `${format(view.period.start)} — ${format(view.period.end)}`
 }
 
 const explanations = {

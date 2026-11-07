@@ -57,7 +57,8 @@ function isTeamProfile(value: unknown): value is TeamProfile {
 }
 
 const labels = { energy: 'Ресурс', clarity: 'Ясность', support: 'Поддержка' }
-const dateLabel = (date: string) => new Date(date).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Omsk' })
+const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+const dateLabel = (date: string) => new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: browserTimeZone }).format(new Date(date))
 const initialToken = () => new URLSearchParams(window.location.hash.slice(1)).get('invite') ?? ''
 function invitationToken(value: string) {
   try { return new URLSearchParams(new URL(value).hash.slice(1)).get('invite') ?? value.trim() } catch { return value.trim() }
@@ -258,7 +259,7 @@ export function TeamWorkspace() {
         </>}<button className="button entrance__submit" type="submit">{busy ? 'Сохраняем…' : restore ? 'Войти по коду' : join ? 'Войти по приглашению' : 'Создать команду'}</button>
       </fieldset></form><div className="button-row"><button className="text-button" onClick={() => { setRestore(false); setJoin(!join) }} disabled={busy}>{join ? 'Создать новую команду' : 'У меня есть приглашение'}</button><button className="text-button" onClick={() => { setShowAccessKey(false); setRestore(!restore) }} disabled={busy}>{restore ? 'Обычный вход' : 'У меня есть личный код входа'}</button></div>
     </section> : <>
-      <div className="team-heading" id="team-overview"><div><h2>{snapshot.workspace.name}</h2><p className="muted">{snapshot.member.name} · {snapshot.member.role === 'organizer' ? 'организатор' : 'участник'} · время по Омску</p></div><div className="button-row"><button className="button secondary" onClick={() => void refresh()} disabled={busy || refreshing}>{refreshing ? 'Обновляем…' : 'Обновить'}</button><button className="text-button" onClick={() => setConfirm('logout')} disabled={busy}>Выйти</button></div></div>
+      <div className="team-heading" id="team-overview"><div><h2>{snapshot.workspace.name}</h2><p className="muted">{snapshot.member.name} · {snapshot.member.role === 'organizer' ? 'организатор' : 'участник'} · {browserTimeZone}</p></div><div className="button-row"><button className="button secondary" onClick={() => void refresh()} disabled={busy || refreshing}>{refreshing ? 'Обновляем…' : 'Обновить'}</button><button className="text-button" onClick={() => setConfirm('logout')} disabled={busy}>Выйти</button></div></div>
       {showRestore && <section className="panel entrance" aria-labelledby="session-restore-title"><h2 id="session-restore-title">Войти снова</h2><p className="muted">Введите личный код, чтобы продолжить. Текущая форма останется открытой.</p><form onSubmit={event => { event.preventDefault(); void perform('/restore', { key: loginKey }, 'Вход восстановлен.') }}><SecretField id="restore-key" label="Личный код входа" visible={showLoginKey} onToggle={() => setShowLoginKey(value => !value)} value={loginKey} onChange={event => setLoginKey(event.target.value)} disabled={busy}/><button className="button" type="submit" disabled={busy}>{busy ? 'Входим…' : 'Войти по коду'}</button><button className="text-button" type="button" disabled={busy} onClick={() => { setShowRestore(false); setShowLoginKey(false); setError(null) }}>Продолжить просмотр</button></form></section>}
       {snapshot.member.role === 'participant' && <details className="panel participant-data">
         <summary>Мои данные</summary>

@@ -2,9 +2,16 @@ import { useCallback, useEffect, useState } from 'react'
 import { ApiError, api } from './client'
 import type { CommunicationRecommendation, CommunicationView } from './telegram'
 import { ActionRecommendationCard } from '../features/actions/ActionRecommendationCard'
-import { TeamPulse, pulsePeriodLabel } from '../features/insights/TeamPulse'
+import { TeamPulse } from '../features/insights/TeamPulse'
 import { RequestError } from './RequestError'
 import './SummaryPanels.css'
+
+const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+const periodFormatter = new Intl.DateTimeFormat('ru-RU', {
+  day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: browserTimeZone,
+})
+const periodLabel = (view: { period: { start: string; end: string } }) =>
+  `${periodFormatter.format(new Date(view.period.start))} — ${periodFormatter.format(new Date(view.period.end))} (${browserTimeZone})`
 
 export function SummaryPanels({ onLogin, refreshKey = 0 }: { onLogin?: () => void; refreshKey?: number }) {
   const [view, setView] = useState<CommunicationView | null>(null)
@@ -85,7 +92,7 @@ export function SummaryPanels({ onLogin, refreshKey = 0 }: { onLogin?: () => voi
       suggestedAction={recommendation.action}
       dataSource={recommendation.dataSource}
       generationSource={recommendation.source}
-      periodLabel={pulsePeriodLabel(view)}
+      periodLabel={periodLabel(view)}
       demo={recommendation.demo ?? false}
     />}
   </div>
