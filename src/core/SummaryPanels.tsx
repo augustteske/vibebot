@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api } from './client'
+import { ApiError, api } from './client'
 import type { CommunicationRecommendation, CommunicationView } from './telegram'
 import { ActionRecommendationCard } from '../features/actions/ActionRecommendationCard'
 import { TeamPulse, pulsePeriodLabel } from '../features/insights/TeamPulse'
@@ -51,6 +51,12 @@ export function SummaryPanels({ onLogin, refreshKey = 0 }: { onLogin?: () => voi
     ).finally(() => { if (active) setRecommendationLoading(false) })
     return () => { active = false }
   }, [view?.status === 'published' ? view.period.id : '', recommendationAttempt])
+
+  if (error instanceof ApiError && error.code === 'UNAVAILABLE') {
+    return <section className="panel telegram-summary-state">
+      <p role="status">Telegram-модуль не подключён. Аналитика станет доступна после интеграции.</p>
+    </section>
+  }
 
   return <div className="telegram-summary">
     <TeamPulse bindingId={bindingId} onHistoryUnavailable={historyUnavailable} view={view} loading={loading} error={error} onLogin={onLogin} retrying={retryingSummary} onRetry={() => {
