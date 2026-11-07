@@ -252,7 +252,9 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
     } catch (error) {
       if (res.headersSent) return res.end()
       if (error instanceof AppError) return json(res, error.status, { error: { code: error.code, message: error.message } })
-      console.error(error?.name ?? 'Error', error?.stack ?? error)
+      const errorName = error?.name ?? 'Error'
+      if (error?.stack) console.error(errorName, error.stack)
+      else console.error(errorName)
       return json(res, 500, { error: { code: 'INTERNAL_ERROR', message: 'Не удалось выполнить действие. Попробуйте ещё раз.' } })
     }
   })

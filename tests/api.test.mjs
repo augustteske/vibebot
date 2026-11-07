@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { resolve, join, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createApp, resolveSecureCookies } from '../server/app.mjs'
@@ -19,15 +20,15 @@ test('health endpoint returns the Compose readiness response', async t => {
 })
 
 test('SPA fallback serves index.html for routes without file extension outside /api/', async t => {
-  const root = resolve('.data')
-  await mkdir(root, { recursive: true })
-  const staticDir = await mkdtemp(join(root, 'spa-static-'))
-  t.after(async () => { await rm(staticDir, { recursive: true, force: true }) })
+  const staticDir = await mkdtemp(join(tmpdir(), 'vibee-test-spa-'))
   await writeFile(join(staticDir, 'index.html'), '<!doctype html><html><body>SPA</body></html>')
 
   const app = createApp({ secret, dbPath: ':memory:', staticDir })
   await new Promise(resolveListen => app.server.listen(0, '127.0.0.1', resolveListen))
-  t.after(() => app.close())
+  t.after(async () => {
+    await app.close()
+    await rm(staticDir, { recursive: true, force: true })
+  })
   const base = 'http://127.0.0.1:' + app.server.address().port
 
   const rootRes = await fetch(base + '/')
@@ -273,12 +274,16 @@ test('personal access key restores the same identity and role; rotation invalida
 })
 
 test('SQLite preserves shared state across server restart', async t => {
-  const root = resolve('.data')
-  await mkdir(root, { recursive: true })
-  const directory = await mkdtemp(join(root, 'api-test-'))
-  t.after(async () => { if (!directory.startsWith(root + sep)) throw new Error('Unexpected test directory'); await rm(directory, { recursive: true, force: true }) })
+  const directory = await mkdtemp(join(tmpdir(), 'vibee-test-sqlite-'))
   const path = join(directory, 'test.sqlite')
-  const first = await start(t, path)
+  let first = null
+  let second = null
+  t.after(async () => {
+    if (first) await first.close()
+    if (second) await second.close()
+    await rm(directory, { recursive: true, force: true })
+  })
+  first = await start(t, path)
   const owner = first.client()
   const created = await owner('/workspaces', { name: 'Постоянная команда', displayName: 'Организатор' })
   const invitation = await owner('/invitations', {})
@@ -290,12 +295,16 @@ test('SQLite preserves shared state across server restart', async t => {
   await owner('/actions/' + actionId + '/feedback', { helpful: true })
   await owner('/actions/' + actionId + '/close-feedback', {})
   await first.close()
-  const second = await start(t, path)
+  first = null
+
+  second = await start(t, path)
   const participant = second.client()
   const joined = await participant('/join', { token: invitation.body.token, displayName: 'Участник' })
   assert.equal(joined.body.workspace.name, 'Постоянная команда')
   assert.equal(joined.body.actions[0].goal, 'Сохранённый шаг')
   await second.close()
+  second = null
+
   const inspection = new DatabaseSync(path)
   try {
     assert.equal(inspection.prepare('SELECT COUNT(*) AS n FROM checkins').get().n, 0)
@@ -313,9 +322,7 @@ test('unhandled 500 error logs error name and stack without sensitive request da
     console.error = originalError
   })
 
-  const root = resolve('.data')
-  await mkdir(root, { recursive: true })
-  const directory = await mkdtemp(join(root, 'api-err-'))
+  const directory = await mkdtemp(join(tmpdir(), 'vibee-test-500-'))
   const dbPath = join(directory, 'corrupt.sqlite')
 
   const { client, close } = await start(t, dbPath)
@@ -351,36 +358,77 @@ test('unhandled 500 error logs error name and stack without sensitive request da
   assert.ok(!loggedString.includes(sensitiveHeader), 'Should not log request headers')
 })
 
+test('unhandled 500 error without stack logs only error name without object properties', async t => {
+  const originalError = console.error
+  const logged = []
+  console.error = (...args) => {
+    logged.push(args)
+  }
+  t.after(() => {
+    console.error = originalError
+  })
+
+  let shouldFail = false
+  const now = () => {
+    if (shouldFail) {
+      const errorWithoutStack = { name: 'StacklessInternalError', sensitiveProperty: 'leaked-property-987' }
+      throw errorWithoutStack
+    }
+    return 1700000000000
+  }
+
+  const { client, close } = await start(t, undefined, { now })
+  t.after(close)
+
+  shouldFail = true
+
+  const res = await client()('/workspaces', { name: 'TestWorkspace', displayName: 'Organizer' })
+  assert.equal(res.status, 500)
+  assert.equal(res.body.error.code, 'INTERNAL_ERROR')
+
+  assert.ok(logged.length > 0, 'console.error should have been called')
+  assert.equal(logged[0].length, 1, 'Only error name should be passed to console.error when stack is absent')
+  assert.equal(logged[0][0], 'StacklessInternalError')
+
+  const loggedString = logged.map(args => args.map(a => String(a)).join(' ')).join('\n')
+  assert.ok(!loggedString.includes('leaked-property-987'), 'Should not log properties of error object')
+})
+
 test('store cleanup removes expired sessions, invitations, and recovery keys from SQLite tables', async t => {
   let currentTime = 1000000
   const now = () => currentTime
-  const root = resolve('.data')
-  await mkdir(root, { recursive: true })
-  const directory = await mkdtemp(join(root, 'cleanup-test-'))
+  const directory = await mkdtemp(join(tmpdir(), 'vibee-test-cleanup-'))
   const dbPath = join(directory, 'cleanup.sqlite')
+  let currentStore = null
   t.after(async () => {
+    if (currentStore) try { currentStore.close() } catch {}
     await rm(directory, { recursive: true, force: true })
   })
 
-  const store = createStore({ path: dbPath, secret, now })
-  const wsToken = store.createWorkspace({ name: 'Команда', displayName: 'Алиса' })
-  const member = store.authenticate(wsToken)
-  store.invite(member)
-  store.recoveryKey(member)
-  store.close()
+  currentStore = createStore({ path: dbPath, secret, now })
+  const wsToken = currentStore.createWorkspace({ name: 'Команда', displayName: 'Алиса' })
+  const member = currentStore.authenticate(wsToken)
+  currentStore.invite(member)
+  currentStore.recoveryKey(member)
+  currentStore.close()
+  currentStore = null
 
   const db = new DatabaseSync(dbPath)
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 1)
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM invitations').get().n, 1)
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM recovery_keys').get().n, 1)
-  db.close()
+  try {
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 1)
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM invitations').get().n, 1)
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM recovery_keys').get().n, 1)
+  } finally {
+    db.close()
+  }
 
   // Re-open store with advanced time (31 days later)
   currentTime += 31 * 86400000
-  const store2 = createStore({ path: dbPath, secret, now })
-  assert.equal(typeof store2.cleanup, 'function', 'store.cleanup should be a function')
-  store2.cleanup()
-  store2.close()
+  currentStore = createStore({ path: dbPath, secret, now })
+  assert.equal(typeof currentStore.cleanup, 'function', 'store.cleanup should be a function')
+  currentStore.cleanup()
+  currentStore.close()
+  currentStore = null
 
   const dbAfter = new DatabaseSync(dbPath)
   try {
@@ -395,9 +443,7 @@ test('store cleanup removes expired sessions, invitations, and recovery keys fro
 test('createApp cleans up expired records on startup and periodic interval', async t => {
   let currentTime = 1000000
   const now = () => currentTime
-  const root = resolve('.data')
-  await mkdir(root, { recursive: true })
-  const directory = await mkdtemp(join(root, 'app-cleanup-'))
+  const directory = await mkdtemp(join(tmpdir(), 'vibee-test-app-cleanup-'))
   const dbPath = join(directory, 'app-cleanup.sqlite')
 
   const store = createStore({ path: dbPath, secret, now })
