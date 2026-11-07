@@ -107,6 +107,7 @@ export function TeamWorkspace() {
   const [teamProfileLoaded, setTeamProfileLoaded] = useState(false)
   const [teamProfileError, setTeamProfileError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
+  const [summaryRefreshKey, setSummaryRefreshKey] = useState(0)
   const requestVersion = useRef(0)
   const busyRef = useRef(false)
   const refreshingRef = useRef(false)
@@ -142,6 +143,8 @@ export function TeamWorkspace() {
         hasSnapshot.current = true
         setError(null)
         setErrorMutation(false)
+        // Re-fetch the Telegram summary on manual and timer refreshes, so a paused binding hides metrics.
+        setSummaryRefreshKey(value => value + 1)
         if (refreshByUser.current) setNotice('Данные команды обновлены.')
       }
     } catch (failure) {
@@ -268,11 +271,11 @@ export function TeamWorkspace() {
         <p>Личный чек-ин в Telegram — отдельный сценарий: его ответы не попадают в эту командную сводку. Команда <code>/stop</code> отменяет личный сценарий и очищает черновик бота, но не удаляет веб-ответы или сообщения из истории Telegram.</p>
         <a href="/docs.html#privacy">Подробнее об обработке данных</a>
       </details>}
-      {snapshot.member.role === 'organizer' && <SummaryPanels key={snapshot.workspace.id + ':' + snapshot.round.id + ':' + snapshot.round.summary.status} onLogin={beginLogin}/>}
-      {snapshot.member.role === 'organizer' && <TelegramCheckinsPanel key={activeWorkspaceId} onLogin={beginLogin}/>}
-      {snapshot.member.role === 'organizer' && <TeamSettings key={activeWorkspaceId} onLogin={beginLogin}/>}
+      {snapshot.member.role === 'organizer' && <SummaryPanels key={snapshot.workspace.id + ':' + snapshot.round.id + ':' + snapshot.round.summary.status} refreshKey={summaryRefreshKey} onLogin={beginLogin}/>}
+      {snapshot.member.role === 'organizer' && <TelegramCheckinsPanel key={'checkins-' + activeWorkspaceId} onLogin={beginLogin}/>}
+      {snapshot.member.role === 'organizer' && <TeamSettings key={'settings-' + activeWorkspaceId} onLogin={beginLogin}/>}
       {confirm === 'logout' && <div className="panel confirmation"><p>Для возвращения понадобится личный код входа. Сохраните его перед выходом.</p><div className="button-row"><button className="button secondary" onClick={() => setConfirm('')} disabled={busy}>Остаться</button><button className="button" onClick={() => void logout()} disabled={busy}>Выйти из пространства</button></div></div>}
-      {snapshot.member.role === 'organizer' && <details key={activeWorkspaceId} className="panel team-profile" onToggle={event => {
+      {snapshot.member.role === 'organizer' && <details key={'profile-' + activeWorkspaceId} className="panel team-profile" onToggle={event => {
         if (event.currentTarget.open && teamProfileWorkspaceRef.current !== activeWorkspaceId) loadTeamProfile(activeWorkspaceId)
       }}>
         <summary>Профиль команды <span className="muted">· необязательно</span></summary>

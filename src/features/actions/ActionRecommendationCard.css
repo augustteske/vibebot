@@ -41,17 +41,71 @@
 
 .vibee-arc__why {
   border: 1px solid var(--arc-line);
-  border-radius: 14px;
+  border-radius: 16px;
   background: #fffefa;
+  overflow: hidden;
+  interpolate-size: allow-keywords;
 }
-.vibee-arc__why summary {
+.vibee-arc__why-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   min-height: 44px;
   padding: 10px 14px;
   cursor: pointer;
   font-weight: 700;
+  color: var(--arc-black);
+  list-style: none;
+  transition: background-color .18s ease;
 }
-.vibee-arc__why summary:focus-visible { outline: 3px solid #806013; outline-offset: 3px; }
-.vibee-arc__why-content { display: grid; gap: 12px; padding: 0 14px 14px; }
+.vibee-arc__why-summary::-webkit-details-marker { display: none; }
+.vibee-arc__why-summary::marker { content: ''; }
+.vibee-arc__why-summary:hover { background: rgba(255, 214, 56, .14); }
+.vibee-arc__why-summary:focus-visible { outline: 3px solid #806013; outline-offset: -3px; }
+
+.vibee-arc__why-title { display: inline-flex; align-items: center; gap: 10px; }
+.vibee-arc__why-title::before {
+  content: '';
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--arc-yellow);
+  box-shadow: 0 0 0 4px rgba(255, 214, 56, .22);
+}
+.vibee-arc__why-chevron {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-right: 2px solid var(--arc-muted);
+  border-bottom: 2px solid var(--arc-muted);
+  transform: rotate(45deg);
+  transition: transform .26s cubic-bezier(.22, 1, .36, 1);
+}
+.vibee-arc__why[open] .vibee-arc__why-chevron { transform: rotate(225deg); }
+
+/* Плавное раскрытие там, где браузер умеет анимировать ::details-content. */
+.vibee-arc__why::details-content {
+  block-size: 0;
+  overflow: clip;
+  opacity: 0;
+  transition: block-size .3s cubic-bezier(.22, 1, .36, 1), opacity .24s ease, content-visibility .3s;
+  transition-behavior: allow-discrete;
+}
+.vibee-arc__why[open]::details-content {
+  block-size: auto;
+  opacity: 1;
+}
+
+.vibee-arc__why-body { animation: vibee-arc-reveal .3s cubic-bezier(.22, 1, .36, 1) both; }
+@keyframes vibee-arc-reveal {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.vibee-arc__why-content { display: grid; gap: 12px; padding: 2px 14px 14px; }
 .vibee-arc__why-intro,
 .vibee-arc__why-note { margin: 0; font-size: 0.84rem; color: var(--arc-muted); }
 .vibee-arc__metrics { display: grid; gap: 8px; margin: 0; }
