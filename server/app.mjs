@@ -12,7 +12,12 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
   const store = createStore({ path: dbPath, secret, telegramBootstrapCredential, telegramSynthetic, now,
     recommendationProvider, recommendationTimeoutMs })
   const cleanupTimer = setInterval(() => {
-    try { store.telegram.cleanup() } catch { console.error('Vibee: Telegram cleanup failed') }
+    try {
+      store.cleanup()
+      store.telegram.cleanup()
+    } catch {
+      console.error('Vibee: periodic cleanup failed')
+    }
   }, 60000)
   cleanupTimer.unref()
   const cookie = token => 'vibebot_session=' + token + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=' + (token ? 604800 : 0) + (secureCookies ? '; Secure' : '')
@@ -255,7 +260,24 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
     server,
     close: () => new Promise((resolveClose, reject) => {
       clearInterval(cleanupTimer)
-      server.close(error => { try { store.close(); error ? reject(error) : resolveClose() } catch (failure) { reject(failure) } })
+      if (!server.listening) {
+        try {
+          store.close()
+          resolveClose()
+        } catch (failure) {
+          reject(failure)
+        }
+        return
+      }
+      server.close(error => {
+        try {
+          store.close()
+          if (error) reject(error)
+          else resolveClose()
+        } catch (failure) {
+          reject(failure)
+        }
+      })
       server.closeIdleConnections()
     }),
   }

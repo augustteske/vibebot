@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { resolve, join, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createApp, resolveSecureCookies } from '../server/app.mjs'
+import { createStore } from '../server/store.mjs'
 import { DatabaseSync } from 'node:sqlite'
 
 const secret = 'test-secret-used-only-in-automated-tests-123456789'
@@ -349,4 +350,79 @@ test('unhandled 500 error logs error name and stack without sensitive request da
   assert.ok(!loggedString.includes(sensitiveCookie), 'Should not log cookies')
   assert.ok(!loggedString.includes(sensitiveHeader), 'Should not log request headers')
 })
+
+test('store cleanup removes expired sessions, invitations, and recovery keys from SQLite tables', async t => {
+  let currentTime = 1000000
+  const now = () => currentTime
+  const root = resolve('.data')
+  await mkdir(root, { recursive: true })
+  const directory = await mkdtemp(join(root, 'cleanup-test-'))
+  const dbPath = join(directory, 'cleanup.sqlite')
+  t.after(async () => {
+    await rm(directory, { recursive: true, force: true })
+  })
+
+  const store = createStore({ path: dbPath, secret, now })
+  const wsToken = store.createWorkspace({ name: 'Команда', displayName: 'Алиса' })
+  const member = store.authenticate(wsToken)
+  store.invite(member)
+  store.recoveryKey(member)
+  store.close()
+
+  const db = new DatabaseSync(dbPath)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 1)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM invitations').get().n, 1)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM recovery_keys').get().n, 1)
+  db.close()
+
+  // Re-open store with advanced time (31 days later)
+  currentTime += 31 * 86400000
+  const store2 = createStore({ path: dbPath, secret, now })
+  assert.equal(typeof store2.cleanup, 'function', 'store.cleanup should be a function')
+  store2.cleanup()
+  store2.close()
+
+  const dbAfter = new DatabaseSync(dbPath)
+  try {
+    assert.equal(dbAfter.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 0)
+    assert.equal(dbAfter.prepare('SELECT COUNT(*) AS n FROM invitations').get().n, 0)
+    assert.equal(dbAfter.prepare('SELECT COUNT(*) AS n FROM recovery_keys').get().n, 0)
+  } finally {
+    dbAfter.close()
+  }
+})
+
+test('createApp cleans up expired records on startup and periodic interval', async t => {
+  let currentTime = 1000000
+  const now = () => currentTime
+  const root = resolve('.data')
+  await mkdir(root, { recursive: true })
+  const directory = await mkdtemp(join(root, 'app-cleanup-'))
+  const dbPath = join(directory, 'app-cleanup.sqlite')
+
+  const store = createStore({ path: dbPath, secret, now })
+  const wsToken = store.createWorkspace({ name: 'Команда', displayName: 'Алиса' })
+  const member = store.authenticate(wsToken)
+  store.invite(member)
+  store.recoveryKey(member)
+  store.close()
+
+  currentTime += 31 * 86400000
+
+  const app = createApp({ secret, dbPath, now })
+  t.after(async () => {
+    await app.close()
+    await rm(directory, { recursive: true, force: true })
+  })
+
+  const db = new DatabaseSync(dbPath)
+  try {
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 0)
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM invitations').get().n, 0)
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM recovery_keys').get().n, 0)
+  } finally {
+    db.close()
+  }
+})
+
 
