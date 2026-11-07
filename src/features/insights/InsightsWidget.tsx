@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useId, useState } from 'react'
 import './InsightsWidget.css'
 
 const InsightsCharts = lazy(() => import('./InsightsCharts').then(module => ({ default: module.InsightsCharts })))
@@ -17,6 +17,60 @@ export interface InsightsWidgetProps {
   teamProfile?: 'informal' | 'formal';
   periodLabel?: string;
   demo?: boolean;
+}
+
+interface MetricInfoProps {
+  label: string;
+  measures: string;
+  doesNotProve: string;
+  note?: string;
+}
+
+const PROFILE_NOTE: Record<'informal' | 'formal', string> = {
+  informal: 'Возможно, команда просто продолжает общаться в неформальном режиме.',
+  formal: 'Возможно, изменились ожидания по доступности.',
+}
+
+/** Маленькая «i» у метрики: что она измеряет и чего не доказывает. */
+function MetricInfo({ label, measures, doesNotProve, note }: MetricInfoProps) {
+  const [hovered, setHovered] = useState(false)
+  const [pinned, setPinned] = useState(false)
+  const tooltipId = useId()
+  const open = hovered || pinned
+
+  return (
+    <span
+      className="iw-info"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => { setHovered(false); setPinned(false) }}
+    >
+      <button
+        type="button"
+        className="iw-info__button"
+        aria-label={`Что показывает метрика «${label}»`}
+        aria-expanded={open}
+        aria-describedby={tooltipId}
+        onClick={() => setPinned(value => !value)}
+        onFocus={() => setPinned(true)}
+        onBlur={() => setPinned(false)}
+        onKeyDown={event => {
+          if (event.key === 'Escape') setPinned(false)
+        }}
+      >
+        <span aria-hidden="true">i</span>
+      </button>
+      <span
+        id={tooltipId}
+        role="tooltip"
+        className={`iw-info__tooltip${open ? ' iw-info__tooltip--open' : ''}`}
+      >
+        <strong>{label}</strong>
+        <span><b>Что измеряет:</b> {measures}</span>
+        <span><b>Чего не доказывает:</b> {doesNotProve}</span>
+        {note && <span className="iw-info__note">{note}</span>}
+      </span>
+    </span>
+  )
 }
 
 export function InsightsWidget({ state, metrics, teamProfile, periodLabel, demo = false }: InsightsWidgetProps) {
@@ -56,12 +110,6 @@ export function InsightsWidget({ state, metrics, teamProfile, periodLabel, demo 
 
   if (!metrics) return null;
 
-  // Разная интерпретация для разных профилей
-  const interpretation = teamProfile === 'informal'
-    ? 'Возможно, вы просто продолжаете общение в relaxed режиме.'
-    : teamProfile === 'formal'
-      ? 'Возможно, изменились ожидания по доступности.'
-      : 'Причины изменений неизвестны без контекста команды.';
   return (
     <div className="iw-container">
       <div className="iw-header">
@@ -73,23 +121,42 @@ export function InsightsWidget({ state, metrics, teamProfile, periodLabel, demo 
 
       <div className="iw-grid">
         <div className="iw-card">
-          <h3>Общение вне рабочих часов</h3>
+          <div className="iw-card__head">
+            <h3>Общение вне рабочих часов</h3>
+            <MetricInfo
+              label="Общение вне рабочих часов"
+              measures="долю сообщений, отправленных вне заданного рабочего графика команды."
+              doesNotProve="что люди перерабатывают: у кого-то может быть личный график или другая часовая зона."
+              note={teamProfile ? PROFILE_NOTE[teamProfile] : undefined}
+            />
+          </div>
           <Suspense fallback={<div className="iw-chart iw-chart--donut" aria-hidden="true" />}>
             <InsightsCharts metric="outsideHoursPercent" value={metrics.outsideHoursPercent} />
           </Suspense>
-          <p className="iw-method">Ограничение: {interpretation}</p>
         </div>
         <div className="iw-card">
-          <h3>Равномерность участия</h3>
+          <div className="iw-card__head">
+            <h3>Равномерность участия</h3>
+            <MetricInfo
+              label="Равномерность участия"
+              measures="насколько равномерно сообщения распределены между участниками, от 0 до 100%."
+              doesNotProve="вклад людей в результат и не показывает, кто «главный» в команде."
+            />
+          </div>
           <Suspense fallback={<div className="iw-chart" aria-hidden="true" />}>
             <InsightsCharts metric="participationEvenness" value={metrics.participationEvenness} />
           </Suspense>
-          <p className="iw-method">Ограничение: Не измеряет вклад людей.</p>
         </div>
         <div className="iw-card">
-          <h3>Благодарности</h3>
+          <div className="iw-card__head">
+            <h3>Благодарности</h3>
+            <MetricInfo
+              label="Благодарности"
+              measures="долю сообщений с автоматически найденными признаками благодарности."
+              doesNotProve="качество работы и настоящую культуру признания: распознавание приблизительное."
+            />
+          </div>
           <p className="iw-value">{metrics.recognitionPercent}%</p>
-          <p className="iw-method">Ограничение: Приблизительное распознавание.</p>
         </div>
       </div>
     </div>
