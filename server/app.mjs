@@ -98,8 +98,9 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
       if (!url.pathname.startsWith('/api/')) {
         if (req.method !== 'GET' || !staticDir) throw new AppError(404, 'NOT_FOUND', 'Страница не найдена')
         const root = resolve(staticDir)
-        const file = resolve(root, '.' + decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname))
-        if (!file.startsWith(root + sep)) throw new AppError(404, 'NOT_FOUND', 'Страница не найдена')
+        const requested = resolve(root, '.' + decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname))
+        if (!requested.startsWith(root + sep)) throw new AppError(404, 'NOT_FOUND', 'Страница не найдена')
+        const file = extname(requested) ? requested : resolve(root, 'index.html')
         let data
         try { data = await readFile(file) } catch { throw new AppError(404, 'NOT_FOUND', 'Страница не найдена') }
         const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png' }
@@ -265,6 +266,10 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         res.setHeader('Set-Cookie', cookie(newToken))
         return json(res, 201, store.snapshot(store.authenticate(newToken)))
       }
+      const feedback = req.method === 'POST' ? url.pathname.match(/^\/api\/actions\/([a-f0-9-]+)\/(feedback|close-feedback)$/) : null
+      const knownRoute = (req.method === 'GET' && ['/api/session', '/api/summary', '/api/telegram-checkin-stats'].includes(url.pathname))
+        || (req.method === 'POST' && (['/api/logout', '/api/invitations', '/api/recovery-key', '/api/checkins', '/api/rounds/close', '/api/rounds/open', '/api/actions'].includes(url.pathname) || !!feedback))
+      if (!knownRoute) throw new AppError(404, 'NOT_FOUND', 'Действие не найдено')
       if (!member) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, store.snapshot(member))
       if (req.method === 'GET' && url.pathname === '/api/summary') return json(res, 200, store.summary(member))
@@ -275,7 +280,6 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         }
         if (url.pathname === '/api/invitations') return json(res, 201, store.invite(member))
         if (url.pathname === '/api/recovery-key') return json(res, 201, store.recoveryKey(member))
-        const feedback = url.pathname.match(/^\/api\/actions\/([a-f0-9-]+)\/(feedback|close-feedback)$/)
         if (url.pathname === '/api/checkins') store.checkin(member, input)
         else if (url.pathname === '/api/rounds/close') store.closeRound(member, input)
         else if (url.pathname === '/api/rounds/open') store.openRound(member)
