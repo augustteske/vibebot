@@ -1,0 +1,20 @@
+.not-found__card {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  width: min(100%, 620px);
+  margin: clamp(32px, 10vh, 96px) auto;
+  padding: clamp(24px, 6vw, 48px);
+}
+
+.not-found__code {
+  color: #725600;
+  font-size: clamp(3rem, 16vw, 6rem);
+  font-weight: 850;
+  letter-spacing: -.07em;
+  line-height: 1;
+}
+
+.not-found__card h1 { margin: 0; font-size: clamp(1.5rem, 7vw, 2.3rem); }
+.not-found__card p { margin: 0 0 8px; }
+.not-found__card .button { min-height: 46px; }

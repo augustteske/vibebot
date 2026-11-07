@@ -1,17 +1,43 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+production=false
+for arg in "$@"; do
+  case "$arg" in
+    --production) production=true ;;
+    -h|--help)
+      printf '%s\n' "Usage: bash scripts/deploy.sh [--production]" \
+        "--production: force COOKIE_SECURE=true for HTTPS; start containers in background."
+      exit 0
+      ;;
+    *)
+      printf 'Unknown option: %s\n' "$arg" >&2
+      exit 1
+      ;;
+  esac
+done
+if [[ "$production" == true ]]; then
+  export COOKIE_SECURE=true
+fi
+
 APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$APP_DIR"
+mkdir -p .data
 
 if [[ ! -f .env ]]; then
-  if [[ ! -f .env.example ]]; then
+  if [[ -f .env.production ]]; then
+    cp .env.production .env
+    chmod 600 .env || true
+    printf '%s\n' "Создан .env из .env.production."
+  elif [[ -f .env.example ]]; then
+    cp .env.example .env
+    chmod 600 .env || true
+    printf '%s\n' "Заполните токены в .env и запустите скрипт снова"
+    exit 1
+  else
     printf '%s\n' "Не найден .env.example — невозможно подготовить .env." >&2
     exit 1
   fi
-  cp .env.example .env
-  printf '%s\n' "Заполните токены в .env и запустите скрипт снова"
-  exit 1
 fi
 
 run_privileged() {
@@ -117,6 +143,10 @@ if ! docker info >/dev/null 2>&1 && [[ "$(uname -s)" == "Linux" && "$(id -u)" -n
     exit 1
   fi
   docker_cmd=(sudo docker)
+  if [[ "$production" == true ]]; then
+    # sudo may drop exported variables; pass the production override explicitly.
+    docker_cmd=(sudo env COOKIE_SECURE=true docker)
+  fi
 fi
 
 docker_ready=false

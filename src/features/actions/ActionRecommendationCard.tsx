@@ -10,6 +10,10 @@ export interface ActionRecommendationCardProps {
   observation?: string;
   explanation?: string;
   limitation?: string;
+  metrics?: {
+    outsideHoursPercent: number;
+    participationEvenness: number;
+  };
   suggestedAction?: string;
   dataSource?: ActionDataSource;
   generationSource?: ActionGenerationSource;
@@ -50,6 +54,7 @@ export function ActionRecommendationCard({
   observation = 'В закрытом периоде стало больше сообщений вне рабочего времени.',
   explanation = 'Возможно, изменились ожидания по доступности.',
   limitation = 'Показатель не доказывает перегрузку: срочные задачи или неверное расписание могли повлиять на картину.',
+  metrics,
   suggestedAction = 'Обсудить с командой, в какие часы ответ можно отложить до следующего рабочего дня.',
   dataSource = 'chat',
   generationSource = 'template',
@@ -125,21 +130,6 @@ export function ActionRecommendationCard({
         <p className="vibee-arc__period">{periodLabel}</p>
       </header>
 
-      <dl className="vibee-arc__blocks">
-        <div className="vibee-arc__block">
-          <dt>Наблюдение</dt>
-          <dd>{observation}</dd>
-        </div>
-        <div className="vibee-arc__block">
-          <dt>Возможное объяснение</dt>
-          <dd>{explanation}</dd>
-        </div>
-        <div className="vibee-arc__block">
-          <dt>Ограничение</dt>
-          <dd>{limitation}</dd>
-        </div>
-      </dl>
-
       <div className="vibee-arc__action">
         <p className="vibee-arc__action-label">Предлагаемый следующий шаг</p>
         {phase === 'editing' || phase === 'saving' ? (
@@ -164,6 +154,49 @@ export function ActionRecommendationCard({
           <p className="vibee-arc__action-text">{acceptedAction || actionText}</p>
         )}
       </div>
+
+      <details className="vibee-arc__why">
+        <summary className="vibee-arc__why-summary">
+          <span className="vibee-arc__why-title">Почему такой вывод?</span>
+          <span className="vibee-arc__why-chevron" aria-hidden="true" />
+        </summary>
+        <div className="vibee-arc__why-body">
+          <div className="vibee-arc__why-content">
+            <dl className="vibee-arc__blocks">
+              <div className="vibee-arc__block">
+                <dt>Наблюдение</dt>
+                <dd>{observation}</dd>
+              </div>
+              <div className="vibee-arc__block">
+                <dt>Возможное объяснение</dt>
+                <dd>{explanation}</dd>
+              </div>
+            </dl>
+            <p className="vibee-arc__why-intro">Показатели опубликованного периода:</p>
+            {metrics ? (
+              <dl className="vibee-arc__metrics">
+                <div>
+                  <dt>Сообщения вне рабочих часов</dt>
+                  <dd>{metrics.outsideHoursPercent.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%</dd>
+                </div>
+                <div>
+                  <dt>Равномерность участия</dt>
+                  <dd>{metrics.participationEvenness.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%</dd>
+                </div>
+              </dl>
+            ) : (
+              <p className="vibee-arc__why-note">Показатели для этого периода недоступны.</p>
+            )}
+            <div className="vibee-arc__limitation">
+              <h4>Ограничение интерпретации</h4>
+              <p>{limitation}</p>
+            </div>
+            <p className="vibee-arc__why-note">
+              Эти агрегаты не объясняют причины изменений и не оценивают отдельных людей.
+            </p>
+          </div>
+        </div>
+      </details>
 
       {error && (
         <p className="vibee-arc__error" role="alert">{error}</p>

@@ -23,12 +23,12 @@ sudo apt install -y ca-certificates curl git xz-utils nginx
 
 ## 3. Получите код и установите Node.js 24
 
-Репозиторий команды размещён на GitLab. Настройте доступ VM к нему через deploy key с минимальными правами; не вставляйте токен в URL или shell history.
+Репозиторий команды размещён на GitHub. Настройте доступ VM к нему через deploy key с минимальными правами; не вставляйте токен в URL или shell history.
 
 ```sh
 sudo mkdir -p /opt/vibee
 sudo chown "$USER":"$(id -gn)" /opt/vibee
-git clone --branch main --single-branch git@gitlab.com:shertwg-group1/vibebot.git /opt/vibee
+git clone --branch main --single-branch git@github.com:augustteske/vibebot.git /opt/vibee
 cd /opt/vibee
 ```
 

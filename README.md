@@ -4,8 +4,8 @@
   <p><strong>Почувствовать команду. Сделать следующий шаг.</strong></p>
   <p>Общие сигналы для бережного разговора и командных решений.</p>
   <p>
-    <a href="https://gitlab.com/shertwg-group1/vibebot/-/pipelines"><img alt="CI · Node tests" src="https://gitlab.com/shertwg-group1/vibebot/badges/develop/pipeline.svg?job=verify"></a>
-    <a href="https://gitlab.com/shertwg-group1/vibebot/-/pipelines"><img alt="CI · Python tests" src="https://gitlab.com/shertwg-group1/vibebot/badges/develop/pipeline.svg?job=verify-bot"></a>
+    <a href="https://github.com/augustteske/vibebot/actions/workflows/ci.yml"><img alt="CI · Node tests" src="https://github.com/augustteske/vibebot/actions/workflows/ci.yml/badge.svg?branch=develop&amp;job=node-tests"></a>
+    <a href="https://github.com/augustteske/vibebot/actions/workflows/ci.yml"><img alt="CI · Python tests" src="https://github.com/augustteske/vibebot/actions/workflows/ci.yml/badge.svg?branch=develop&amp;job=python-tests"></a>
     <a href="LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/License-MIT-FFD638.svg"></a>
     <a href="https://nodejs.org/"><img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24.x-339933?logo=node.js&amp;logoColor=white"></a>
   </p>
@@ -49,10 +49,10 @@ bash scripts/deploy.sh
 Нужны Docker Engine и Docker Compose v2:
 
 ```sh
-docker compose up
+COOKIE_SECURE=false APP_ORIGIN=http://127.0.0.1:8787 docker compose up
 ```
 
-Откройте <http://127.0.0.1:8787>. Для пересборки после изменения кода используйте `docker compose up --build`. Compose запускает веб-приложение и API; профиль Telegram-бота по умолчанию выключен. SQLite хранится в Docker volume. Остановить — `Ctrl+C` или `docker compose down`.
+Откройте <http://127.0.0.1:8787>. Для пересборки добавьте `--build` к команде выше. В PowerShell задайте `$env:COOKIE_SECURE='false'` и `$env:APP_ORIGIN='http://127.0.0.1:8787'` перед `docker compose up`. Compose запускает веб-приложение и API; профиль Telegram-бота по умолчанию выключен. SQLite хранится в Docker volume. Остановить — `Ctrl+C` или `docker compose down`.
 
 Настройки берутся из необязательного `.env`. `TELEGRAM_BOT_TOKEN` нужен только для отдельно разрешённой доставки уведомлений; внешний провайдер рекомендаций настраивается через `LLM_PROVIDER` и `LLM_API_KEY` и по умолчанию не вызывается. `COOKIE_SECURE=false` допустим только для локального HTTP; за HTTPS reverse proxy установите `COOKIE_SECURE=true`. Обычный Compose не включает реальный групповой Telegram-контур.
 
@@ -66,6 +66,78 @@ npm run dev
 ```
 
 Откройте <http://127.0.0.1:5173>. Команда запускает Vite и локальный Node.js API. Она не включает реальную Telegram-интеграцию.
+
+## Деплой на сервер (Production)
+
+Сервер организаторов: Ubuntu, внешний IP `109.194.123.17`, внутренний IP `172.28.77.12`. Нужны SSH-доступ организаторов, Git, Docker Engine и плагин Docker Compose. Команды ниже выполняются на сервере.
+
+1. Подключитесь и склонируйте репозиторий. Замените `YOUR_SSH_USER` выданным логином. Ветка `feat/august-core` содержит эти настройки деплоя; после ревью используйте согласованную командой ветку или тег.
+
+   ```sh
+   ssh YOUR_SSH_USER@109.194.123.17
+   git clone --branch feat/august-core https://github.com/augustteske/vibebot.git
+   cd vibebot
+   ```
+
+2. Создайте серверный `.env`:
+
+   ```sh
+   cp .env.example .env
+   chmod 600 .env
+   nano .env
+   ```
+
+   Замените соответствующие строки (значения ниже — placeholders):
+
+   ```dotenv
+   TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
+   LLM_PROVIDER=template
+   APP_ORIGIN=https://YOUR_QQ_DOMAIN
+   COOKIE_SECURE=true
+   ```
+
+   `TELEGRAM_BOT_TOKEN` — секретный токен вашего Telegram-бота, не QQ-бота организаторов. Он нужен для отдельно разрешённых уведомлений; обычный запуск Compose не запускает polling-бота. `LLM_PROVIDER=template` использует локальные шаблоны без внешнего ИИ. `.env` не коммитьте. Обязательно замените локальные `APP_ORIGIN` и `COOKIE_SECURE=false` из `.env.example`: origin должен точно совпадать с публичным HTTPS-адресом, без пути и завершающего `/`. Если домен ещё не выдан, сначала выполните публикацию ниже, затем обновите origin и повторите запуск.
+
+3. Проверьте Docker и запустите приложение в фоне:
+
+   ```sh
+   docker --version
+   docker compose version
+   docker compose up -d --build
+   ```
+
+   Альтернатива — `bash scripts/deploy.sh --production`: скрипт проверяет Docker и Compose, при необходимости устанавливает их на Ubuntu/Debian и принудительно передаёт `COOKIE_SECURE=true`, даже если в `.env` осталось `false`. Контейнеры запускаются с `-d`. При недоступности Docker для пользователя скрипт использует sudo.
+
+4. Дождитесь запуска и проверьте API:
+
+   ```sh
+   docker compose ps
+   curl --fail http://127.0.0.1:8787/api/health
+   ```
+
+   Ожидается HTTP 200. Если сервис ещё запускается, повторите запрос; для диагностики используйте `docker compose logs --tail=100 web`. HTTP healthcheck работает независимо от Secure-cookie; вход в кабинет в production проверяйте через HTTPS-домен.
+
+### Интеграция с QQ-ботом организаторов
+
+В QQ-боте, предоставленном организаторами, выполните команды по очереди:
+
+```text
+/claim
+/publish 8787
+```
+
+Дождитесь подтверждения `/claim` и следуйте запросам бота для закрепления сервера. После запуска приложения `/publish 8787` публикует порт и выдаёт домен по схеме организаторов. Используйте адрес из ответа бота, а не пример `YOUR_QQ_DOMAIN`. Если бот запрашивает дополнительные данные, используйте выданные организаторами параметры сервера.
+
+Установите полученный HTTPS-origin в `.env` и примените его пересозданием контейнера:
+
+```sh
+bash scripts/deploy.sh --production
+curl --fail https://YOUR_QQ_DOMAIN/api/health
+```
+
+Откройте этот домен в браузере и проверьте вход в кабинет. Публикация порта настроена как `8787:8787` (все интерфейсы хоста), а Node.js внутри контейнера слушает `0.0.0.0:8787`. Прокси организаторов должен иметь доступ к `172.28.77.12:8787` и обслуживать публичный HTTPS; при недоступности порта проверьте сетевые правила с организаторами. Сам контейнер обслуживает HTTP, TLS завершается на прокси.
+
+В Compose `COOKIE_SECURE` по умолчанию `true`; отключение через `.env` или переменную окружения допустимо только для локальных HTTP-тестов без `--production`. SQLite сохраняется в volume `vibebot_data`; при обновлениях не используйте `docker compose down -v`. Публикация веб-кабинета не включает обработку реальных Telegram-чатов: для неё по-прежнему требуется отдельное согласование условий согласия, хранения и отзыва.
 
 ---
 
@@ -103,8 +175,11 @@ Telegram updates ──→ Python 3.12 / aiogram ──→ Node.js 24 API ──
 - [Правила бренда](docs/BRAND.md)
 - [Руководство Python-бота](bot/README.md)
 - [Compose-конфигурация](compose.yaml)
+- [Временный HTTPS-туннель с Windows: установка, запуск и остановка](docs/WINDOWS_TUNNEL.md)
 - [Развёртывание одной командой](scripts/deploy.sh) ([PowerShell](scripts/deploy.ps1))
-- [GitLab CI](https://gitlab.com/shertwg-group1/vibebot/-/pipelines)
+- [Справка внутри сайта](public/docs.html)
+- [Проект условий пилота и политики обработки данных](docs/LEGAL_DRAFT.md)
+- [GitHub Actions](https://github.com/augustteske/vibebot/actions/workflows/ci.yml)
 
 ---
 

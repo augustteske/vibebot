@@ -17,6 +17,22 @@ const credentialHash = createHash('sha256').update(credential).digest('hex')
 const policyVersion = 'synthetic-v1'
 const DAY = 86400000
 const demoIntervals = [1, 2, 3, 4, 5].map(day => ({ day, start: 540, end: 1080 }))
+const expectedTelegramTables = [
+  'telegram_binding_requests', 'telegram_binding_tokens', 'telegram_bindings', 'telegram_chat_actions',
+  'telegram_checkins', 'telegram_close_requests', 'telegram_closed_periods', 'telegram_credentials',
+  'telegram_event_ids', 'telegram_feedback_collections', 'telegram_feedback_requests', 'telegram_feedback_votes',
+  'telegram_identities', 'telegram_identity_requests', 'telegram_link_tokens', 'telegram_links',
+  'telegram_media_observations', 'telegram_message_ids', 'telegram_notification_deliveries',
+  'telegram_notification_subscriptions', 'telegram_open_periods', 'telegram_period_authors',
+  'telegram_profile_requests', 'telegram_profiles', 'telegram_requests', 'telegram_texts',
+  'telegram_transcription_jobs', 'telegram_transcription_requests', 'telegram_transcription_texts',
+]
+
+function assertTelegramTables(db) {
+  const actual = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%' ORDER BY name")
+    .all().map(row => row.name)
+  assert.deepEqual(actual, expectedTelegramTables)
+}
 
 test('SQLite startup migrates old Telegram bindings without losing persisted profile or binding data', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'vibee-telegram-migration-test-'))
@@ -206,6 +222,19 @@ test('HTTP: current Telegram summary requires an organizer session and handles m
   assert.deepEqual((await f.currentSummary()).body, { status: 'disconnected' })
 })
 
+test('HTTP: summary optionally exposes only the server-selected organizer binding for history', async t => {
+  const f = await fixture(t)
+  const path = '/telegram/summary?includeBinding=1'
+  error(await f.request(path), 401, 'SIGN_IN_REQUIRED')
+  error(await f.request(path, undefined, { Cookie: 'vibebot_session=' + f.tokens[1] }), 403, 'FORBIDDEN')
+  await f.activate()
+  const result = await f.request(path, undefined, { Cookie: 'vibebot_session=' + f.tokens[0] })
+  assert.equal(result.body.bindingId, f.id)
+  assert.deepEqual(result.body.view, (await f.currentSummary()).body)
+  const foreign = await f.request(path, undefined, { Cookie: 'vibebot_session=' + f.foreignToken })
+  assert.deepEqual(foreign.body, { bindingId: null, view: { status: 'disconnected' } })
+})
+
 const sendMany = async (f, revision, count, authors, firstMessageId, thanks = 0,
   { bindingId = f.id, credential: botCredential = credential, chatId = '-100000000001', senderBase = 100000001 } = {}) => {
   for (let i = 0; i < count; i++) {
@@ -234,6 +263,89 @@ const publishForRecommendation = async f => {
   }
   return { periodId, revision: active.revision, closeInput }
 }
+
+const history = (f, token = f.tokens[0], bindingId = f.id) => f.request(
+  '/telegram/bindings/' + bindingId + '/history', undefined,
+  { Cookie: 'vibebot_session=' + token })
+
+test('HTTP/SQLite: seven-day history preserves real boundaries, hidden states, retention and restart', async t => {
+  const f = await fixture(t)
+  const active = await f.activate()
+  await f.setProfile()
+  const base = Date.parse('2026-11-02T03:00:00.000Z')
+  f.setTime(base)
+  assert.deepEqual((await history(f)).body.periods, [])
+  await sendMany(f, active.revision, 1, 1, 8100)
+  await closeCurrent(f, active.revision)
+  const insufficient = (await history(f)).body.periods[0]
+  assert.equal(insufficient.status, 'insufficient')
+  assert.equal(insufficient.period.start, new Date(base).toISOString())
+  assert.equal('metrics' in insufficient, false)
+  for (let day = 1; day <= 3; day++) {
+    f.setTime(base + day * DAY)
+    await sendMany(f, active.revision, 20, 5, 8200 + day * 100, 4)
+    await closeCurrent(f, active.revision)
+    if (day < 3) {
+      const periods = (await history(f)).body.periods
+      assert.equal(periods.at(-1).status, 'calibrating')
+      assert.equal(periods.some(row => 'metrics' in row), false)
+    }
+  }
+  const before = await history(f)
+  assert.equal(before.status, 200)
+  assert.equal(before.body.periods.length, 4)
+  assert.deepEqual(before.body.periods.at(-1), (await f.summary()).body)
+  await f.restart()
+  assert.deepEqual(await history(f), before)
+  // Open work does not replace the already closed history.
+  await sendMany(f, active.revision, 1, 1, 8700)
+  assert.equal((await history(f)).body.periods.length, 4)
+  f.setTime(base + 8 * DAY)
+  const expired = (await history(f)).body
+  assert.equal(expired.periods.length, 2)
+  assert.ok(expired.periods.every(row => row.status === 'calibrating' && !('metrics' in row)))
+  f.setTime(base + 10 * DAY)
+  assert.deepEqual((await history(f)).body.periods, [])
+})
+
+test('HTTP/SQLite: history enforces authentication, workspace, consent, profile and evidence gates', async t => {
+  const f = await fixture(t)
+  const { revision } = await publishForRecommendation(f)
+  error(await f.request('/telegram/bindings/' + f.id + '/history'), 401, 'SIGN_IN_REQUIRED')
+  error(await history(f, f.tokens[1]), 403, 'FORBIDDEN')
+  error(await history(f, f.foreignToken), 404, 'NOT_FOUND')
+  assert.deepEqual((await history(f, f.foreignToken, f.otherBindingId)).body.error.code, 'NOT_FOUND')
+  f.db.prepare('UPDATE telegram_bindings SET evidence_expires=? WHERE id=?').run(f.time(), f.id)
+  assert.equal((await history(f)).body.status, 'paused')
+  assert.deepEqual((await history(f)).body.periods, [])
+  f.db.prepare('UPDATE telegram_bindings SET evidence_expires=NULL WHERE id=?').run(f.id)
+  await f.profile({ requestId: randomUUID(), expectedVersion: 1, timeZone: 'UTC', intervals: demoIntervals })
+  assert.deepEqual((await history(f)).body.periods, [])
+  await sendMany(f, revision, 20, 5, 9100)
+  await closeCurrent(f, revision)
+  await f.decision(0, 'withdrawn')
+  assert.equal((await history(f)).body.status, 'paused')
+  assert.deepEqual((await history(f)).body.periods, [])
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_closed_periods WHERE binding_id=?').get(f.id).n, 0)
+})
+
+test('HTTP/SQLite: history is unavailable outside the synthetic gate', async t => {
+  const f = await fixture(t, { enabled: false })
+  error(await history(f), 503, 'UNAVAILABLE')
+})
+
+test('HTTP/SQLite: history hides paused and prior-revision periods and roster changes delete them', async t => {
+  const f = await fixture(t)
+  await publishForRecommendation(f)
+  await f.mutate('control', { action: 'pause' })
+  assert.equal((await history(f)).body.status, 'paused')
+  assert.deepEqual((await history(f)).body.periods, [])
+  await f.mutate('control', { action: 'resume' })
+  assert.deepEqual((await history(f)).body.periods, [])
+  await f.mutate('roster', { memberIds: f.people.map(person => person.id), verified: true })
+  assert.deepEqual((await history(f)).body.periods, [])
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_closed_periods WHERE binding_id=?').get(f.id).n, 0)
+})
 
 test('closing a published period notifies only the linked organizer and does not duplicate on replay', async t => {
   const sent = []
@@ -347,7 +459,7 @@ test('SQLite: adding Telegram tables preserves existing workspace, member and ch
   assert.equal(reopened.prepare('SELECT name FROM members WHERE id=?').get(memberId).name, 'Legacy member')
   assert.deepEqual({ ...reopened.prepare('SELECT energy,clarity,support FROM checkins WHERE round_id=?').get(roundId) },
     { energy: 2, clarity: 3, support: 4 })
-  assert.equal(reopened.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 25)
+  assertTelegramTables(reopened)
   reopened.close()
 })
 
@@ -1344,5 +1456,232 @@ test('Telegram synthetic gate defaults off and unfinished summary routes remain 
   error(await f.recommendation(randomUUID()), 503, 'UNAVAILABLE')
   error(await f.chatFeedback(randomUUID(), 'interpretation', undefined), 503, 'UNAVAILABLE')
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_requests').get().n, 0)
-  assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name LIKE 'telegram_%'").get().n, 25)
+  assertTelegramTables(f.db)
+})
+
+test('HTTP: bot submits an anonymous personal check-in and the Telegram id is not persisted', async t => {
+  const f = await fixture(t)
+  await f.activate()
+  const submittedAt = new Date(f.time()).toISOString()
+  const payload = {
+    telegramUserId: '100000001',
+    nonce: 'a1b2c3d4e5f60718',
+    scores: { energy: 4, clarity: 3, support: 5 },
+    submittedAt,
+  }
+  const ok = await f.bot('checkins', payload)
+  assert.equal(ok.status, 200)
+  assert.deepEqual(ok.body, { accepted: true, duplicate: false })
+  const row = f.db.prepare('SELECT * FROM telegram_checkins WHERE binding_id=? AND nonce=?').get(f.id, payload.nonce)
+  assert.deepEqual({ energy: row.energy, clarity: row.clarity, support: row.support },
+    { energy: 4, clarity: 3, support: 5 })
+  assert.ok(!JSON.stringify(row).includes('100000001'), 'telegram id must not be stored')
+
+  // Идемпотентный повтор той же отправки тем же участником.
+  const repeat = await f.bot('checkins', payload)
+  assert.equal(repeat.status, 200)
+  assert.deepEqual(repeat.body, { accepted: true, duplicate: true })
+
+  // Тот же nonce с другим содержимым отклоняется.
+  error(await f.bot('checkins', { ...payload, scores: { energy: 1, clarity: 1, support: 1 } }), 409, 'EVENT_CONFLICT')
+
+  // Другой nonce от другого связанного участника принимается.
+  const second = await f.bot('checkins', { ...payload, telegramUserId: '100000002', nonce: 'b2c3d4e5f6071819' })
+  assert.equal(second.status, 200)
+
+  // Несвязанный пользователь отклоняется и не попадает в таблицу.
+  error(await f.bot('checkins', { ...payload, telegramUserId: '999999999', nonce: 'c3d4e5f607181920' }), 403, 'FORBIDDEN')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_checkins WHERE binding_id=?').get(f.id).n, 2)
+
+  // Некорректные оценки и неверные поля отклоняются.
+  error(await f.bot('checkins', { ...payload, scores: { energy: 0, clarity: 3, support: 5 }, nonce: 'd4e5f60718192021' }), 400, 'INVALID_INPUT')
+  error(await f.bot('checkins', { ...payload, nonce: 'short' }), 400, 'INVALID_INPUT')
+
+  // Блокировка чата запрещает приём.
+  await f.bot('pause', f.command((await f.status()).revision, { reason: 'manual' }))
+  error(await f.bot('checkins', { ...payload, nonce: 'e5f6071819202122' }), 409, 'CONSENT_REQUIRED')
+})
+
+const transcriptionPolicyVersion = 'synthetic-transcription-v1'
+
+// Seeds a binding already fully consented under synthetic-transcription-v1 and
+// activates it, mirroring activate() but for the transcription policy version.
+async function activateTranscription(f) {
+  const bindingId = f.id, chatId = '-100000000001'
+  const state = transitionConsent(initialConsentState(), { type: 'bind', policyVersion: transcriptionPolicyVersion }, 0)
+  f.db.prepare('UPDATE telegram_bindings SET state=? WHERE id=?').run(JSON.stringify(state), bindingId)
+  const current = await f.status()
+  await f.mutate('roster', { memberIds: f.people.map(person => person.id), verified: true })
+  await f.mutate('company', { accepted: true, authorityConfirmed: true, policyVersion: transcriptionPolicyVersion })
+  for (let i = 0; i < f.people.length; i++) {
+    await f.bot('consents', f.command((await f.status()).revision, {
+      telegramUserId: String(100000001 + i), policyVersion: transcriptionPolicyVersion,
+      rosterVersion: (await f.status()).rosterVersion, decision: 'accepted' }))
+  }
+  const active = await f.mutate('control', { action: 'resume' })
+  assert.equal(active.body.phase, 'active')
+  return active.body
+}
+
+const transcriptionJob = (f, revision, fields = {}) => ({
+  requestId: randomUUID(), expectedRevision: revision, chatId: '-100000000001',
+  mediaMessageId: '90000001', senderId: '100000001',
+  sentAt: new Date(f.time()).toISOString(), ...fields })
+
+test('HTTP/SQLite: transcription requires the dedicated policy version and full consent', async t => {
+  const f = await fixture(t)
+  // Active under synthetic-v1 must NOT admit transcription jobs.
+  const active = await f.activate()
+  error(await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, active.revision), { Authorization: 'Bearer ' + credential }),
+    409, 'CONSENT_REQUIRED')
+  // Before any consent at all, same policy gate plus consent gate.
+  const fresh = await fixture(t)
+  error(await fresh.request('/bot/v1/bindings/' + fresh.id + '/transcription-jobs',
+    transcriptionJob(fresh, (await fresh.status()).revision), { Authorization: 'Bearer ' + credential }),
+    409, 'CONSENT_REQUIRED')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_jobs').get().n, 0)
+})
+
+test('HTTP/SQLite: transcription job and result deduplicate across keys and conflict on change', async t => {
+  const f = await fixture(t)
+  const active = await activateTranscription(f)
+  const input = transcriptionJob(f, active.revision)
+  const created = await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs', input,
+    { Authorization: 'Bearer ' + credential })
+  assert.equal(created.status, 200)
+  assert.equal(created.body.status, 'queued')
+  assert.match(created.body.jobId, /^[0-9a-f-]{36}$/)
+  assert.equal(created.body.revision, active.revision)
+  // Replay the same requestId returns the same job without a second row.
+  const replay = await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs', input,
+    { Authorization: 'Bearer ' + credential })
+  assert.deepEqual(replay, created)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_jobs').get().n, 1)
+  // A different requestId with the same mediaMessageId resolves to the same job.
+  const sameMedia = await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, active.revision, { mediaMessageId: input.mediaMessageId, requestId: randomUUID() }),
+    { Authorization: 'Bearer ' + credential })
+  assert.equal(sameMedia.body.jobId, created.body.jobId)
+  // Changed body with the same requestId conflicts.
+  error(await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    { ...input, senderId: '100000002' }, { Authorization: 'Bearer ' + credential }), 409, 'EVENT_CONFLICT')
+  // Same mediaMessageId with different content conflicts.
+  error(await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, active.revision, { mediaMessageId: input.mediaMessageId, senderId: '100000002' }),
+    { Authorization: 'Bearer ' + credential }), 409, 'EVENT_CONFLICT')
+
+  // Submit the transcript.
+  const submit = { requestId: randomUUID(), expectedRevision: active.revision, jobId: created.body.jobId,
+    text: 'Спасибо за помощь с расшифровкой.', sentAt: new Date(f.time()).toISOString() }
+  const result = await f.request('/bot/v1/bindings/' + f.id + '/transcriptions', submit,
+    { Authorization: 'Bearer ' + credential })
+  assert.equal(result.status, 200)
+  assert.deepEqual(result.body, { jobId: created.body.jobId, result: 'accepted', revision: active.revision })
+  // Status reflects accepted.
+  const status = await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs/' + created.body.jobId,
+    undefined, { Authorization: 'Bearer ' + credential })
+  assert.deepEqual(status.body, { jobId: created.body.jobId, status: 'accepted', revision: active.revision })
+  // Replay the same requestId returns the original accepted result without a new text row.
+  const replayResult = await f.request('/bot/v1/bindings/' + f.id + '/transcriptions', submit,
+    { Authorization: 'Bearer ' + credential })
+  assert.deepEqual(replayResult.body, { jobId: created.body.jobId, result: 'accepted', revision: active.revision })
+  // A different requestId for an already-accepted job returns duplicate.
+  const duplicateSubmit = await f.request('/bot/v1/bindings/' + f.id + '/transcriptions',
+    { ...submit, requestId: randomUUID() }, { Authorization: 'Bearer ' + credential })
+  assert.deepEqual(duplicateSubmit.body, { jobId: created.body.jobId, result: 'duplicate', revision: active.revision })
+  // Changed text for the same job conflicts.
+  error(await f.request('/bot/v1/bindings/' + f.id + '/transcriptions',
+    { ...submit, text: 'Другой текст' }, { Authorization: 'Bearer ' + credential }), 409, 'EVENT_CONFLICT')
+  // Unknown job returns 404.
+  error(await f.request('/bot/v1/bindings/' + f.id + '/transcriptions',
+    { ...submit, requestId: randomUUID(), jobId: randomUUID() }, { Authorization: 'Bearer ' + credential }), 404, 'NOT_FOUND')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_texts').get().n, 1)
+})
+
+test('HTTP/SQLite: transcription gates revision, freshness, schema and bot scope', async t => {
+  const f = await fixture(t)
+  const active = await activateTranscription(f)
+  const post = (path, input, bindingId = f.id) => f.request(path, input, { Authorization: 'Bearer ' + credential })
+  // Stale revision.
+  error(await post('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, active.revision - 1)), 409, 'STALE_REVISION')
+  // Freshness window.
+  error(await post('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, active.revision, { sentAt: new Date(f.time() - 60001).toISOString() })), 400, 'INVALID_INPUT')
+  error(await post('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, active.revision, { sentAt: new Date(f.time() + 30001).toISOString() })), 400, 'INVALID_INPUT')
+  // Unknown extra fields rejected.
+  error(await post('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    { ...transcriptionJob(f, active.revision), workspaceId: f.owner.workspace_id }), 400, 'INVALID_INPUT')
+  // Foreign binding / bootstrap credential.
+  error(await post('/bot/v1/bindings/' + f.otherBindingId + '/transcription-jobs',
+    transcriptionJob(f, active.revision)), 404, 'NOT_FOUND')
+  error(await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, active.revision), { Authorization: 'Bearer ' + bootstrapCredential }), 401, 'BOT_AUTH_REQUIRED')
+  // Wrong chat.
+  error(await post('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, active.revision, { chatId: '-100000000002' })), 404, 'NOT_FOUND')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_jobs').get().n, 0)
+})
+
+test('HTTP/SQLite: unknown sender pauses the chat and rejects transcription text without storing', async t => {
+  const f = await fixture(t)
+  const active = await activateTranscription(f)
+  const input = transcriptionJob(f, active.revision, { senderId: '999999999' })
+  const result = await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs', input,
+    { Authorization: 'Bearer ' + credential })
+  assert.equal(result.status, 200)
+  assert.equal(result.body.result, 'paused')
+  assert.equal(result.body.revision, active.revision + 1)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_jobs').get().n, 0)
+})
+
+test('HTTP/SQLite: transcript text expires after 15 minutes and dedup survives to 24h', async t => {
+  const f = await fixture(t)
+  const active = await activateTranscription(f)
+  const created = await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, active.revision), { Authorization: 'Bearer ' + credential })
+  const jobId = created.body.jobId
+  const submit = { requestId: randomUUID(), expectedRevision: active.revision, jobId,
+    text: 'Временный текст расшифровки.', sentAt: new Date(f.time()).toISOString() }
+  assert.equal((await f.request('/bot/v1/bindings/' + f.id + '/transcriptions', submit,
+    { Authorization: 'Bearer ' + credential })).body.result, 'accepted')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_texts').get().n, 1)
+  f.advance(900001)
+  await f.restart()
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_texts').get().n, 0)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_jobs').get().n, 1)
+  f.advance(86400000)
+  await f.restart()
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_jobs').get().n, 0)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_requests').get().n, 0)
+})
+
+test('HTTP/SQLite: consent withdrawal clears transcription text and blocks new jobs', async t => {
+  const f = await fixture(t)
+  const active = await activateTranscription(f)
+  const created = await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, active.revision), { Authorization: 'Bearer ' + credential })
+  const submit = { requestId: randomUUID(), expectedRevision: active.revision, jobId: created.body.jobId,
+    text: 'Расшифровка до отзыва.', sentAt: new Date(f.time()).toISOString() }
+  assert.equal((await f.request('/bot/v1/bindings/' + f.id + '/transcriptions', submit,
+    { Authorization: 'Bearer ' + credential })).body.result, 'accepted')
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_texts').get().n, 1)
+  assert.equal((await f.decision(0, 'withdrawn')).status, 200)
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_transcription_texts').get().n, 0)
+  error(await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, (await f.status()).revision), { Authorization: 'Bearer ' + credential }),
+    409, 'CONSENT_REQUIRED')
+})
+
+test('HTTP/SQLite: transcription routes are absent when the synthetic gate is off', async t => {
+  const f = await fixture(t, { enabled: false })
+  error(await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs',
+    transcriptionJob(f, 0), { Authorization: 'Bearer ' + credential }), 503, 'UNAVAILABLE')
+  error(await f.request('/bot/v1/bindings/' + f.id + '/transcriptions',
+    { requestId: randomUUID(), expectedRevision: 0, jobId: randomUUID(), text: 'x', sentAt: new Date().toISOString() },
+    { Authorization: 'Bearer ' + credential }), 503, 'UNAVAILABLE')
+  error(await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs/' + randomUUID(),
+    undefined, { Authorization: 'Bearer ' + credential }), 503, 'UNAVAILABLE')
 })

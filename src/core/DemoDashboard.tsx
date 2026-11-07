@@ -57,6 +57,7 @@ export function DemoDashboard({ onBack, onEnter, onCreateTeam }: DemoDashboardPr
             observation="В этом вымышленном периоде 25% сообщений команды пришлись на время вне рабочего расписания."
             explanation="Возможно, участникам не всегда ясно, когда ответ можно отложить до следующего рабочего дня."
             limitation="Пример не описывает реальную команду и не позволяет делать выводы о нагрузке отдельных людей."
+            metrics={demoMetrics}
             suggestedAction="Договориться, какие сообщения действительно требуют ответа вечером, а какие могут подождать до утра."
             dataSource="chat"
             generationSource="template"

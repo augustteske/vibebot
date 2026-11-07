@@ -1,98 +1,99 @@
-import { useEffect, useState } from 'react'
-import { api } from './client'
+import { useCallback, useEffect, useState } from 'react'
+import { ApiError, api } from './client'
 import type { CommunicationRecommendation, CommunicationView } from './telegram'
 import { ActionRecommendationCard } from '../features/actions/ActionRecommendationCard'
-import { InsightsWidget } from '../features/insights/InsightsWidget'
+import { TeamPulse } from '../features/insights/TeamPulse'
+import { RequestError } from './RequestError'
 import './SummaryPanels.css'
 
-type TelegramSummaryResponse = {
-  view: CommunicationView
-  recommendation: CommunicationRecommendation | null
-}
+const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+const periodFormatter = new Intl.DateTimeFormat('ru-RU', {
+  day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: browserTimeZone,
+})
+const periodLabel = (view: { period: { start: string; end: string } }) =>
+  `${periodFormatter.format(new Date(view.period.start))} — ${periodFormatter.format(new Date(view.period.end))} (${browserTimeZone})`
 
-const periodLabel = (view: Extract<CommunicationView, { status: 'published' }>) => {
-  const format = (date: string) => new Date(date).toLocaleString('ru-RU', {
-    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Omsk',
-  })
-  return `${format(view.period.start)} — ${format(view.period.end)}`
-}
-
-export function SummaryPanels() {
-  const [result, setResult] = useState<TelegramSummaryResponse | null>(null)
-  const [error, setError] = useState('')
+export function SummaryPanels({ onLogin, refreshKey = 0 }: { onLogin?: () => void; refreshKey?: number }) {
+  const [view, setView] = useState<CommunicationView | null>(null)
+  const [bindingId, setBindingId] = useState<string | null>(null)
+  const [recommendation, setRecommendation] = useState<CommunicationRecommendation | null>(null)
+  const [error, setError] = useState<unknown>(null)
+  const [recommendationError, setRecommendationError] = useState<unknown>(null)
   const [loading, setLoading] = useState(true)
+  const [retryingSummary, setRetryingSummary] = useState(false)
+  const [recommendationLoading, setRecommendationLoading] = useState(false)
   const [attempt, setAttempt] = useState(0)
+  const [recommendationAttempt, setRecommendationAttempt] = useState(0)
+  const historyUnavailable = useCallback((next: CommunicationView | null, failure?: unknown) => {
+    setView(next)
+    setRecommendation(null)
+    setBindingId(null)
+    if (failure) setError(failure)
+  }, [])
 
   useEffect(() => {
     let active = true
-    void api<CommunicationView>('/telegram/summary').then(async view => ({
-      view,
-      recommendation: view.status === 'published'
-        ? await api<CommunicationRecommendation>('/telegram/recommendation?periodId=' + encodeURIComponent(view.period.id))
-        : null,
-    })).then(
-      response => { if (active) setResult(response) },
-      failure => { if (active) setError(failure instanceof Error ? failure.message : 'Не удалось загрузить результаты') },
-    ).finally(() => { if (active) setLoading(false) })
+    void api<{ bindingId: string | null; view: CommunicationView }>('/telegram/summary?includeBinding=1').then(
+      result => {
+        if (!active) return
+        // Keep the same reference when nothing changed, so the weekly history is not reset on every refresh.
+        setView(previous => previous && JSON.stringify(previous) === JSON.stringify(result.view) ? previous : result.view)
+        setBindingId(result.bindingId)
+        setError(null)
+      },
+      failure => { if (active) { setView(null); setBindingId(null); setError(failure) } },
+    ).finally(() => { if (active) { setLoading(false); setRetryingSummary(false) } })
     return () => { active = false }
-  }, [attempt])
+  }, [attempt, refreshKey])
 
-  if (loading) return <section className="panel"><p role="status">Загружаем аналитику чата…</p></section>
-  if (error) return <section className="panel" aria-labelledby="telegram-summary-error-title">
-    <h2 id="telegram-summary-error-title">Не удалось загрузить аналитику чата</h2>
-    <p className="error" role="alert">{error}</p>
-    <button className="button secondary" onClick={() => {
-      setLoading(true)
-      setError('')
-      setResult(null)
-      setAttempt(value => value + 1)
-    }}>Повторить</button>
-  </section>
-  if (!result) return null
+  useEffect(() => {
+    if (view?.status !== 'published') { setRecommendation(null); setRecommendationError(null); return }
+    let active = true
+    setRecommendation(null)
+    setRecommendationError(null)
+    setRecommendationLoading(true)
+    void api<CommunicationRecommendation>('/telegram/recommendation?periodId=' + encodeURIComponent(view.period.id)).then(
+      result => { if (active) setRecommendation(result) },
+      failure => { if (active) setRecommendationError(failure) },
+    ).finally(() => { if (active) setRecommendationLoading(false) })
+    return () => { active = false }
+  }, [view?.status === 'published' ? view.period.id : '', recommendationAttempt])
 
-  const { view, recommendation } = result
-  if (view.status === 'disconnected' || view.status === 'paused') {
-    return <section className="panel telegram-summary-state"><h2>Нет активной привязки</h2></section>
-  }
-  if (view.status === 'calibrating' || view.status === 'insufficient') {
-    return <section className="telegram-summary-state telegram-summary-state--calibrating">
-      <h2>Идет калибровка</h2>
-      <p>Показатели появятся, когда накопится достаточно данных.</p>
-    </section>
-  }
-  if (view.status === 'awaiting_consents') {
-    return <section className="panel telegram-summary-state"><h2>Ожидается согласие участников</h2></section>
-  }
-  if (view.status === 'open') {
-    return <section className="panel telegram-summary-state"><h2>Период еще собирается</h2></section>
-  }
-  if (view.status === 'error') {
-    return <section className="panel telegram-summary-state" role="alert"><h2>Анализ чата временно недоступен</h2></section>
-  }
-  if (view.status !== 'published') return null
-  const metrics = {
-    outsideHoursPercent: view.metrics.outsideHoursPercent,
-    participationEvenness: view.metrics.participationEvenness,
-    recognitionPercent: view.metrics.recognitionPercent,
-  }
-  if (!recommendation) {
-    return <section className="panel telegram-summary-state" role="alert">
-      <h2>Рекомендация для периода недоступна</h2>
-      <InsightsWidget state="published" metrics={metrics} periodLabel={periodLabel(view)} demo={view.demo}/>
+  if (error instanceof ApiError && error.code === 'UNAVAILABLE') {
+    return <section className="panel telegram-summary-state">
+      <p role="status">Telegram-модуль не подключён. Аналитика станет доступна после интеграции.</p>
     </section>
   }
 
   return <div className="telegram-summary">
-    <InsightsWidget state="published" metrics={metrics} periodLabel={periodLabel(view)} demo={view.demo}/>
+    <TeamPulse bindingId={bindingId} onHistoryUnavailable={historyUnavailable} view={view} loading={loading} error={error} onLogin={onLogin} retrying={retryingSummary} onRetry={() => {
+      setLoading(true)
+      setRetryingSummary(true)
+      setError(null)
+      setView(null)
+      setBindingId(null)
+      setAttempt(value => value + 1)
+    }}/>
+    {view?.status === 'published' && recommendationLoading && <p role="status">Загружаем рекомендацию…</p>}
+    {view?.status === 'published' && !!recommendationError && <RequestError error={recommendationError} action="Просматривать рекомендацию может только организатор." onLogin={onLogin} onRetry={() => {
+      setRecommendationError(null)
+      setRecommendationLoading(true)
+      setRecommendationAttempt(value => value + 1)
+    }} retrying={recommendationLoading}/>}
+    {view?.status === 'published' && recommendation &&
     <ActionRecommendationCard
       observation={recommendation.observation}
       explanation={recommendation.explanation}
       limitation={recommendation.limitation}
+      metrics={{
+        outsideHoursPercent: view.metrics.outsideHoursPercent,
+        participationEvenness: view.metrics.participationEvenness,
+      }}
       suggestedAction={recommendation.action}
       dataSource={recommendation.dataSource}
       generationSource={recommendation.source}
       periodLabel={periodLabel(view)}
       demo={recommendation.demo ?? false}
-    />
+    />}
   </div>
 }

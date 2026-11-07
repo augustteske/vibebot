@@ -53,10 +53,91 @@
   box-shadow: 0 8px 24px rgba(23, 23, 25, .045);
 }
 
+.iw-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
 .iw-card h3 {
-  margin: 0 0 10px 0;
+  margin: 0;
   font-size: 1rem;
 }
+
+.iw-info {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  margin-top: -2px;
+}
+
+.iw-info__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--vibee-line);
+  border-radius: 999px;
+  background: #fffefa;
+  color: var(--vibee-muted);
+  font: inherit;
+  font-size: .72rem;
+  font-weight: 800;
+  font-style: italic;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color .18s ease, border-color .18s ease, color .18s ease, transform .18s ease;
+}
+
+.iw-info__button:hover,
+.iw-info__button[aria-expanded='true'] {
+  border-color: #e4bb16;
+  background: var(--vibee-yellow-soft);
+  color: var(--vibee-ink);
+}
+
+.iw-info__button:active { transform: scale(.92); }
+.iw-info__button:focus-visible { outline: 3px solid #806013; outline-offset: 2px; }
+
+.iw-info__tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 6px;
+  width: max-content;
+  max-width: min(280px, calc(100vw - 48px));
+  padding: 12px 14px;
+  border: 1px solid var(--vibee-line);
+  border-top: 3px solid var(--vibee-yellow);
+  border-radius: 14px;
+  background: #fff;
+  color: var(--vibee-muted);
+  font-size: .8rem;
+  line-height: 1.45;
+  text-align: left;
+  box-shadow: var(--vibee-shadow-card);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity .18s ease, transform .18s ease, visibility .18s;
+}
+
+.iw-info__tooltip--open {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+}
+
+.iw-info__tooltip strong { color: var(--vibee-ink); font-size: .82rem; }
+.iw-info__tooltip b { color: var(--vibee-ink); font-weight: 700; }
+.iw-info__note { color: var(--vibee-muted); font-style: italic; }
 
 .iw-chart {
   width: 100%;
@@ -90,12 +171,6 @@
   font-weight: 800;
   margin: 0 0 10px 0;
   color: var(--vibee-ink);
-}
-
-.iw-method {
-  font-size: 0.8rem;
-  color: #555;
-  margin: 0;
 }
 
 .iw-hint {

@@ -6,6 +6,7 @@ const DAY = 86400000
 const LINK_TTL = 600000
 const TEXT_TTL = 900000
 const MEDIA_POLICY_VERSION = 'synthetic-media-v1'
+const TRANSCRIPTION_POLICY_VERSION = 'synthetic-transcription-v1'
 const CLOSED_TTL = 7 * DAY
 const MAX_INTERVALS = 70
 const uuid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
@@ -111,6 +112,14 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
       actor_key TEXT NOT NULL, request_id TEXT NOT NULL, digest TEXT NOT NULL,
       response TEXT NOT NULL, expires INTEGER NOT NULL, PRIMARY KEY(actor_key,request_id)
     );
+    CREATE TABLE IF NOT EXISTS telegram_checkins(
+      binding_id TEXT NOT NULL REFERENCES telegram_bindings(id), nonce TEXT NOT NULL,
+      digest TEXT NOT NULL, energy INTEGER NOT NULL CHECK(energy BETWEEN 1 AND 5),
+      clarity INTEGER NOT NULL CHECK(clarity BETWEEN 1 AND 5),
+      support INTEGER NOT NULL CHECK(support BETWEEN 1 AND 5),
+      created_at INTEGER NOT NULL, expires INTEGER NOT NULL,
+      PRIMARY KEY(binding_id,nonce)
+    );
     CREATE TABLE IF NOT EXISTS telegram_event_ids(
       binding_id TEXT NOT NULL REFERENCES telegram_bindings(id), event_id TEXT NOT NULL,
       digest TEXT NOT NULL, expires INTEGER NOT NULL, PRIMARY KEY(binding_id,event_id)
@@ -202,6 +211,25 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
       expires INTEGER NOT NULL,
       PRIMARY KEY(binding_id,period_id,kind,member_id,request_id)
     );
+    CREATE TABLE IF NOT EXISTS telegram_transcription_jobs(
+      binding_id TEXT NOT NULL REFERENCES telegram_bindings(id), job_id TEXT NOT NULL,
+      chat_id TEXT NOT NULL, media_message_id TEXT NOT NULL, sender_id TEXT NOT NULL,
+      sent_at TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('queued','accepted')),
+      digest TEXT NOT NULL, expires INTEGER NOT NULL,
+      PRIMARY KEY(binding_id,job_id)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS telegram_transcription_media
+      ON telegram_transcription_jobs(binding_id,chat_id,media_message_id);
+    CREATE TABLE IF NOT EXISTS telegram_transcription_texts(
+      binding_id TEXT NOT NULL REFERENCES telegram_bindings(id), job_id TEXT NOT NULL,
+      text TEXT NOT NULL, expires INTEGER NOT NULL,
+      PRIMARY KEY(binding_id,job_id)
+    );
+    CREATE TABLE IF NOT EXISTS telegram_transcription_requests(
+      binding_id TEXT NOT NULL REFERENCES telegram_bindings(id), request_id TEXT NOT NULL,
+      digest TEXT NOT NULL, response TEXT NOT NULL, expires INTEGER NOT NULL,
+      PRIMARY KEY(binding_id,request_id)
+    );
   `)
   db.exec('BEGIN IMMEDIATE')
   try {
@@ -231,6 +259,7 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
   const purgeText = bindingId => {
     run('DELETE FROM telegram_texts WHERE binding_id=?', bindingId)
     run('DELETE FROM telegram_media_observations WHERE binding_id=?', bindingId)
+    run('DELETE FROM telegram_transcription_texts WHERE binding_id=?', bindingId)
   }
   const clearOpenPeriod = bindingId => {
     run('DELETE FROM telegram_period_authors WHERE binding_id=?', bindingId)
@@ -346,6 +375,7 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
     run('DELETE FROM telegram_binding_tokens WHERE expires<=?', time - DAY)
     run('DELETE FROM telegram_binding_requests WHERE expires<=?', time)
     run('DELETE FROM telegram_identity_requests WHERE expires<=?', time)
+    run('DELETE FROM telegram_checkins WHERE expires<=?', time)
     run('DELETE FROM telegram_texts WHERE expires<=?', time)
     run('DELETE FROM telegram_media_observations WHERE expires<=?', time)
     run('DELETE FROM telegram_event_ids WHERE expires<=?', time)
@@ -358,6 +388,9 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
     run('DELETE FROM telegram_feedback_requests WHERE expires<=?', time)
     run('DELETE FROM telegram_close_requests WHERE expires<=?', time)
     run('DELETE FROM telegram_profile_requests WHERE expires<=?', time)
+    run('DELETE FROM telegram_transcription_texts WHERE expires<=?', time)
+    run('DELETE FROM telegram_transcription_requests WHERE expires<=?', time)
+    run('DELETE FROM telegram_transcription_jobs WHERE expires<=?', time)
     for (const open of db.prepare('SELECT binding_id FROM telegram_open_periods WHERE opened_at<=?').all(time - DAY)) clearOpenPeriod(open.binding_id)
     for (const binding of db.prepare('SELECT * FROM telegram_bindings WHERE evidence_expires<=?').all(time)) expireBinding(binding)
   })
@@ -616,6 +649,39 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
         return { subscribed: true }
       })
     },
+    acceptCheckin(actor, id, input) {
+      unavailable()
+      // Анонимный личный чек-ин: telegramUserId служит только для проверки,
+      // что участник находится в привязке (ростере), и НЕ сохраняется в БД.
+      if (!input || Array.isArray(input) || typeof input !== 'object'
+        || Object.keys(input).length !== 4 || !telegramId(input.telegramUserId)
+        || !/^[a-f0-9]{16}$/.test(input.nonce) || !utcTime(input.submittedAt)
+        || !input.scores || Array.isArray(input.scores)
+        || Object.keys(input.scores).length !== 3
+        || Object.keys(input.scores).some(key => !['energy', 'clarity', 'support'].includes(key))
+        || Object.values(input.scores).some(value => !Number.isSafeInteger(value) || value < 1 || value > 5)) invalid()
+      return tx(() => {
+        const binding = bindingFor(actor, id)
+        if (actor.kind !== 'bot') fail(403, 'FORBIDDEN', 'Нужен scoped credential бота')
+        const state = JSON.parse(binding.state)
+        if (!canProcessChat(state)) fail(409, 'CONSENT_REQUIRED', 'Чат не активен')
+        const age = now() - Date.parse(input.submittedAt)
+        if (age > 60000 || age < -30000) fail(400, 'INVALID_INPUT', 'Событие вне допустимого окна')
+        const member = one('SELECT member_id FROM telegram_links WHERE binding_id=? AND workspace_id=? AND telegram_user_id=?',
+          id, actor.workspace_id, input.telegramUserId)?.member_id
+        if (!member) fail(403, 'FORBIDDEN', 'Участник не связан с этой командой')
+        // Идемпотентность: digest включает telegramUserId, поэтому повторная отправка
+        // тем же участником с тем же nonce распознаётся, а подмена — отклоняется.
+        const contentDigest = digest(canonical({ nonce: input.nonce, scores: input.scores, telegramUserId: input.telegramUserId }))
+        const seen = one('SELECT digest FROM telegram_checkins WHERE binding_id=? AND nonce=?', id, input.nonce)
+        if (seen && seen.digest !== contentDigest) fail(409, 'EVENT_CONFLICT', 'Чек-ин уже использован с другим содержимым')
+        if (seen) return { accepted: true, duplicate: true }
+        run('INSERT INTO telegram_checkins(binding_id,nonce,digest,energy,clarity,support,created_at,expires) VALUES(?,?,?,?,?,?,?,?)',
+          id, input.nonce, contentDigest, input.scores.energy, input.scores.clarity, input.scores.support,
+          now(), now() + 30 * DAY)
+        return { accepted: true, duplicate: false }
+      })
+    },
     claimOrganizerNotification(actor, id, periodId) {
       unavailable()
       return tx(() => {
@@ -771,6 +837,122 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
         return { eventId: input.eventId, result: 'accepted', revision: state.revision }
       })
     },
+    createTranscriptionJob(actor, id, input) {
+      unavailable()
+      if (!input || Array.isArray(input) || typeof input !== 'object'
+        || Object.keys(input).length !== 6 || !uuid(input.requestId) || !revision(input.expectedRevision)
+        || !chatId(input.chatId) || !messageId(input.mediaMessageId) || !telegramId(input.senderId)
+        || !utcTime(input.sentAt)) invalid()
+      return tx(() => {
+        const binding = bindingFor(actor, id)
+        if (actor.kind !== 'bot') fail(403, 'FORBIDDEN', 'Нужен scoped credential бота')
+        if (binding.chat_id !== input.chatId) fail(404, 'NOT_FOUND', 'Чат не найден')
+        const state = JSON.parse(binding.state)
+        if (input.expectedRevision !== state.revision) fail(409, 'STALE_REVISION', 'Версия изменилась')
+        if (state.policyVersion !== TRANSCRIPTION_POLICY_VERSION || !canProcessChat(state)
+          || (binding.evidence_expires !== null && binding.evidence_expires <= now())) {
+          fail(409, 'CONSENT_REQUIRED', 'Для расшифровки нужно актуальное полное согласие')
+        }
+        const age = now() - Date.parse(input.sentAt)
+        if (age > 60000 || age < -30000) fail(400, 'INVALID_INPUT', 'Событие вне допустимого окна')
+        const member = one('SELECT member_id FROM telegram_links WHERE binding_id=? AND workspace_id=? AND telegram_user_id=?',
+          id, actor.workspace_id, input.senderId)?.member_id
+        if (!member || !state.roster.includes(member) || state.decisions[member] !== 'accepted') {
+          const paused = transitionConsent(state, { type: 'unknown_member' }, state.revision)
+          run('UPDATE telegram_bindings SET state=?,evidence_expires=NULL WHERE id=?', JSON.stringify(paused), id)
+          purgeText(id)
+          clearDerived(id)
+          return { result: 'paused', revision: paused.revision }
+        }
+        const requestDigest = digest(canonical({ operation: 'transcriptionJob', input }))
+        const previous = one('SELECT * FROM telegram_transcription_requests WHERE binding_id=? AND request_id=?',
+          id, input.requestId)
+        if (previous) {
+          if (previous.digest !== requestDigest) fail(409, 'EVENT_CONFLICT', 'Идентификатор запроса уже использован')
+          return JSON.parse(previous.response)
+        }
+        const contentDigest = digest(canonical({ chatId: input.chatId, mediaMessageId: input.mediaMessageId,
+          senderId: input.senderId, sentAt: input.sentAt }))
+        const existing = one('SELECT * FROM telegram_transcription_jobs WHERE binding_id=? AND chat_id=? AND media_message_id=?',
+          id, input.chatId, input.mediaMessageId)
+        if (existing && existing.digest !== contentDigest) {
+          fail(409, 'EVENT_CONFLICT', 'Голосовое уже использовано с другим содержимым')
+        }
+        if (existing) {
+          const response = { jobId: existing.job_id, status: existing.status, revision: state.revision }
+          run('INSERT INTO telegram_transcription_requests VALUES(?,?,?,?,?)', id, input.requestId,
+            requestDigest, JSON.stringify(response), now() + DAY)
+          return response
+        }
+        const jobId = randomUUID()
+        run('INSERT INTO telegram_transcription_jobs VALUES(?,?,?,?,?,?,?,?,?)', id, jobId,
+          input.chatId, input.mediaMessageId, input.senderId, input.sentAt, 'queued', contentDigest, now() + DAY)
+        const response = { jobId, status: 'queued', revision: state.revision }
+        run('INSERT INTO telegram_transcription_requests VALUES(?,?,?,?,?)', id, input.requestId,
+          requestDigest, JSON.stringify(response), now() + DAY)
+        return response
+      })
+    },
+    submitTranscription(actor, id, input) {
+      unavailable()
+      if (!input || Array.isArray(input) || typeof input !== 'object'
+        || Object.keys(input).length !== 5 || !uuid(input.requestId) || !revision(input.expectedRevision)
+        || !uuid(input.jobId) || typeof input.text !== 'string'
+        || !input.text.trim() || Array.from(input.text).length > 4096
+        || !utcTime(input.sentAt)) invalid()
+      return tx(() => {
+        const binding = bindingFor(actor, id)
+        if (actor.kind !== 'bot') fail(403, 'FORBIDDEN', 'Нужен scoped credential бота')
+        const state = JSON.parse(binding.state)
+        if (input.expectedRevision !== state.revision) fail(409, 'STALE_REVISION', 'Версия изменилась')
+        if (state.policyVersion !== TRANSCRIPTION_POLICY_VERSION || !canProcessChat(state)
+          || (binding.evidence_expires !== null && binding.evidence_expires <= now())) {
+          fail(409, 'CONSENT_REQUIRED', 'Для расшифровки нужно актуальное полное согласие')
+        }
+        const age = now() - Date.parse(input.sentAt)
+        if (age > 60000 || age < -30000) fail(400, 'INVALID_INPUT', 'Событие вне допустимого окна')
+        const requestDigest = digest(canonical({ operation: 'transcription', input }))
+        const previous = one('SELECT * FROM telegram_transcription_requests WHERE binding_id=? AND request_id=?',
+          id, input.requestId)
+        if (previous) {
+          if (previous.digest !== requestDigest) fail(409, 'EVENT_CONFLICT', 'Идентификатор запроса уже использован')
+          return JSON.parse(previous.response)
+        }
+        const job = one('SELECT * FROM telegram_transcription_jobs WHERE binding_id=? AND job_id=?', id, input.jobId)
+        if (!job) fail(404, 'NOT_FOUND', 'Задача расшифровки не найдена')
+        const contentDigest = digest(canonical({ jobId: input.jobId, text: input.text }))
+        if (job.digest !== contentDigest && job.status === 'accepted') {
+          fail(409, 'EVENT_CONFLICT', 'Задача уже использована с другим текстом')
+        }
+        if (job.status === 'accepted') {
+          const response = { jobId: input.jobId, result: 'duplicate', revision: state.revision }
+          run('INSERT INTO telegram_transcription_requests VALUES(?,?,?,?,?)', id, input.requestId,
+            requestDigest, JSON.stringify(response), now() + DAY)
+          return response
+        }
+        run('UPDATE telegram_transcription_jobs SET status=?,digest=?,expires=? WHERE binding_id=? AND job_id=?',
+          'accepted', contentDigest, now() + DAY, id, input.jobId)
+        run('INSERT INTO telegram_transcription_texts VALUES(?,?,?,?) ON CONFLICT(binding_id,job_id) DO UPDATE SET text=excluded.text,expires=excluded.expires',
+          id, input.jobId, input.text, now() + TEXT_TTL)
+        const response = { jobId: input.jobId, result: 'accepted', revision: state.revision }
+        run('INSERT INTO telegram_transcription_requests VALUES(?,?,?,?,?)', id, input.requestId,
+          requestDigest, JSON.stringify(response), now() + DAY)
+        return response
+      })
+    },
+    transcriptionJobStatus(actor, id, jobId) {
+      unavailable()
+      if (!uuid(jobId)) invalid()
+      return tx(() => {
+        const binding = bindingFor(actor, id)
+        if (actor.kind !== 'bot') fail(403, 'FORBIDDEN', 'Нужен scoped credential бота')
+        const state = JSON.parse(binding.state)
+        const job = one('SELECT * FROM telegram_transcription_jobs WHERE binding_id=? AND job_id=?', id, jobId)
+        if (!job) fail(404, 'NOT_FOUND', 'Задача расшифровки не найдена')
+        const status = job.expires <= now() ? 'expired' : job.status
+        return { jobId, status, revision: state.revision }
+      })
+    },
     status(actor, id) {
       unavailable()
       return tx(() => { const binding = expireBinding(bindingFor(actor, id)); return publicStatus(binding, JSON.parse(binding.state)) })
@@ -788,6 +970,26 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
         const closed = one('SELECT * FROM telegram_closed_periods WHERE binding_id=? AND revision=? AND profile_version=? AND expires>? ORDER BY closed_at DESC,rowid DESC LIMIT 1',
           id, state.revision, profile.version, now())
         return closed ? periodView(closed) : { status: 'insufficient' }
+      })
+    },
+    history(actor, id) {
+      unavailable()
+      organizerProfile(actor)
+      return tx(() => {
+        const binding = bindingFor(actor, id)
+        const state = JSON.parse(binding.state)
+        const time = now()
+        const window = { start: new Date(time - CLOSED_TTL).toISOString(), end: new Date(time).toISOString() }
+        const empty = status => ({ status, demo: true, window, periods: [] })
+        if (!canProcessChat(state)) return empty(state.phase)
+        if (binding.evidence_expires !== null && binding.evidence_expires <= time) return empty('paused')
+        const profile = profileFor(actor.workspace_id)
+        if (!hasSchedule(profile)) return empty('calibrating')
+        const rows = all('SELECT * FROM telegram_closed_periods WHERE binding_id=? AND revision=? AND profile_version=? AND expires>? AND closed_at>? AND closed_at<=? ORDER BY closed_at ASC,rowid ASC',
+          id, state.revision, profile.version, time, time - CLOSED_TTL, time)
+        return { status: 'active', demo: true, window, revision: state.revision, profileVersion: profile.version,
+          periods: rows.map(row => ({ ...periodView(row),
+            period: { id: row.period_id, start: new Date(row.start_at).toISOString(), end: new Date(row.closed_at).toISOString() } })) }
       })
     },
     currentSummary(actor) {

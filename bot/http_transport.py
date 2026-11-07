@@ -168,6 +168,43 @@ class HttpTransport:
             raise OrganizerRequiredError("Only a linked organizer can subscribe to notifications")
         raise TransportError("Vibee rejected notification subscription")
 
+    async def submit_personal_checkin(
+        self, telegram_user_id: int, scores: dict[str, int], nonce: str,
+    ) -> dict[str, object]:
+        """Отправляет завершённый личный чек-ин (три оценки) на сервер Vibee.
+
+        telegramUserId используется сервером только для проверки ростера
+        и не сохраняется в базе.
+        """
+        if type(telegram_user_id) is not int or telegram_user_id < 1:
+            raise TransportError("Invalid Telegram user")
+        if set(scores) != {"energy", "clarity", "support"} or any(
+            type(value) is not int or value not in range(1, 6) for value in scores.values()
+        ):
+            raise TransportError("Invalid check-in scores")
+        sent_at = self._now()
+        submitted_at = (
+            sent_at.strftime("%Y-%m-%dT%H:%M:%S.")
+            + f"{sent_at.microsecond // 1000:03d}Z"
+        )
+        url = f"{self._base_url}/api/bot/v1/bindings/{self._binding_id}/checkins"
+        payload: dict[str, object] = {
+            "telegramUserId": str(telegram_user_id),
+            "nonce": nonce,
+            "scores": dict(scores),
+            "submittedAt": submitted_at,
+        }
+        try:
+            response = await self._client.post(url, headers=self._headers(), json=payload)
+        except (httpx.TimeoutException, httpx.RequestError) as error:
+            raise TransportError("Vibee check-in submission failed") from error
+        body = self._response_body(response)
+        if response.status_code == 200 and body.get("accepted") is True:
+            return body
+        if response.status_code == 403 and self._error_code(body) == "FORBIDDEN":
+            raise PausedError("Server rejected check-in sender")
+        raise TransportError("Vibee rejected check-in submission")
+
     async def close(self) -> None:
         """Закрывает созданный транспортом HTTP-клиент."""
         if self._owns_client:

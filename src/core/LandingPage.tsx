@@ -100,8 +100,8 @@ export function LandingPage({ onEnter, onDemo }: LandingPageProps) {
             <button className="landing-demo-link" type="button" onClick={onDemo}>
               Посмотреть демо <span aria-hidden="true">↗</span>
             </button>
-            <a className="landing-github" href="https://gitlab.com/shertwg-group1/vibebot" target="_blank" rel="noreferrer">
-              GitLab <span aria-hidden="true">↗</span>
+            <a className="landing-github" href="https://github.com/augustteske/vibebot" target="_blank" rel="noreferrer">
+              GitHub <span aria-hidden="true">↗</span>
             </a>
             <span className="landing-demo-note">Демонстрация на вымышленных данных</span>
           </div>
@@ -196,8 +196,8 @@ export function LandingPage({ onEnter, onDemo }: LandingPageProps) {
           </a>
           <span className="landing-footer-note">Общие сигналы. Решения — за командой.</span>
           <nav className="landing-footer-links" aria-label="Ссылки">
-            <a href="https://gitlab.com/shertwg-group1/vibebot" target="_blank" rel="noreferrer">GitLab <span aria-hidden="true">↗</span></a>
-            <a href="https://gitlab.com/shertwg-group1/vibebot/-/tree/main/docs" target="_blank" rel="noreferrer">Документация</a>
+            <a href="https://github.com/augustteske/vibebot" target="_blank" rel="noreferrer">GitHub <span aria-hidden="true">↗</span></a>
+            <a href="/docs.html">Документация</a>
             <a href="https://opensource.org/license/mit" target="_blank" rel="noreferrer">MIT License</a>
           </nav>
         </div>
