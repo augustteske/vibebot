@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { resolve, join, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createApp, resolveSecureCookies } from '../server/app.mjs'
@@ -15,6 +15,35 @@ test('health endpoint returns the Compose readiness response', async t => {
   const result = await client()('/health')
   assert.equal(result.status, 200)
   assert.deepEqual(result.body, { ok: true })
+})
+
+test('SPA fallback serves index.html for routes without file extension outside /api/', async t => {
+  const root = resolve('.data')
+  await mkdir(root, { recursive: true })
+  const staticDir = await mkdtemp(join(root, 'spa-static-'))
+  t.after(async () => { await rm(staticDir, { recursive: true, force: true }) })
+  await writeFile(join(staticDir, 'index.html'), '<!doctype html><html><body>SPA</body></html>')
+
+  const app = createApp({ secret, dbPath: ':memory:', staticDir })
+  await new Promise(resolveListen => app.server.listen(0, '127.0.0.1', resolveListen))
+  t.after(() => app.close())
+  const base = 'http://127.0.0.1:' + app.server.address().port
+
+  const rootRes = await fetch(base + '/')
+  assert.equal(rootRes.status, 200)
+  assert.equal(await rootRes.text(), '<!doctype html><html><body>SPA</body></html>')
+
+  const demoRes = await fetch(base + '/demo')
+  assert.equal(demoRes.status, 200)
+  assert.equal(demoRes.headers.get('content-type'), 'text/html; charset=utf-8')
+  assert.equal(await demoRes.text(), '<!doctype html><html><body>SPA</body></html>')
+
+  const deepRes = await fetch(base + '/teams/settings')
+  assert.equal(deepRes.status, 200)
+  assert.equal(await deepRes.text(), '<!doctype html><html><body>SPA</body></html>')
+
+  const missingFileRes = await fetch(base + '/missing.js')
+  assert.equal(missingFileRes.status, 404)
 })
 
 test('allowed origins and production secure cookies are enforced', async t => {
