@@ -10,13 +10,24 @@ from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from .flow import CheckinFlow, QUESTIONS
 from .http_transport import HttpTransport, OrganizerRequiredError, PausedError, TransportError
 from .intake import ConsentSnapshot, TelegramIntake
 from .pause_state import PauseState
 from .voice import LocalWhisperProvider, VoiceError, VoiceTranscription, install_voice_handlers
+
+
+# Список команд для синего меню Telegram; тексты согласованы с bot/BRANDING.md.
+BOT_COMMANDS = [
+    BotCommand(command="start", description="Открыть меню сценариев"),
+    BotCommand(command="help", description="Доступные команды и сценарии"),
+    BotCommand(command="privacy", description="Как бот обрабатывает данные"),
+    BotCommand(command="stop", description="Отменить сценарий и очистить черновик"),
+    BotCommand(command="transcribe", description="Согласие на одну голосовую (нужна локальная модель)"),
+    BotCommand(command="subscribe", description="Уведомления организатора (если настроены)"),
+]
 
 
 def create_dispatcher(
@@ -397,6 +408,11 @@ async def main():
     try:
         async with Bot(token=token) as bot:
             print("Vibee: запускаю подключение к Telegram. Для проверки отправьте /start.", flush=True)
+            try:
+                await bot.set_my_commands(BOT_COMMANDS)
+            except Exception as error:
+                # Меню команд не критично для работы бота: сообщаем и продолжаем опрос.
+                logging.getLogger(__name__).warning("Не удалось обновить меню команд Telegram: %s", error)
             await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types(), handle_signals=True)
     finally:
         task.cancel()

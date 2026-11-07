@@ -6,7 +6,7 @@ import { TeamPulse, pulsePeriodLabel } from '../features/insights/TeamPulse'
 import { RequestError } from './RequestError'
 import './SummaryPanels.css'
 
-export function SummaryPanels({ onLogin }: { onLogin?: () => void }) {
+export function SummaryPanels({ onLogin, refreshKey = 0 }: { onLogin?: () => void; refreshKey?: number }) {
   const [view, setView] = useState<CommunicationView | null>(null)
   const [bindingId, setBindingId] = useState<string | null>(null)
   const [recommendation, setRecommendation] = useState<CommunicationRecommendation | null>(null)
@@ -26,13 +26,18 @@ export function SummaryPanels({ onLogin }: { onLogin?: () => void }) {
 
   useEffect(() => {
     let active = true
-    setBindingId(null)
     void api<{ bindingId: string | null; view: CommunicationView }>('/telegram/summary?includeBinding=1').then(
-      result => { if (active) { setView(result.view); setBindingId(result.bindingId); setError(null) } },
+      result => {
+        if (!active) return
+        // Keep the same reference when nothing changed, so the weekly history is not reset on every refresh.
+        setView(previous => previous && JSON.stringify(previous) === JSON.stringify(result.view) ? previous : result.view)
+        setBindingId(result.bindingId)
+        setError(null)
+      },
       failure => { if (active) { setView(null); setBindingId(null); setError(failure) } },
     ).finally(() => { if (active) { setLoading(false); setRetryingSummary(false) } })
     return () => { active = false }
-  }, [attempt])
+  }, [attempt, refreshKey])
 
   useEffect(() => {
     if (view?.status !== 'published') { setRecommendation(null); setRecommendationError(null); return }
@@ -53,6 +58,7 @@ export function SummaryPanels({ onLogin }: { onLogin?: () => void }) {
       setRetryingSummary(true)
       setError(null)
       setView(null)
+      setBindingId(null)
       setAttempt(value => value + 1)
     }}/>
     {view?.status === 'published' && recommendationLoading && <p role="status">Загружаем рекомендацию…</p>}
