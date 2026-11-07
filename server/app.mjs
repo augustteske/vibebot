@@ -1,7 +1,19 @@
 import { createServer } from 'node:http'
+import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
 import { AppError, createStore } from './store.mjs'
+
+function formatSafeError(error, context = {}) {
+  const errorName = error instanceof Error && error.name ? error.name : 'UnknownError'
+  const errorCode = typeof error?.code === 'string' || typeof error?.code === 'number' ? error.code : undefined
+  const payload = { ...context, errorName, ...(errorCode !== undefined ? { errorCode } : {}) }
+  if (process.env.NODE_ENV === 'development' && error instanceof Error && typeof error.stack === 'string') {
+    const frames = error.stack.split('\n').filter(line => /^\s+at\s/.test(line)).join('\n')
+    if (frames) payload.stack = frames
+  }
+  return JSON.stringify(payload)
+}
 
 export function resolveSecureCookies(env = process.env) {
   const cookieSecure = env.COOKIE_SECURE
@@ -12,7 +24,7 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
   const store = createStore({ path: dbPath, secret, telegramBootstrapCredential, telegramSynthetic, now,
     recommendationProvider, recommendationTimeoutMs })
   const cleanupTimer = setInterval(() => {
-    try { store.telegram.cleanup() } catch { console.error('Vibee: Telegram cleanup failed') }
+    try { store.telegram.cleanup() } catch (error) { console.error('Vibee: Telegram cleanup failed', formatSafeError(error)) }
   }, 60000)
   cleanupTimer.unref()
   const cookie = token => 'vibebot_session=' + token + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=' + (token ? 604800 : 0) + (secureCookies ? '; Secure' : '')
@@ -75,6 +87,8 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
     } catch { throw new AppError(400, invalidCode, 'Не удалось прочитать запрос') }
   }
   const server = createServer(async (req, res) => {
+    const requestId = randomUUID()
+    res.setHeader('X-Request-Id', requestId)
     res.setHeader('Cache-Control', 'no-store')
     res.setHeader('X-Content-Type-Options', 'nosniff')
     res.setHeader('Referrer-Policy', 'no-referrer')
@@ -275,7 +289,7 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
     } catch (error) {
       if (res.headersSent) return res.end()
       if (error instanceof AppError) return json(res, error.status, { error: { code: error.code, message: error.message } })
-      console.error('Vibee: request failed without logging request data')
+      console.error('Vibee: request failed', formatSafeError(error, { requestId, method: req.method }))
       return json(res, 500, { error: { code: 'INTERNAL_ERROR', message: 'Не удалось выполнить действие. Попробуйте ещё раз.' } })
     }
   })
