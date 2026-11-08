@@ -29,7 +29,10 @@ export function ThemeToggle({ className = '' }: { className?: string }) {
     <button
       type="button"
       className={'theme-toggle' + (className ? ' ' + className : '')}
-      onClick={() => setTheme(target)}
+      onClick={() => {
+        applyTheme(target, true)
+        setTheme(target)
+      }}
       aria-label={label}
       title={label}
       aria-pressed={theme === 'dark'}

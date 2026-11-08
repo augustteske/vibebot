@@ -57,8 +57,10 @@ function isTeamProfile(value: unknown): value is TeamProfile {
 }
 
 const labels = { energy: 'Ресурс', clarity: 'Ясность', support: 'Поддержка' }
-const dateLabel = (date: string) => new Date(date).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Omsk' })
+const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+const dateLabel = (date: string) => new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: browserTimeZone }).format(new Date(date))
 const initialToken = () => new URLSearchParams(window.location.hash.slice(1)).get('invite') ?? ''
+const initialRoomKey = () => new URLSearchParams(window.location.hash.slice(1)).get('room') ?? ''
 function invitationToken(value: string) {
   try { return new URLSearchParams(new URL(value).hash.slice(1)).get('invite') ?? value.trim() } catch { return value.trim() }
 }
@@ -112,6 +114,7 @@ export function TeamWorkspace() {
   const [busy, setBusy] = useState(false)
   const [join, setJoin] = useState(!!initialToken())
   const [invite, setInvite] = useState(initialToken)
+  const [roomKey, setRoomKey] = useState(initialRoomKey)
   const [inviteLink, setInviteLink] = useState('')
   const [restore, setRestore] = useState(false)
   const [showRestore, setShowRestore] = useState(false)
@@ -131,6 +134,7 @@ export function TeamWorkspace() {
   const refreshingRef = useRef(false)
   const refreshByUser = useRef(false)
   const hasSnapshot = useRef(false)
+  const autoJoinedRoomRef = useRef(false)
   const teamProfileWorkspaceRef = useRef('')
   const activeWorkspaceId = snapshot?.workspace.id ?? ''
   const loadTeamProfile = useCallback((workspaceId: string, force = false) => {
@@ -208,15 +212,17 @@ export function TeamWorkspace() {
       }),
     }), updatedAt)
   }
-  async function perform(path: string, input: unknown, message: string) {
+  async function perform(path: string, input: unknown, message: string | ((result: SessionSnapshot) => string)) {
     if (busyRef.current) return false
     busyRef.current = true; setBusy(true); setError(null); setErrorMutation(false); setNotice(''); requestVersion.current++
     try {
-      const result = await api(path, input)
-      setSnapshot(result); hasSnapshot.current = true; setError(null); setErrorMutation(false); setNotice(message); setConfirm(''); setShowRestore(false)
-      if (path === '/workspaces' || path === '/join' || path === '/restore') {
+      const result = await api<SessionSnapshot>(path, input)
+      const resolvedMessage = typeof message === 'function' ? message(result) : message
+      setSnapshot(result); hasSnapshot.current = true; setError(null); setErrorMutation(false); setNotice(resolvedMessage); setConfirm(''); setShowRestore(false)
+      if (path === '/workspaces' || path === '/join' || path === '/join-by-key' || path === '/restore') {
         window.history.replaceState(null, '', window.location.pathname + '?mode=team')
         setInvite('')
+        setRoomKey('')
       }
       return true
     } catch (failure) {
@@ -225,6 +231,13 @@ export function TeamWorkspace() {
       return false
     } finally { busyRef.current = false; setBusy(false) }
   }
+  useEffect(() => {
+    if (!initialized || snapshot || autoJoinedRoomRef.current) return
+    const hashRoom = initialRoomKey().trim().toUpperCase()
+    if (!hashRoom) return
+    autoJoinedRoomRef.current = true
+    void perform('/join-by-key', { roomKey: hashRoom }, result => 'Вы вошли в команду ' + result.workspace.name)
+  }, [initialized, snapshot])
   async function issueInvite() {
     if (busyRef.current) return
     busyRef.current = true; setBusy(true); setError(null); setErrorMutation(false); setNotice('')
@@ -271,12 +284,39 @@ export function TeamWorkspace() {
       <div className="entrance__brand"><img src="/bee.svg" alt=""/><span>Vibee</span></div>
       <h2>{restore ? 'Вернуться в команду' : join ? 'Присоединиться к команде' : 'Создать пространство'}</h2>
       <p className="muted">Собирайте добровольные сигналы и выбирайте полезный следующий шаг.</p>
+      <form className="room-key-box" aria-label="У меня есть ключ комнаты" onSubmit={event => {
+        event.preventDefault()
+        const trimmed = roomKey.trim().toUpperCase()
+        if (!trimmed) return
+        void perform('/join-by-key', { roomKey: trimmed }, result => 'Вы вошли в команду ' + result.workspace.name)
+      }}>
+        <fieldset disabled={busy}>
+          <label className="team-field" htmlFor="room-key-input">
+            У меня есть ключ комнаты
+            <div className="room-key-box__row">
+              <input
+                id="room-key-input"
+                name="roomKey"
+                value={roomKey}
+                onChange={event => setRoomKey(event.target.value.toUpperCase())}
+                maxLength={16}
+                autoComplete="off"
+                placeholder="Код комнаты (напр. A1B2C3D4)"
+                required
+              />
+              <button className="button room-key-box__submit" type="submit">
+                {busy ? 'Входим…' : 'Войти по ключу'}
+              </button>
+            </div>
+          </label>
+        </fieldset>
+      </form>
       <form onSubmit={authenticate}><fieldset disabled={busy}>{restore ? <SecretField id="access-key" name="accessKey" label="Личный код входа" visible={showAccessKey} onToggle={() => setShowAccessKey(value => !value)}/> : <><label className="team-field">Ваше имя<input name="displayName" autoComplete="given-name" maxLength={60} required/></label>
         {join ? <label className="team-field">Приглашение<input value={invite} onChange={e => setInvite(e.target.value)} autoComplete="off" required placeholder="Ссылка или код приглашения"/></label> : <label className="team-field">Название команды<input name="name" maxLength={80} required placeholder="Например, команда продукта"/></label>}
         </>}<button className="button entrance__submit" type="submit">{busy ? 'Сохраняем…' : restore ? 'Войти по коду' : join ? 'Войти по приглашению' : 'Создать команду'}</button>
       </fieldset></form><div className="button-row"><button className="text-button" onClick={() => { setRestore(false); setJoin(!join) }} disabled={busy}>{join ? 'Создать новую команду' : 'У меня есть приглашение'}</button><button className="text-button" onClick={() => { setShowAccessKey(false); setRestore(!restore) }} disabled={busy}>{restore ? 'Обычный вход' : 'У меня есть личный код входа'}</button></div>
     </section> : <>
-      <div className="team-heading" id="team-overview"><div><h2>{snapshot.workspace.name}</h2><p className="muted">{snapshot.member.name} · {snapshot.member.role === 'organizer' ? 'организатор' : 'участник'} · время по Омску</p></div><div className="button-row"><button className="button secondary" onClick={() => void refresh()} disabled={busy || refreshing}>{refreshing ? 'Обновляем…' : 'Обновить'}</button><button className="text-button" onClick={() => setConfirm('logout')} disabled={busy}>Выйти</button></div></div>
+      <div className="team-heading" id="team-overview"><div><h2>{snapshot.workspace.name}</h2><p className="muted">{snapshot.member.name} · {snapshot.member.role === 'organizer' ? 'организатор' : 'участник'} · {browserTimeZone}</p></div><div className="button-row"><button className="button secondary" onClick={() => void refresh()} disabled={busy || refreshing}>{refreshing ? 'Обновляем…' : 'Обновить'}</button><button className="text-button" onClick={() => setConfirm('logout')} disabled={busy}>Выйти</button></div></div>
       {showRestore && <section className="panel entrance" aria-labelledby="session-restore-title"><h2 id="session-restore-title">Войти снова</h2><p className="muted">Введите личный код, чтобы продолжить. Текущая форма останется открытой.</p><form onSubmit={event => { event.preventDefault(); void perform('/restore', { key: loginKey }, 'Вход восстановлен.') }}><SecretField id="restore-key" label="Личный код входа" visible={showLoginKey} onToggle={() => setShowLoginKey(value => !value)} value={loginKey} onChange={event => setLoginKey(event.target.value)} disabled={busy}/><button className="button" type="submit" disabled={busy}>{busy ? 'Входим…' : 'Войти по коду'}</button><button className="text-button" type="button" disabled={busy} onClick={() => { setShowRestore(false); setShowLoginKey(false); setError(null) }}>Продолжить просмотр</button></form></section>}
       {snapshot.member.role === 'participant' && <details className="panel participant-data">
         <summary>Мои данные</summary>
@@ -367,7 +407,7 @@ export function TeamWorkspace() {
               <button className="button" type="submit">{busy ? 'Сохраняем…' : 'Сохранить чек-ин'}</button></fieldset>
             </form></>}
         </section>
-        {snapshot.member.role === 'organizer' && <section className="panel"><h2>Пригласить участника</h2><p className="muted">Каждая ссылка действует 24 часа и используется один раз. Создавайте отдельное приглашение для каждого человека.</p><button className="button secondary" disabled={busy} onClick={() => void issueInvite()}>Создать приглашение</button>{inviteLink && <><label className="team-field">Ссылка для одного участника<input readOnly value={inviteLink} onFocus={event => event.currentTarget.select()}/></label><button className="text-button" onClick={() => { void navigator.clipboard.writeText(inviteLink).then(() => setNotice('Приглашение скопировано.'), () => setNotice('Выделите ссылку и скопируйте её вручную.')) }}>Скопировать ссылку</button></>}</section>}
+        {snapshot.member.role === 'organizer' && <section className="panel"><h2>Пригласить участника</h2><p className="muted">Передайте участникам короткий ключ комнаты для быстрого входа или создайте одноразовую ссылку на 24 часа.</p>{snapshot.workspace.roomKey && <div className="room-key-share"><label className="team-field">Ключ комнаты<input readOnly value={snapshot.workspace.roomKey} onFocus={event => event.currentTarget.select()}/></label><button className="text-button" type="button" onClick={() => { void navigator.clipboard.writeText(snapshot.workspace.roomKey ?? '').then(() => setNotice('Ключ комнаты скопирован.'), () => setNotice('Выделите ключ комнаты и скопируйте его вручную.')) }}>Скопировать ключ комнаты</button></div>}<button className="button secondary" disabled={busy} onClick={() => void issueInvite()}>Создать приглашение</button>{inviteLink && <><label className="team-field">Ссылка для одного участника<input readOnly value={inviteLink} onFocus={event => event.currentTarget.select()}/></label><button className="text-button" onClick={() => { void navigator.clipboard.writeText(inviteLink).then(() => setNotice('Приглашение скопировано.'), () => setNotice('Выделите ссылку и скопируйте её вручную.')) }}>Скопировать ссылку</button></>}</section>}
         <section className="panel"><h2>Вернуться с другого устройства</h2><p className="muted">Сохраните личный код входа. Он действует 30 дней и сохраняет ваши права и участие. Новый код заменяет предыдущий.</p><button className="button secondary" disabled={busy} onClick={() => void createAccessKey()}>Создать личный код входа</button>{accessKey && <label className="team-field">Ваш личный код<input value={accessKey} readOnly onFocus={event => event.currentTarget.select()}/></label>}</section>
         <div className="note"><strong>Приватность в небольших командах</strong><p>При четырёх участниках статистика скрыта. Добровольные упражнения остаются доступны. Сессия привязана к этому браузеру на семь дней.</p></div>
       </aside></div>

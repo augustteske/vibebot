@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { SyntheticEvent } from 'react'
 import { ThemeToggle } from './ThemeToggle'
+import { isNewYearSeason } from './theme'
 import './LandingPage.css'
 
 // Большая картинка идёт через прокси предпросмотра и иногда получает 502.
@@ -16,6 +17,7 @@ function retryImageOnce(event: SyntheticEvent<HTMLImageElement>) {
 interface LandingPageProps {
   onEnter: () => void;
   onDemo: () => void;
+  onJoinByKey?: (roomKey: string) => void;
 }
 
 const features = [
@@ -39,6 +41,38 @@ const features = [
   },
 ]
 
+const contrastPairs = [
+  {
+    id: 'focus',
+    beforeTitle: 'Размытые приоритеты в потоке чатов',
+    beforeText: 'Десятки параллельных обсуждений и срочных пингов: к середине дня непонятно, какая задача действительно главная.',
+    afterTitle: 'Понятный фокус на день',
+    afterText: 'Короткий чек-ин и сводка показывают уровень ясности приоритетов и помогают команде выбрать одну главную цель.',
+  },
+  {
+    id: 'rhythm',
+    beforeTitle: 'Незаметная усталость и переработки',
+    beforeText: 'Ночные сообщения и неравномерная вовлечённость видны только постфактум, когда у людей уже закончился ресурс.',
+    afterTitle: 'Бережные командные метрики',
+    afterText: 'Агрегаты без личных рейтингов подсвечивают долю сообщений вне расписания, равномерность участия и уровень поддержки.',
+  },
+  {
+    id: 'action',
+    beforeTitle: 'Обсуждения без конкретного шага',
+    beforeText: 'Проблемы озвучиваются на созвонах, но теряются в переписке без понятной договорённости и проверки результата.',
+    afterTitle: 'Готовая рекомендация и обратная связь',
+    afterText: 'Vibee предлагает конкретный следующий шаг по самому заметному сигналу, а команда отмечает, принёс ли он пользу.',
+  },
+]
+
+const snowflakes = Array.from({ length: 18 }, (_, index) => ({
+  id: index,
+  left: `${(index * 17 + 5) % 96}%`,
+  delay: `${((index * 1.3) % 8).toFixed(1)}s`,
+  duration: `${10 + (index % 6) * 2}s`,
+  size: `${6 + (index % 4) * 3}px`,
+}))
+
 const steps = [
   {
     number: '01',
@@ -60,7 +94,16 @@ const steps = [
   },
 ]
 
-export function LandingPage({ onEnter, onDemo }: LandingPageProps) {
+export function LandingPage({ onEnter, onDemo, onJoinByKey }: LandingPageProps) {
+  const [roomKey, setRoomKey] = useState('')
+  const [newYear] = useState(() => isNewYearSeason())
+  const [activeContrastIndex, setActiveContrastIndex] = useState(0)
+  const [contrastView, setContrastView] = useState<'split' | 'before' | 'after'>('split')
+
+  useEffect(() => {
+    document.documentElement.dataset.season = newYear ? 'new-year' : 'default'
+  }, [newYear])
+
   useEffect(() => {
     const revealElements = Array.from(document.querySelectorAll<HTMLElement>('.landing-reveal'))
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -84,7 +127,24 @@ export function LandingPage({ onEnter, onDemo }: LandingPageProps) {
   }, [])
 
   return (
-    <main className="landing" id="top">
+    <main className={'landing' + (newYear ? ' landing--new-year' : '')} id="top">
+      {newYear && (
+        <div className="landing-snow" aria-hidden="true">
+          {snowflakes.map(flake => (
+            <span
+              key={flake.id}
+              className="landing-snowflake"
+              style={{
+                left: flake.left,
+                width: flake.size,
+                height: flake.size,
+                animationDelay: flake.delay,
+                animationDuration: flake.duration,
+              }}
+            />
+          ))}
+        </div>
+      )}
       <header className="landing-header">
         <a className="landing-brand" href="#top" aria-label="Vibee — главная">
           <img src="/bee.svg" alt="" />
@@ -118,13 +178,174 @@ export function LandingPage({ onEnter, onDemo }: LandingPageProps) {
             </a>
             <span className="landing-demo-note">Демонстрация на вымышленных данных</span>
           </div>
+          <form
+            className="landing-room-key"
+            aria-label="У меня есть ключ комнаты"
+            onSubmit={event => {
+              event.preventDefault()
+              const trimmed = roomKey.trim().toUpperCase()
+              if (!trimmed) return
+              if (onJoinByKey) {
+                onJoinByKey(trimmed)
+              } else {
+                window.history.pushState(null, '', '/?mode=team#room=' + encodeURIComponent(trimmed))
+                onEnter()
+              }
+            }}
+          >
+            <label className="landing-room-key__label" htmlFor="landing-room-key-input">
+              У меня есть ключ комнаты
+            </label>
+            <div className="landing-room-key__controls">
+              <input
+                id="landing-room-key-input"
+                name="roomKey"
+                value={roomKey}
+                onChange={event => setRoomKey(event.target.value.toUpperCase())}
+                maxLength={16}
+                autoComplete="off"
+                placeholder="Код от тимлида (напр. A1B2C3D4)"
+                required
+              />
+              <button className="landing-room-key__submit" type="submit">
+                Войти
+              </button>
+            </div>
+          </form>
         </div>
         <div className="landing-mascot landing-reveal landing-reveal--mascot" aria-hidden="true">
           <div className="landing-mascot-glow" />
           <div className="landing-orbit landing-orbit--outer" />
-          <img src="/bee-mascot.png" alt="" width="1280" height="1280" fetchPriority="high" onError={retryImageOnce} />
+          <div className="landing-mascot-figure">
+            {newYear && (
+              <svg
+                className="landing-mascot-hat"
+                viewBox="0 0 160 120"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden="true"
+              >
+                <path
+                  d="M26 86C34 44 68 18 118 22C130 23 138 34 134 45C124 41 105 44 92 58L122 86H26Z"
+                  fill="url(#vibeeHatRed)"
+                />
+                <circle cx="136" cy="38" r="15" fill="#FFFDF7" stroke="#E5DEC9" strokeWidth="2" />
+                <rect x="16" y="80" width="114" height="24" rx="12" fill="#FFFDF7" stroke="#E5DEC9" strokeWidth="2" />
+                <defs>
+                  <linearGradient id="vibeeHatRed" x1="26" y1="20" x2="128" y2="90" gradientUnits="userSpaceOnUse">
+                    <stop stopColor="#EF3B2D" />
+                    <stop offset="0.6" stopColor="#C81E1E" />
+                    <stop offset="1" stopColor="#9B1414" />
+                  </linearGradient>
+                </defs>
+              </svg>
+            )}
+            <img src="/bee-mascot.png" alt="" width="1280" height="1280" fetchPriority="high" onError={retryImageOnce} />
+          </div>
           <span className="landing-float-card landing-float-card--top">Решения — за командой</span>
           <span className="landing-float-card landing-float-card--bottom">Только общие сигналы</span>
+        </div>
+      </section>
+
+      <section className="landing-contrast" id="contrast" aria-labelledby="landing-contrast-title">
+        <div className="landing-section-inner">
+          <div className="landing-section-heading landing-reveal">
+            <div>
+              <span className="landing-eyebrow">ПРОБЛЕМА → РЕШЕНИЕ</span>
+              <h2 id="landing-contrast-title">Было — хаос.<br /><span>Стало — ясность.</span></h2>
+            </div>
+            <div className="landing-contrast-controls">
+              <p>Выберите любую ситуацию или переключите режим сравнения, чтобы увидеть, как меняется командный ритм.</p>
+              <div className="landing-contrast-tabs" role="group" aria-label="Режим сравнения">
+                <button
+                  type="button"
+                  className={'landing-contrast-tab' + (contrastView === 'split' ? ' is-active' : '')}
+                  aria-pressed={contrastView === 'split'}
+                  onClick={() => setContrastView('split')}
+                >
+                  Было / Стало
+                </button>
+                <button
+                  type="button"
+                  className={'landing-contrast-tab' + (contrastView === 'before' ? ' is-active' : '')}
+                  aria-pressed={contrastView === 'before'}
+                  onClick={() => setContrastView('before')}
+                >
+                  Было: проблема
+                </button>
+                <button
+                  type="button"
+                  className={'landing-contrast-tab' + (contrastView === 'after' ? ' is-active' : '')}
+                  aria-pressed={contrastView === 'after'}
+                  onClick={() => setContrastView('after')}
+                >
+                  Стало: решение
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className={'landing-contrast-grid landing-contrast-grid--' + contrastView}>
+            {contrastView !== 'after' && (
+              <article className="landing-contrast-card landing-contrast-card--before landing-reveal">
+                <div className="landing-contrast-card__header">
+                  <span className="landing-contrast-badge landing-contrast-badge--before">БЫЛО · ПРОБЛЕМА</span>
+                  <h3>Было: хаос в чатах, непонятные задачи</h3>
+                </div>
+                <ul className="landing-contrast-list">
+                  {contrastPairs.map((pair, index) => (
+                    <li key={pair.id}>
+                      <button
+                        type="button"
+                        className={'landing-contrast-item' + (activeContrastIndex === index ? ' is-selected' : '')}
+                        onClick={() => setActiveContrastIndex(index)}
+                        aria-pressed={activeContrastIndex === index}
+                      >
+                        <span className="landing-contrast-item__index">0{index + 1}</span>
+                        <div>
+                          <strong>{pair.beforeTitle}</strong>
+                          <p>{pair.beforeText}</p>
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            )}
+
+            {contrastView === 'split' && (
+              <div className="landing-contrast-arrow landing-reveal" aria-hidden="true">
+                <span>→</span>
+              </div>
+            )}
+
+            {contrastView !== 'before' && (
+              <article className="landing-contrast-card landing-contrast-card--after landing-reveal">
+                <div className="landing-contrast-card__header">
+                  <span className="landing-contrast-badge landing-contrast-badge--after">СТАЛО · РЕШЕНИЕ VIBEE</span>
+                  <h3>Стало: понятные метрики и рекомендации</h3>
+                </div>
+                <ul className="landing-contrast-list">
+                  {contrastPairs.map((pair, index) => (
+                    <li key={pair.id}>
+                      <button
+                        type="button"
+                        className={'landing-contrast-item' + (activeContrastIndex === index ? ' is-selected' : '')}
+                        onClick={() => setActiveContrastIndex(index)}
+                        aria-pressed={activeContrastIndex === index}
+                      >
+                        <span className="landing-contrast-item__index">0{index + 1}</span>
+                        <div>
+                          <strong>{pair.afterTitle}</strong>
+                          <p>{pair.afterText}</p>
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            )}
+          </div>
         </div>
       </section>
 

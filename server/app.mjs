@@ -1,7 +1,19 @@
 import { createServer } from 'node:http'
+import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
 import { AppError, createStore } from './store.mjs'
+
+function formatSafeError(error, context = {}) {
+  const errorName = error instanceof Error && error.name ? error.name : 'UnknownError'
+  const errorCode = typeof error?.code === 'string' || typeof error?.code === 'number' ? error.code : undefined
+  const payload = { ...context, errorName, ...(errorCode !== undefined ? { errorCode } : {}) }
+  if (process.env.NODE_ENV === 'development' && error instanceof Error && typeof error.stack === 'string') {
+    const frames = error.stack.split('\n').filter(line => /^\s+at\s/.test(line)).join('\n')
+    if (frames) payload.stack = frames
+  }
+  return JSON.stringify(payload)
+}
 
 export function resolveSecureCookies(env = process.env) {
   const cookieSecure = env.COOKIE_SECURE
@@ -12,7 +24,12 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
   const store = createStore({ path: dbPath, secret, telegramBootstrapCredential, telegramSynthetic, now,
     recommendationProvider, recommendationTimeoutMs })
   const cleanupTimer = setInterval(() => {
-    try { store.telegram.cleanup() } catch { console.error('Vibee: Telegram cleanup failed') }
+    try {
+      store.cleanup()
+      store.telegram.cleanup()
+    } catch (error) {
+      console.error('Vibee: periodic cleanup failed', formatSafeError(error))
+    }
   }, 60000)
   cleanupTimer.unref()
   const cookie = token => 'vibebot_session=' + token + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=' + (token ? 604800 : 0) + (secureCookies ? '; Secure' : '')
@@ -75,6 +92,8 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
     } catch { throw new AppError(400, invalidCode, 'Не удалось прочитать запрос') }
   }
   const server = createServer(async (req, res) => {
+    const requestId = randomUUID()
+    res.setHeader('X-Request-Id', requestId)
     res.setHeader('Cache-Control', 'no-store')
     res.setHeader('X-Content-Type-Options', 'nosniff')
     res.setHeader('Referrer-Policy', 'no-referrer')
@@ -84,8 +103,9 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
       if (!url.pathname.startsWith('/api/')) {
         if (req.method !== 'GET' || !staticDir) throw new AppError(404, 'NOT_FOUND', 'Страница не найдена')
         const root = resolve(staticDir)
-        const file = resolve(root, '.' + decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname))
-        if (!file.startsWith(root + sep)) throw new AppError(404, 'NOT_FOUND', 'Страница не найдена')
+        const requested = resolve(root, '.' + decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname))
+        if (!requested.startsWith(root + sep)) throw new AppError(404, 'NOT_FOUND', 'Страница не найдена')
+        const file = extname(requested) ? requested : resolve(root, 'index.html')
         let data
         try { data = await readFile(file) } catch { throw new AppError(404, 'NOT_FOUND', 'Страница не найдена') }
         const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png' }
@@ -249,12 +269,19 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
       }
       const token = tokenFrom(req)
       const member = store.authenticate(token)
-      if (req.method === 'POST' && ['/api/workspaces', '/api/join', '/api/restore'].includes(url.pathname)) {
+      if (req.method === 'POST' && ['/api/workspaces', '/api/join', '/api/join-by-key', '/api/restore'].includes(url.pathname)) {
         if (member) throw new AppError(409, 'ALREADY_SIGNED_IN', 'Сначала выйдите из текущего пространства')
-        const newToken = url.pathname === '/api/workspaces' ? store.createWorkspace(input) : url.pathname === '/api/restore' ? store.restore(input) : store.join(input)
+        const newToken = url.pathname === '/api/workspaces' ? store.createWorkspace(input)
+          : url.pathname === '/api/restore' ? store.restore(input)
+          : url.pathname === '/api/join-by-key' ? store.joinByKey(input)
+          : store.join(input)
         res.setHeader('Set-Cookie', cookie(newToken))
         return json(res, 201, store.snapshot(store.authenticate(newToken)))
       }
+      const feedback = req.method === 'POST' ? url.pathname.match(/^\/api\/actions\/([a-f0-9-]+)\/(feedback|close-feedback)$/) : null
+      const knownRoute = (req.method === 'GET' && ['/api/session', '/api/summary', '/api/telegram-checkin-stats'].includes(url.pathname))
+        || (req.method === 'POST' && (['/api/logout', '/api/invitations', '/api/recovery-key', '/api/checkins', '/api/rounds/close', '/api/rounds/open', '/api/actions'].includes(url.pathname) || !!feedback))
+      if (!knownRoute) throw new AppError(404, 'NOT_FOUND', 'Действие не найдено')
       if (!member) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, store.snapshot(member))
       if (req.method === 'GET' && url.pathname === '/api/summary') return json(res, 200, store.summary(member))
@@ -265,7 +292,6 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         }
         if (url.pathname === '/api/invitations') return json(res, 201, store.invite(member))
         if (url.pathname === '/api/recovery-key') return json(res, 201, store.recoveryKey(member))
-        const feedback = url.pathname.match(/^\/api\/actions\/([a-f0-9-]+)\/(feedback|close-feedback)$/)
         if (url.pathname === '/api/checkins') store.checkin(member, input)
         else if (url.pathname === '/api/rounds/close') store.closeRound(member, input)
         else if (url.pathname === '/api/rounds/open') store.openRound(member)
@@ -279,7 +305,9 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
     } catch (error) {
       if (res.headersSent) return res.end()
       if (error instanceof AppError) return json(res, error.status, { error: { code: error.code, message: error.message } })
-      console.error('Vibee: request failed without logging request data')
+      const errorName = error?.name ?? 'Error'
+      if (error?.stack) console.error(errorName, error.stack)
+      else console.error(errorName)
       return json(res, 500, { error: { code: 'INTERNAL_ERROR', message: 'Не удалось выполнить действие. Попробуйте ещё раз.' } })
     }
   })
@@ -287,7 +315,24 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
     server,
     close: () => new Promise((resolveClose, reject) => {
       clearInterval(cleanupTimer)
-      server.close(error => { try { store.close(); error ? reject(error) : resolveClose() } catch (failure) { reject(failure) } })
+      if (!server.listening) {
+        try {
+          store.close()
+          resolveClose()
+        } catch (failure) {
+          reject(failure)
+        }
+        return
+      }
+      server.close(error => {
+        try {
+          store.close()
+          if (error) reject(error)
+          else resolveClose()
+        } catch (failure) {
+          reject(failure)
+        }
+      })
       server.closeIdleConnections()
     }),
   }

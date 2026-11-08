@@ -1,0 +1,18 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Vibee ${{ github.ref_name }}
+          body: "Первый стабильный релиз Vibee. Включает Telegram-бота, веб-кабинет с графиками, тёмную/светлую тему, вход по ключу комнаты, окна обратной связи и умные рекомендации."
+          generate_release_notes: true

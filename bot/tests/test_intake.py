@@ -238,6 +238,70 @@ class IntakeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["sentAt"], "2026-10-31T08:00:00.000Z")
         self.assertIn("мой id 12345", payload["text"])
 
+    async def test_duplicate_within_ttl_is_dropped(self):
+        transport = FakeTransport()
+        current_time = 1000.0
+        intake = TelegramIntake(full_consent(), transport, clock=lambda: current_time)
+        event = telegram_update(message_id=42)
+
+        result1 = await intake.process(event)
+        self.assertEqual(result1["result"], "accepted")
+        self.assertEqual(len(transport.events), 1)
+
+        # Advance time within 24h TTL (e.g. 23 hours later)
+        current_time += 23 * 3600
+        result2 = await intake.process(event)
+        self.assertIsNone(result2)
+        self.assertEqual(len(transport.events), 1)
+
+    async def test_duplicate_after_ttl_is_accepted_and_pruned(self):
+        transport = FakeTransport()
+        current_time = 1000.0
+        intake = TelegramIntake(full_consent(), transport, clock=lambda: current_time)
+        event = telegram_update(message_id=42)
+
+        result1 = await intake.process(event)
+        self.assertEqual(result1["result"], "accepted")
+        self.assertEqual(len(transport.events), 1)
+
+        # Advance time beyond 24h TTL (e.g. 24 hours and 1 second later)
+        current_time += 24 * 3600 + 1
+        result2 = await intake.process(event)
+        self.assertEqual(result2["result"], "accepted")
+        self.assertEqual(len(transport.events), 2)
+
+    async def test_seen_messages_size_does_not_exceed_limit(self):
+        transport = FakeTransport()
+        current_time = 1000.0
+        # Configure small capacity limit to verify eviction
+        intake = TelegramIntake(
+            full_consent(),
+            transport,
+            clock=lambda: current_time,
+            max_seen_messages=3,
+        )
+
+        for i in range(1, 4):
+            current_time += 1.0
+            res = await intake.process(telegram_update(message_id=i, sender_id=100 + i))
+            self.assertEqual(res["result"], "accepted")
+
+        self.assertEqual(len(intake._seen_messages), 3)
+
+        # Adding 4th message should evict message_id=1
+        current_time += 1.0
+        res4 = await intake.process(telegram_update(message_id=4, sender_id=104))
+        self.assertEqual(res4["result"], "accepted")
+        self.assertEqual(len(intake._seen_messages), 3)
+        self.assertNotIn((-100123, 1), intake._seen_messages)
+        self.assertIn((-100123, 4), intake._seen_messages)
+
+        # Message 1 was evicted, so sending it again should be accepted
+        res1_again = await intake.process(telegram_update(message_id=1, sender_id=101))
+        self.assertEqual(res1_again["result"], "accepted")
+        # And message 2 is now evicted
+        self.assertNotIn((-100123, 2), intake._seen_messages)
+
     async def test_rate_limit_drops_eleventh_message_for_sender(self):
         transport = FakeTransport()
         intake = TelegramIntake(full_consent(), transport)

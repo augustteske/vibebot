@@ -6,6 +6,11 @@
 
 .telegram-summary-state {
   margin-bottom: 22px;
+  color: var(--vibee-muted);
+}
+
+.telegram-summary-state p {
+  margin: 0;
 }
 
 .telegram-summary-state--calibrating {

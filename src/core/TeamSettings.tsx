@@ -46,9 +46,11 @@ const toMinutes = (time: string) => {
 
 const toTime = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
 
+const defaultTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+
 export function TeamSettings({ onLogin }: { onLogin?: () => void }) {
   const [schedule, setSchedule] = useState<WorkSchedule | null>(null)
-  const [timeZone, setTimeZone] = useState('Asia/Omsk')
+  const [timeZone, setTimeZone] = useState(defaultTimeZone)
   const [selectedDays, setSelectedDays] = useState<number[]>([1, 2, 3, 4, 5])
   const [startTime, setStartTime] = useState('10:00')
   const [endTime, setEndTime] = useState('19:00')
@@ -63,7 +65,7 @@ export function TeamSettings({ onLogin }: { onLogin?: () => void }) {
     void api<WorkSchedule>('/telegram/profile').then(profile => {
       if (!active) return
       setSchedule(profile)
-      setTimeZone(profile.timeZone ?? 'Asia/Omsk')
+      setTimeZone(profile.timeZone ?? defaultTimeZone)
       if (profile.intervals.length) {
         setSelectedDays([...new Set(profile.intervals.map(interval => interval.day))])
         setStartTime(toTime(profile.intervals[0].start))

@@ -1,6 +1,7 @@
 """Офлайн-фильтр событий Telegram до передачи текста транспорту."""
 
-from collections import deque
+from collections import OrderedDict, deque
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import logging
@@ -88,16 +89,50 @@ class TelegramIntake:
     RATE_WINDOW_SECONDS = 60.0
     MAX_MESSAGE_LENGTH = 4096
     PAUSED_STATUS_REFRESH_SECONDS = 30.0
+    SEEN_MESSAGES_TTL_SECONDS = 86400.0
+    MAX_SEEN_MESSAGES = 50_000
 
-    def __init__(self, consent: ConsentSnapshot, transport: TextTransport, pause_state: PauseState | None = None) -> None:
+    def __init__(
+        self,
+        consent: ConsentSnapshot,
+        transport: TextTransport,
+        pause_state: PauseState | None = None,
+        clock: Callable[[], float] | None = None,
+        max_seen_messages: int = MAX_SEEN_MESSAGES,
+        seen_ttl_seconds: float = SEEN_MESSAGES_TTL_SECONDS,
+    ) -> None:
         self._pause_state = pause_state or PauseState()
         self._consent = replace(consent, active=False) if self._pause_state.stage != "clear" else consent
         self._transport = transport
-        self._seen_messages: set[tuple[int, int]] = set()
+        self._clock = clock if clock is not None else lambda: monotonic()
+        self._max_seen_messages = max_seen_messages
+        self._seen_ttl_seconds = seen_ttl_seconds
+        self._seen_messages: OrderedDict[tuple[int, int], float] = OrderedDict()
         self._rate_timestamps: dict[int, deque[float]] = {}
         self._recent_rate_events: deque[tuple[float, int]] = deque()
         self._server_paused = False
         self._last_status_refresh: float | None = None
+
+    def _prune_seen_messages(self, now: float) -> None:
+        """Удаляет сообщения старше TTL."""
+        cutoff = now - self._seen_ttl_seconds
+        while self._seen_messages:
+            first_key, first_time = next(iter(self._seen_messages.items()))
+            if first_time <= cutoff:
+                self._seen_messages.popitem(last=False)
+            else:
+                break
+
+    def _record_seen_message(self, message_key: tuple[int, int], now: float | None = None) -> None:
+        """Сохраняет сообщение с текущим monotonic time и удаляет старые записи."""
+        if now is None:
+            now = self._clock()
+        self._prune_seen_messages(now)
+        if message_key in self._seen_messages:
+            self._seen_messages.move_to_end(message_key)
+        self._seen_messages[message_key] = now
+        while len(self._seen_messages) > self._max_seen_messages:
+            self._seen_messages.popitem(last=False)
 
     def update_consent(self, consent: ConsentSnapshot) -> None:
         """Обновляет состояние привязки после паузы или смены согласий."""
@@ -109,7 +144,7 @@ class TelegramIntake:
 
     def is_rate_limited(self, sender_id: int) -> bool:
         """Проверяет квоту отправителя до затратной обработки, например Whisper."""
-        now = monotonic()
+        now = self._clock()
         self._prune_rate_events(now)
         return len(self._rate_timestamps.get(sender_id, ())) >= self.RATE_LIMIT
 
@@ -152,7 +187,7 @@ class TelegramIntake:
                 self._pause_state.confirmed(status.revision)
                 self._consent = replace(self._consent, active=False)
                 self._server_paused = True
-                self._last_status_refresh = monotonic()
+                self._last_status_refresh = self._clock()
                 return False
             if (status.phase == "active" and self._pause_state.pause_revision is not None
                 and status.revision > self._pause_state.pause_revision):
@@ -192,7 +227,7 @@ class TelegramIntake:
         """Передаёт допустимое новое сообщение и возвращает ответ транспорта."""
         if not self._consent.active:
             if self._server_paused:
-                now = monotonic()
+                now = self._clock()
                 if (
                     self._last_status_refresh is None
                     or now - self._last_status_refresh >= self.PAUSED_STATUS_REFRESH_SECONDS
@@ -234,11 +269,12 @@ class TelegramIntake:
             return None
         if chat_id != self._consent.chat_id:
             return None
+        now = self._clock()
+        self._prune_seen_messages(now)
         message_key = (chat_id, message_id)
         if message_key in self._seen_messages:
             return None
 
-        now = monotonic()
         self._prune_rate_events(now)
         sender_timestamps = self._rate_timestamps.get(sender_id)
         if sender_timestamps is not None and len(sender_timestamps) >= self.RATE_LIMIT:
@@ -279,7 +315,7 @@ class TelegramIntake:
             self._consent = replace(self._consent, active=False)
             self._server_paused = True
             self._last_status_refresh = now
-            self._seen_messages.add(message_key)
+            self._record_seen_message(message_key, now)
             logging.getLogger(__name__).warning("Telegram intake paused after server rejected event delivery")
             return {"result": "paused"}
         if result.get("error", {}).get("code") == "STALE_REVISION":
@@ -291,7 +327,7 @@ class TelegramIntake:
             self._last_status_refresh = now
             logging.getLogger(__name__).warning("Telegram intake paused by server response")
         if result.get("result") in {"accepted", "duplicate", "paused"}:
-            self._seen_messages.add(message_key)
+            self._record_seen_message(message_key, now)
         return result
     def _prune_rate_events(self, now: float) -> None:
         """Удаляет timestamps старше окна, сохраняя только актуальные sender ID."""
@@ -307,7 +343,7 @@ class TelegramIntake:
 
     async def retry_with_new_revision(self, event: dict[str, object]) -> dict[str, object]:
         """Обновляет ревизию по статусу и повторяет событие один раз."""
-        from .http_transport import PausedError, StaleRevisionError
+        from .http_transport import PausedError
 
         message_key = (int(event["chatId"]), int(event["messageId"]))
         status = await self.get_binding_status()
@@ -316,8 +352,8 @@ class TelegramIntake:
         if status.phase == "paused":
             self._consent = replace(self._consent, active=False, revision=status.revision)
             self._server_paused = True
-            self._last_status_refresh = monotonic()
-            self._seen_messages.add(message_key)
+            self._last_status_refresh = self._clock()
+            self._record_seen_message(message_key)
             return {"result": "paused", "revision": status.revision}
         if (
             status.phase != "active"
@@ -333,7 +369,7 @@ class TelegramIntake:
         except PausedError:
             self._consent = replace(self._consent, active=False)
             self._server_paused = True
-            self._last_status_refresh = monotonic()
-            self._seen_messages.add(message_key)
+            self._last_status_refresh = self._clock()
+            self._record_seen_message(message_key)
             logging.getLogger(__name__).warning("Telegram intake paused after server rejected event delivery")
             return {"result": "paused", "revision": status.revision}
