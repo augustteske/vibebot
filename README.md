@@ -51,9 +51,68 @@ cd vibebot
 docker compose up -d --build
 ```
 
-После запуска веб-кабинет доступен по адресу **[http://127.0.0.1:8787](http://127.0.0.1:8787)** (для локальной разработки без Docker: `npm ci && npm run dev`).
+После запуска веб-кабинет доступен по адресу **[http://127.0.0.1:8787](http://127.0.0.1:8787)**.
 
 > Локально по HTTP задайте `COOKIE_SECURE=false` и `APP_ORIGIN=http://127.0.0.1:8787` (в `.env` или перед командой) — иначе вход в кабинет не сохранит сессию.
+
+---
+
+## 🛠 Локальная разработка
+
+Для работы без Docker понадобятся **Node.js 24.x** и **Python 3.12+**.
+
+### 1. Веб-кабинет и API (Node.js + Vite)
+
+```bash
+cp .env.example .env
+npm ci
+npm run dev
+```
+
+Фронтенд откроется на **[http://127.0.0.1:5173](http://127.0.0.1:5173)**, а сервер API — на `http://127.0.0.1:8787` (проверить окружение можно командой `npm run doctor`).
+
+### 2. Telegram-бот (Python 3.12)
+
+Создайте виртуальное окружение и установите зависимости:
+
+```bash
+# Linux / macOS
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r bot/requirements.txt
+
+# Windows (PowerShell)
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r bot/requirements.txt
+```
+
+Запустите бота, передав `TELEGRAM_BOT_TOKEN` и `VIBEE_API_BASE_URL`:
+
+```bash
+# Linux / macOS
+TELEGRAM_BOT_TOKEN=your_bot_token VIBEE_API_BASE_URL=http://localhost:8787 python -m bot
+
+# Windows (PowerShell)
+$env:TELEGRAM_BOT_TOKEN="your_bot_token"
+$env:VIBEE_API_BASE_URL="http://localhost:8787"
+python -m bot
+```
+
+*(Проверить конфигурацию бота без подключения к Telegram можно командой `python -m bot --check`.)*
+
+### 3. Тестирование
+
+```bash
+# Тесты API и UI (Node.js) + полная проверка типов и сборки
+npm test
+npm run check
+
+# Модульные тесты Telegram-бота (Python)
+python -m unittest discover -s bot/tests -v
+```
+
+---
 
 ## ☁️ Деплой на сервер
 

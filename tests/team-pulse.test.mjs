@@ -25,10 +25,12 @@ test('weekly pulse renders real periods and hides insufficient, calibrating and 
   assert.match(html, /20%/)
   assert.match(html, /<details open/)
   assert.match(html, /Демо/)
-  assert.doesNotMatch(render({ ...history, status: 'paused', periods: [published] }), /25%|89\.8%|20%|<details/)
+  assert.match(html, /share-card-trigger/)
+  assert.doesNotMatch(render({ ...history, status: 'paused', periods: [published] }), /25%|89\.8%|20%|<details|share-card-trigger/)
   const current = renderToStaticMarkup(createElement(TeamPulse, {
     view: { status: 'insufficient' }, loading: false, error: null, onRetry() {},
   }))
   assert.match(current, /<option value="week">Неделя/)
   assert.match(current, /<option value="month" disabled/)
+  assert.doesNotMatch(current, /share-card-trigger/)
 })
