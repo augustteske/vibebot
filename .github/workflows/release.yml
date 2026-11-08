@@ -10,9 +10,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v ver="$VERSION" '
+            /^## \[/ { if (found) exit; if (index($0, "## [" ver "]") == 1) { found = 1; next } }
+            /^\[[^]]+\]: / { if (found) exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "::error file=CHANGELOG.md::Нет секции ## [$VERSION] для тега $GITHUB_REF_NAME"
+            exit 1
+          fi
+          cat release-notes.md
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           name: Vibee ${{ github.ref_name }}
-          body: "Первый стабильный релиз Vibee. Включает Telegram-бота, веб-кабинет с графиками, тёмную/светлую тему, вход по ключу комнаты, окна обратной связи и умные рекомендации."
+          body_path: release-notes.md
           generate_release_notes: true
