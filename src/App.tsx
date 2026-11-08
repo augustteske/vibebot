@@ -8,20 +8,23 @@ import { TeamWorkspace } from './core/TeamWorkspace'
 import { LandingPage } from './core/LandingPage'
 import { DemoDashboard } from './core/DemoDashboard'
 import { NotFoundPage } from './core/NotFoundPage'
+import { ThemeToggle } from './core/ThemeToggle'
+import { FeedbackModal } from './core/FeedbackModal'
 import './App.css'
 
 export default function App() {
   const [scenario, setScenario] = useState<keyof typeof demoRounds>('clarity')
   const [demo, setDemo] = useState(() => window.location.pathname === '/demo')
-  const [team, setTeam] = useState(() => window.location.pathname !== '/demo' && (new URLSearchParams(window.location.search).get('mode') === 'team' || window.location.hash.startsWith('#invite=')))
-  const [enteredWorkspace, setEnteredWorkspace] = useState(() => window.location.pathname !== '/demo' && (new URLSearchParams(window.location.search).get('mode') === 'team' || window.location.hash.startsWith('#invite=')))
+  const hasTeamHash = () => window.location.hash.startsWith('#invite=') || window.location.hash.startsWith('#room=')
+  const [team, setTeam] = useState(() => window.location.pathname !== '/demo' && (new URLSearchParams(window.location.search).get('mode') === 'team' || hasTeamHash()))
+  const [enteredWorkspace, setEnteredWorkspace] = useState(() => window.location.pathname !== '/demo' && (new URLSearchParams(window.location.search).get('mode') === 'team' || hasTeamHash()))
   const summary = aggregateRound(demoRounds[scenario])
   const knownPath = window.location.pathname === '/' || window.location.pathname === '/demo'
 
   useEffect(() => {
     function syncRoute() {
       const demoRoute = window.location.pathname === '/demo'
-      const teamRoute = !demoRoute && (new URLSearchParams(window.location.search).get('mode') === 'team' || window.location.hash.startsWith('#invite='))
+      const teamRoute = !demoRoute && (new URLSearchParams(window.location.search).get('mode') === 'team' || window.location.hash.startsWith('#invite=') || window.location.hash.startsWith('#room='))
       setDemo(demoRoute)
       setTeam(teamRoute)
       setEnteredWorkspace(teamRoute)
@@ -56,19 +59,28 @@ export default function App() {
   }
   if (!knownPath) return <NotFoundPage />
   if (!enteredWorkspace) {
-    return <LandingPage onEnter={() => mode(true)} onDemo={openDemo} />
+    return <LandingPage
+      onEnter={() => mode(true)}
+      onDemo={openDemo}
+      onJoinByKey={key => {
+        window.history.pushState(null, '', '/?mode=team#room=' + encodeURIComponent(key))
+        setDemo(false)
+        setTeam(true)
+        setEnteredWorkspace(true)
+      }}
+    />
   }
   return <main className="workspace">
     <header><a className="brand" href="/" onClick={event => {
       event.preventDefault()
       openHome()
-    }}><img src="/bee.svg" alt=""/>Vibee</a><span className="badge">{team ? 'Пространство команды' : 'Демонстрация · вымышленные данные'}</span></header>
+    }}><img src="/bee.svg" alt=""/>Vibee</a><div className="header-actions"><span className="badge">{team ? 'Пространство команды' : 'Демонстрация · вымышленные данные'}</span><ThemeToggle /></div></header>
     <section className="intro"><span className="eyebrow">ПРОСТРАНСТВО КОМАНДЫ</span><h1>Почувствовать команду.<br/>Сделать следующий шаг.</h1><p>Ресурс, ясность и поддержка — повод договориться о том, что поможет сегодня. Утилита для рабочих чатов — в разработке.</p></section>
     <nav className="mode-switch" aria-label="Режим"><button className="button secondary" aria-pressed={!team} onClick={() => mode(false)}>Демонстрационный режим</button><button className="button secondary" aria-pressed={team} onClick={() => mode(true)}>Моя команда</button></nav>
     {team ? <TeamWorkspace/> : <>
       <label className="scenario">Демо-сценарий <select value={scenario} onChange={e => setScenario(e.target.value as keyof typeof demoRounds)}><option value="clarity">Шесть участников · мало ясности</option><option value="small">Четыре участника · данные скрыты</option><option value="open">Раунд ещё открыт</option></select></label>
       <div className="grid"><section><InsightsPanel summary={summary}/><ActionsPanel key={scenario} summary={summary}/></section><aside><CheckinPanel/><div className="note"><strong>Ты управляешь следующим шагом</strong><p>Предложения публикуются после подтверждения. Этот режим использует вымышленные данные, без подключения ИИ. Для сохранения и совместной работы откройте «Моя команда».</p></div></aside></div>
     </>}
-    <footer>Vibee · Shertwg group</footer>
+    <footer><span>Vibee · Shertwg group</span><FeedbackModal/></footer>
   </main>
 }

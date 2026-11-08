@@ -28,6 +28,60 @@
 
 <h2 align="center">Быстрый старт</h2>
 
+### Быстрый старт на VPS
+
+Для развёртывания на чистом сервере Ubuntu/Debian (например, Hetzner, Timeweb или любом другом VPS):
+
+1. **Подключитесь к серверу по SSH:**
+   ```sh
+   ssh root@YOUR_SERVER_IP
+   ```
+2. **Установите `git` (если на чистом образе его ещё нет) и склонируйте репозиторий:**
+   ```sh
+   apt-get update && apt-get install -y git
+   git clone --branch feat/august-core https://github.com/augustteske/vibebot.git
+   cd vibebot
+   ```
+3. **Запустите скрипт первичной подготовки `scripts/bootstrap.sh`:**
+   ```sh
+   bash scripts/bootstrap.sh
+   ```
+   - Скрипт автоматически проверит наличие `git`, `docker` и `docker compose` и при отсутствии установит их через `apt-get`.
+   - При первом запуске скрипт создаст `.env` из `.env.example` и остановится с сообщением: `Заполните .env (токен бота, домен) и запустите снова`.
+   - Откройте `.env` (например, `nano .env`), укажите `TELEGRAM_BOT_TOKEN`, `APP_ORIGIN` (например, `http://YOUR_SERVER_IP:8787` для проверки по IP или ваш HTTPS-домен) и `COOKIE_SECURE` (`false` для HTTP по IP, `true` для HTTPS), после чего запустите скрипт повторно:
+     ```sh
+     bash scripts/bootstrap.sh
+     ```
+4. **Проверьте, что всё работает:**
+   ```sh
+   docker compose ps
+   curl --fail http://127.0.0.1:8787/api/health
+   ```
+   В ответе должно вернуться `{"ok":true}`, а веб-интерфейс будет доступен по адресу `http://YOUR_SERVER_IP:8787`.
+
+### Деплой на Oracle Cloud (Ubuntu ARM / Ampere A1)
+
+Контейнеры `web` (`node:24-bookworm-slim`) и `bot` (`python:3.12-slim`), а также `scripts/bootstrap.sh` полностью поддерживают архитектуру `linux/arm64` (`aarch64`) без эмуляции.
+
+1. **Создайте ARM-инстанс в Oracle Cloud (OCI):**
+   - Выберите образ **Canonical Ubuntu 22.04** или **24.04 (aarch64)**.
+   - Выберите Shape **VM.Standard.A1.Flex** (процессор Ampere ARM64, например 1–4 OCPU и 6–24 ГБ ОЗУ в рамках Always Free) и добавьте свой SSH-ключ.
+2. **Откройте TCP-порт `8787`:**
+   - **В консоли Oracle Cloud:** перейдите в *Networking → Virtual Cloud Networks → ваша VCN → Subnet → Security Lists → Add Ingress Rules* и добавьте правило: Source CIDR `0.0.0.0/0`, IP Protocol `TCP`, Destination Port Range `8787`.
+   - **Внутри самой ВМ Ubuntu** (в образах Oracle по умолчанию активно блокирующее правило `iptables`):
+     ```sh
+     sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 8787 -j ACCEPT
+     sudo netfilter-persistent save
+     ```
+3. **Запустите `bootstrap.sh`:**
+   ```sh
+   ssh ubuntu@YOUR_ORACLE_IP
+   git clone --branch feat/august-core https://github.com/augustteske/vibebot.git
+   cd vibebot
+   bash scripts/bootstrap.sh
+   ```
+   Заполните созданный `.env` (`nano .env`) и выполните `bash scripts/bootstrap.sh` повторно.
+
 ### Развёртывание одной командой
 
 На Ubuntu/Debian или macOS запустите из корня репозитория:

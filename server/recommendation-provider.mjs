@@ -19,15 +19,77 @@ const PROVIDERS = {
   },
 }
 
+// Пороги, после которых показатель считается заметным отклонением.
+const THRESHOLDS = Object.freeze({
+  outsideHoursPercent: 50,
+  participationEvenness: 50,
+  recognitionPercent: 10,
+})
+
+// Насколько показатель ушёл за свой порог: 0 — в норме, 1 — максимально заметно.
+function severity(value, threshold, direction) {
+  if (direction === 'above') {
+    return value > threshold ? (value - threshold) / (100 - threshold) : 0
+  }
+  return value < threshold ? (threshold - value) / threshold : 0
+}
+
+function scheduleCard(metrics) {
+  return {
+    observation: `Вне рабочих интервалов отправлено ${metrics.outsideHoursPercent}% сообщений периода.`,
+    explanation: 'Возможно, часть обсуждений приходится на время вне согласованного расписания.',
+    limitation: 'Это доля сообщений, а не оценка нагрузки или благополучия участников; причины неизвестны.',
+    action: 'Обсудить с командой удобное время для рабочих сообщений.',
+  }
+}
+
+function participationCard(metrics) {
+  return {
+    observation: `Равномерность участия — ${metrics.participationEvenness}%: вклад участников заметно различается.`,
+    explanation: 'Возможно, кто-то стал меньше писать из-за загрузки или нехватки контекста.',
+    limitation: 'Показатель описывает распределение сообщений, а не вовлечённость или отношение людей; причины неизвестны.',
+    action: 'Проверить загрузку команды и уточнить, не нужна ли кому-то поддержка.',
+  }
+}
+
+function recognitionCard(metrics) {
+  return {
+    observation: `Благодарности — ${metrics.recognitionPercent}% сообщений периода: это мало.`,
+    explanation: 'Возможно, вклад участников остаётся незамеченным.',
+    limitation: 'Доля благодарностей зависит от стиля общения и не измеряет реальную поддержку в команде.',
+    action: 'Отметить чей-то вклад: короткое «спасибо» за конкретную помощь.',
+  }
+}
+
+function balancedCard() {
+  return {
+    observation: 'Заметных отклонений по расписанию, участию и благодарностям нет.',
+    explanation: 'Показатели периода держатся в спокойных пределах.',
+    limitation: 'Метрики не показывают причин и не оценивают людей; это только повод для разговора.',
+    action: 'Продолжать текущий ритм и следить за изменениями.',
+  }
+}
+
+// Правила проверяются по порядку; при равной заметности выигрывает верхнее.
+const TEMPLATE_RULES = Object.freeze([
+  { card: scheduleCard, weight: metrics => severity(metrics.outsideHoursPercent, THRESHOLDS.outsideHoursPercent, 'above') },
+  { card: participationCard, weight: metrics => severity(metrics.participationEvenness, THRESHOLDS.participationEvenness, 'below') },
+  { card: recognitionCard, weight: metrics => severity(metrics.recognitionPercent, THRESHOLDS.recognitionPercent, 'below') },
+])
+
+function templateRecommendationCard(metrics) {
+  let best = null
+  for (const rule of TEMPLATE_RULES) {
+    const weight = rule.weight(metrics)
+    if (weight > 0 && (best === null || weight > best.weight)) best = { card: rule.card, weight }
+  }
+  return best ? best.card(metrics) : balancedCard()
+}
+
 export const templateRecommendationProvider = Object.freeze({
   source: 'template',
   generate({ metrics }) {
-    return {
-      observation: `Вне рабочих интервалов отправлено ${metrics.outsideHoursPercent}% сообщений периода.`,
-      explanation: 'Возможно, часть обсуждений приходится на время вне согласованного расписания.',
-      limitation: 'Это доля сообщений, а не оценка нагрузки или благополучия участников; причины неизвестны.',
-      action: 'Обсудить с командой удобное время для рабочих сообщений.',
-    }
+    return templateRecommendationCard(metrics)
   },
 })
 

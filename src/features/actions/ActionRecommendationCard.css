@@ -27,9 +27,10 @@
   border-radius: 999px;
   padding: 2px 8px;
   font-size: 0.75rem;
-  background: linear-gradient(145deg, #fff, #faf9f4);
+  background: var(--vibee-surface-gradient);
 }
 .vibee-arc__badge--demo {
+  color: var(--vibee-yellow-ink);
   background: var(--arc-yellow);
   font-weight: 700;
 }
@@ -42,7 +43,7 @@
 .vibee-arc__why {
   border: 1px solid var(--arc-line);
   border-radius: 16px;
-  background: #fffefa;
+  background: var(--vibee-surface-alt);
   overflow: hidden;
   interpolate-size: allow-keywords;
 }
@@ -62,7 +63,7 @@
 .vibee-arc__why-summary::-webkit-details-marker { display: none; }
 .vibee-arc__why-summary::marker { content: ''; }
 .vibee-arc__why-summary:hover { background: rgba(255, 214, 56, .14); }
-.vibee-arc__why-summary:focus-visible { outline: 3px solid #806013; outline-offset: -3px; }
+.vibee-arc__why-summary:focus-visible { outline: 3px solid var(--vibee-focus); outline-offset: -3px; }
 
 .vibee-arc__why-title { display: inline-flex; align-items: center; gap: 10px; }
 .vibee-arc__why-title::before {
@@ -127,7 +128,7 @@
   border-left: 4px solid var(--arc-yellow);
   border-radius: 0 14px 14px 0;
   padding: 12px 16px;
-  background: linear-gradient(135deg, #fff9df, #fffefa);
+  background: linear-gradient(135deg, var(--vibee-tint-flat), var(--vibee-surface-alt));
 }
 .vibee-arc__action-label { margin: 0 0 4px; font-size: 0.78rem; text-transform: uppercase; color: var(--arc-muted); }
 .vibee-arc__action-text { margin: 0; font-weight: 600; }
@@ -139,10 +140,12 @@
   padding: 12px 14px;
   border: 1px solid var(--arc-line);
   border-radius: var(--vibee-radius-control);
+  background: var(--vibee-field-bg);
+  color: var(--arc-black);
   resize: vertical;
   transition: border-color .18s ease, box-shadow .18s ease;
 }
-.vibee-arc__textarea:focus { border-color: #c79c00; outline: 0; box-shadow: 0 0 0 4px rgba(255, 214, 56, .24); }
+.vibee-arc__textarea:focus { border-color: var(--vibee-yellow-deep); outline: 0; box-shadow: 0 0 0 4px rgba(255, 214, 56, .24); }
 .vibee-arc__hint { margin: 4px 0 0; font-size: 0.78rem; color: var(--arc-muted); }
 
 .vibee-arc__controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -152,25 +155,25 @@
   padding: 9px 16px;
   border: 1px solid var(--arc-line);
   border-radius: 999px;
-  background: linear-gradient(145deg, #fff, #faf9f4);
+  background: var(--vibee-surface-gradient);
   color: var(--arc-black);
   cursor: pointer;
   transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
 }
 .vibee-arc__btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: var(--vibee-shadow-soft); }
-.vibee-arc__btn--primary { border-color: #e4bb16; background: linear-gradient(135deg, #ffe982, var(--arc-yellow) 58%, var(--vibee-yellow-deep)); font-weight: 740; }
+.vibee-arc__btn--primary { border-color: var(--vibee-yellow-line); color: var(--vibee-yellow-ink); background: var(--vibee-yellow-gradient); font-weight: 740; }
 .vibee-arc__btn--quiet { border-style: dashed; color: var(--arc-muted); }
-.vibee-arc__btn--chip[aria-pressed='true'] { background: var(--arc-yellow); font-weight: 700; }
+.vibee-arc__btn--chip[aria-pressed='true'] { color: var(--vibee-yellow-ink); background: var(--arc-yellow); font-weight: 700; }
 .vibee-arc__btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .vibee-arc__btn:focus-visible,
-.vibee-arc__textarea:focus-visible { outline: 3px solid #806013; outline-offset: 3px; }
+.vibee-arc__textarea:focus-visible { outline: 3px solid var(--vibee-focus); outline-offset: 3px; }
 
-.vibee-arc__feedback { border: 1px solid var(--arc-line); border-radius: 16px; padding: 12px 16px; margin: 0; display: flex; flex-wrap: wrap; gap: 8px; background: #fffefa; }
+.vibee-arc__feedback { border: 1px solid var(--arc-line); border-radius: 16px; padding: 12px 16px; margin: 0; display: flex; flex-wrap: wrap; gap: 8px; background: var(--vibee-surface-alt); }
 .vibee-arc__feedback legend { padding: 0 4px; font-size: 0.8rem; }
 
 .vibee-arc__status { margin: 0; }
 .vibee-arc__status--ok { font-weight: 700; }
-.vibee-arc__error { margin: 0; color: #a40000; font-weight: 600; }
+.vibee-arc__error { margin: 0; color: var(--vibee-danger-strong); font-weight: 600; }
 .vibee-arc__note { margin: 0; font-size: 0.78rem; color: var(--arc-muted); }
 
 .vibee-arc__visually-hidden {
@@ -185,4 +188,4 @@
   .vibee-arc__btn { flex: 1 1 100%; text-align: center; }
 }
 .vibee-arc__title { font-weight: 750; letter-spacing: -.035em; }
-.vibee-arc__action { background: linear-gradient(110deg, #fff7d9, #fffaea); }
+.vibee-arc__action { background: var(--vibee-tint); }

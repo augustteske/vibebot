@@ -14,9 +14,9 @@
 }
 
 .telegram-summary-state--calibrating {
-  border: 1px solid rgba(190, 150, 0, .18);
+  border: 1px solid var(--vibee-tint-border);
   border-radius: var(--vibee-radius-card);
-  background: linear-gradient(135deg, #fff7d4, #ffe982);
+  background: var(--vibee-tint-strong);
   color: var(--vibee-ink);
   padding: 26px;
   box-shadow: var(--vibee-shadow-soft);

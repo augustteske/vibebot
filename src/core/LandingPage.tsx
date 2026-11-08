@@ -1,9 +1,22 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import type { SyntheticEvent } from 'react'
+import { ThemeToggle } from './ThemeToggle'
 import './LandingPage.css'
+
+// Большая картинка идёт через прокси предпросмотра и иногда получает 502.
+// Одна повторная загрузка с новым адресом возвращает её без перезагрузки страницы.
+function retryImageOnce(event: SyntheticEvent<HTMLImageElement>) {
+  const image = event.currentTarget
+  if (image.dataset.retry) return
+  image.dataset.retry = '1'
+  const source = image.src.split('?')[0]
+  window.setTimeout(() => { image.src = source + '?retry=' + Date.now() }, 600)
+}
 
 interface LandingPageProps {
   onEnter: () => void;
   onDemo: () => void;
+  onJoinByKey?: (roomKey: string) => void;
 }
 
 const features = [
@@ -48,7 +61,9 @@ const steps = [
   },
 ]
 
-export function LandingPage({ onEnter, onDemo }: LandingPageProps) {
+export function LandingPage({ onEnter, onDemo, onJoinByKey }: LandingPageProps) {
+  const [roomKey, setRoomKey] = useState('')
+
   useEffect(() => {
     const revealElements = Array.from(document.querySelectorAll<HTMLElement>('.landing-reveal'))
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -81,6 +96,7 @@ export function LandingPage({ onEnter, onDemo }: LandingPageProps) {
         <nav className="landing-nav" aria-label="Навигация по странице">
           <a href="#features">Преимущества</a>
           <a href="#how-it-works">Как это работает</a>
+          <ThemeToggle />
           <button className="landing-nav-cta" onClick={onEnter}>Войти в кабинет</button>
         </nav>
       </header>
@@ -105,11 +121,45 @@ export function LandingPage({ onEnter, onDemo }: LandingPageProps) {
             </a>
             <span className="landing-demo-note">Демонстрация на вымышленных данных</span>
           </div>
+          <form
+            className="landing-room-key"
+            aria-label="У меня есть ключ комнаты"
+            onSubmit={event => {
+              event.preventDefault()
+              const trimmed = roomKey.trim().toUpperCase()
+              if (!trimmed) return
+              if (onJoinByKey) {
+                onJoinByKey(trimmed)
+              } else {
+                window.history.pushState(null, '', '/?mode=team#room=' + encodeURIComponent(trimmed))
+                onEnter()
+              }
+            }}
+          >
+            <label className="landing-room-key__label" htmlFor="landing-room-key-input">
+              У меня есть ключ комнаты
+            </label>
+            <div className="landing-room-key__controls">
+              <input
+                id="landing-room-key-input"
+                name="roomKey"
+                value={roomKey}
+                onChange={event => setRoomKey(event.target.value.toUpperCase())}
+                maxLength={16}
+                autoComplete="off"
+                placeholder="Код от тимлида (напр. A1B2C3D4)"
+                required
+              />
+              <button className="landing-room-key__submit" type="submit">
+                Войти
+              </button>
+            </div>
+          </form>
         </div>
         <div className="landing-mascot landing-reveal landing-reveal--mascot" aria-hidden="true">
           <div className="landing-mascot-glow" />
           <div className="landing-orbit landing-orbit--outer" />
-          <img src="/bee-mascot.png" alt="" width="1280" height="1280" fetchPriority="high" />
+          <img src="/bee-mascot.png" alt="" width="1280" height="1280" fetchPriority="high" onError={retryImageOnce} />
           <span className="landing-float-card landing-float-card--top">Решения — за командой</span>
           <span className="landing-float-card landing-float-card--bottom">Только общие сигналы</span>
         </div>

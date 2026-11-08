@@ -1,34 +1,111 @@
-:root {
-  --vibee-ink: #171719;
-  --vibee-muted: #64646a;
-  --vibee-paper: #fffefa;
-  --vibee-surface: #ffffff;
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* Бренд: жёлтый одинаков в обеих темах, меняется только подложка. */
   --vibee-yellow: #ffd638;
   --vibee-yellow-soft: #fff5c7;
   --vibee-yellow-deep: #f5c400;
+  --vibee-yellow-ink: #332700;
+  --vibee-yellow-line: #e4bb16;
+
+  /* Жёлтые градиенты бренда: одинаковы в обеих темах. */
+  --vibee-yellow-gradient: linear-gradient(135deg, #ffe982 0%, #ffd638 58%, #f5c400 100%);
+  --vibee-yellow-gradient-hover: linear-gradient(135deg, #fff0a9 0%, #ffdf5b 55%, #ffd000 100%);
+  --vibee-yellow-band: linear-gradient(135deg, #ffe982, #ffd638 58%, #f6c900);
+
+  /* Текст */
+  --vibee-ink: #171719;
+  --vibee-ink-soft: #333338;
+  --vibee-muted: #64646a;
+  --vibee-subtle: #55555b;
+  --vibee-eyebrow: #705d16;
+  --vibee-link: #4f420f;
+  --vibee-chart-text: #111113;
+
+  /* Фоны и поверхности */
+  --vibee-paper: #fffefa;
+  --vibee-surface: #ffffff;
+  --vibee-surface-alt: #fffefa;
+  --vibee-surface-translucent: rgba(255, 255, 255, .92);
+  --vibee-surface-gradient: linear-gradient(145deg, #ffffff, #faf9f4);
+  --vibee-header-bg: rgba(255, 254, 250, .88);
+  --vibee-field-bg: #ffffff;
+  --vibee-field-focus-bg: #fffefa;
+
+  /* Жёлтые подложки для плашек, заметок и метрик */
+  --vibee-tint: linear-gradient(145deg, #fffdf6, #fff6d5);
+  --vibee-tint-flat: #fff7d4;
+  --vibee-tint-strong: linear-gradient(135deg, #fff7d4, #ffe983);
+  --vibee-tint-border: rgba(190, 150, 0, .18);
+
+  /* Линии и фокус */
   --vibee-line: rgba(23, 23, 25, .1);
-  --vibee-radius-card: 24px;
-  --vibee-radius-control: 14px;
+  --vibee-line-strong: rgba(23, 23, 25, .16);
+  --vibee-focus: #806013;
+
+  /* Тени */
   --vibee-shadow-soft: 0 12px 34px rgba(23, 23, 25, .07);
   --vibee-shadow-card: 0 22px 60px rgba(23, 23, 25, .1);
   --vibee-shadow-hover: 0 28px 68px rgba(23, 23, 25, .15);
+
+  /* Контрастные кнопки (тёмная пилюля в светлой теме). */
+  --vibee-inverse-solid: #171719;
+  --vibee-inverse-gradient: linear-gradient(135deg, #262629, #111113 70%);
+  --vibee-inverse-solid-hover: linear-gradient(135deg, #3a3420, #171719 72%);
+  --vibee-inverse-solid-ink: #ffffff;
+
+  /* Тёмная полоса лендинга и подвал: остаются тёмными в обеих темах. */
+  --vibee-band-bg:
+    radial-gradient(ellipse at 12% 0%, rgba(255, 214, 56, .12), transparent 34rem),
+    linear-gradient(180deg, #242426 0%, #151517 22%, #151517 100%);
+  --vibee-band-ink: #ffffff;
+  --vibee-band-muted: rgba(255, 255, 255, .72);
+  --vibee-band-line: rgba(255, 255, 255, .13);
+  --vibee-band-card: linear-gradient(145deg, rgba(255, 255, 255, .105), rgba(255, 255, 255, .035));
+  --vibee-band-card-hover: linear-gradient(145deg, rgba(255, 255, 255, .15), rgba(255, 255, 255, .055));
+  --vibee-footer-bg: #171719;
+  --vibee-footer-ink: #ffffff;
+  --vibee-footer-muted: rgba(255, 255, 255, .62);
+
+  /* Ошибки */
+  --vibee-danger: #751d1d;
+  --vibee-danger-strong: #a40000;
+  --vibee-danger-bg: #fff3ee;
+  --vibee-danger-line: rgba(164, 0, 0, .18);
+
+  /* Геометрия и шрифт */
+  --vibee-radius-card: 24px;
+  --vibee-radius-control: 14px;
   --vibee-font: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --paper: #faf9f6;
+
+  /* Декоративные свечения лендинга. */
+  --vibee-hero-glow:
+    radial-gradient(ellipse at 76% 48%, rgba(255, 214, 56, .34), rgba(255, 246, 203, .18) 40%, transparent 72%),
+    radial-gradient(ellipse at 94% 30%, rgba(248, 191, 0, .16), transparent 36%);
+  --vibee-halo: radial-gradient(circle at 35% 27%, #fff 0, #fff8d9 49%, rgba(255, 229, 125, .25) 72%, transparent 73%);
+  --vibee-halo-border: rgba(135, 104, 0, .12);
+  --vibee-halo-shadow: 0 35px 100px rgba(117, 91, 0, .1), inset 0 0 60px rgba(255, 255, 255, .8);
+  --vibee-glow-opacity: .35;
+
+  /* Старые имена: оставлены для совместимости с существующей разметкой. */
+  --paper: var(--vibee-paper);
   --surface: var(--vibee-surface);
-  --ink: #292a28;
-  --muted: #62645f;
-  --line: #dedfd8;
-  --honey: var(--brand-yellow);
-  --soft: #f7f3e6;
+  --ink: var(--vibee-ink);
+  --muted: var(--vibee-muted);
+  --line: var(--vibee-line);
+  --honey: var(--vibee-yellow);
+  --soft: var(--vibee-tint-flat);
   --brand-ink: var(--vibee-ink);
   --brand-yellow: var(--vibee-yellow);
-  --brand-yellow-deep: #e5b900;
+  --brand-yellow-deep: var(--vibee-yellow-deep);
   --brand-muted: var(--vibee-muted);
-  --surface-shadow: 0 18px 48px rgba(23, 23, 25, .08), 0 3px 12px rgba(23, 23, 25, .035);
-  --surface-shadow-hover: 0 24px 58px rgba(23, 23, 25, .12), 0 6px 18px rgba(23, 23, 25, .05);
+  --surface-shadow: var(--vibee-shadow-soft);
+  --surface-shadow-hover: var(--vibee-shadow-hover);
   --radius-card: 22px;
   --radius-control: var(--vibee-radius-control);
   --radius-pill: 999px;
+
   color: var(--vibee-ink);
   background: var(--vibee-paper);
   font-family: var(--vibee-font);
@@ -36,6 +113,73 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --vibee-yellow-soft: rgba(255, 214, 56, .16);
+  --vibee-yellow-ink: #2b2200;
+
+  --vibee-ink: #f4f3ee;
+  --vibee-ink-soft: #dedcd4;
+  --vibee-muted: #a6a5a0;
+  --vibee-subtle: #bdbcb6;
+  --vibee-eyebrow: #e6d188;
+  --vibee-link: #f0d97a;
+  --vibee-chart-text: #f4f3ee;
+
+  --vibee-paper: #121214;
+  --vibee-surface: #1e1e22;
+  --vibee-surface-alt: #19191d;
+  --vibee-surface-translucent: rgba(30, 30, 34, .92);
+  --vibee-surface-gradient: linear-gradient(145deg, #232327, #1b1b1f);
+  --vibee-header-bg: rgba(18, 18, 20, .86);
+  --vibee-field-bg: #1b1b1f;
+  --vibee-field-focus-bg: #202025;
+
+  --vibee-tint: linear-gradient(145deg, #262318, #201d13);
+  --vibee-tint-flat: #262216;
+  --vibee-tint-strong: linear-gradient(135deg, #2a2617, #37300f);
+  --vibee-tint-border: rgba(255, 214, 56, .22);
+
+  --vibee-line: rgba(255, 255, 255, .12);
+  --vibee-line-strong: rgba(255, 255, 255, .22);
+  --vibee-focus: #ffd638;
+
+  --vibee-shadow-soft: 0 12px 34px rgba(0, 0, 0, .45);
+  --vibee-shadow-card: 0 22px 60px rgba(0, 0, 0, .55);
+  --vibee-shadow-hover: 0 28px 68px rgba(0, 0, 0, .65);
+
+  --vibee-inverse-solid: #f2f0e9;
+  --vibee-inverse-gradient: linear-gradient(135deg, #f6f4ec, #dedacd 70%);
+  --vibee-inverse-solid-hover: linear-gradient(135deg, #ffffff, #e8e4d8 72%);
+  --vibee-inverse-solid-ink: #171719;
+
+  --vibee-band-bg:
+    radial-gradient(ellipse at 12% 0%, rgba(255, 214, 56, .1), transparent 34rem),
+    linear-gradient(180deg, #0e0e10 0%, #0a0a0c 100%);
+  --vibee-band-ink: #f7f6f1;
+  --vibee-band-muted: rgba(247, 246, 241, .72);
+  --vibee-band-line: rgba(255, 255, 255, .16);
+  --vibee-band-card: linear-gradient(145deg, rgba(255, 255, 255, .07), rgba(255, 255, 255, .02));
+  --vibee-band-card-hover: linear-gradient(145deg, rgba(255, 255, 255, .12), rgba(255, 255, 255, .04));
+  --vibee-footer-bg: #0c0c0e;
+  --vibee-footer-ink: #f4f3ee;
+  --vibee-footer-muted: rgba(244, 243, 238, .62);
+
+  --vibee-danger: #ffb4ab;
+  --vibee-danger-strong: #ff8a80;
+  --vibee-danger-bg: rgba(180, 40, 40, .16);
+  --vibee-danger-line: rgba(255, 138, 128, .32);
+
+  --vibee-hero-glow:
+    radial-gradient(ellipse at 76% 48%, rgba(255, 214, 56, .16), rgba(255, 214, 56, .05) 40%, transparent 72%),
+    radial-gradient(ellipse at 94% 30%, rgba(248, 191, 0, .1), transparent 36%);
+  --vibee-halo: radial-gradient(circle at 35% 27%, #2c2a24 0, #241f10 49%, rgba(255, 214, 56, .12) 72%, transparent 73%);
+  --vibee-halo-border: rgba(255, 214, 56, .16);
+  --vibee-halo-shadow: 0 35px 100px rgba(0, 0, 0, .5), inset 0 0 60px rgba(255, 214, 56, .08);
+  --vibee-glow-opacity: .2;
 }
 
 * { box-sizing: border-box; }
@@ -46,6 +190,22 @@ body {
   margin: 0;
   color: var(--vibee-ink);
   background: var(--vibee-paper);
+  transition: background-color .32s cubic-bezier(.22, 1, .36, 1), color .32s cubic-bezier(.22, 1, .36, 1);
+}
+
+:root.theme-transitioning,
+:root.theme-transitioning *,
+:root.theme-transitioning *::before,
+:root.theme-transitioning *::after {
+  transition-property: background-color, border-color, color, fill, stroke, box-shadow;
+  transition-duration: .32s;
+  transition-timing-function: cubic-bezier(.22, 1, .36, 1);
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: .32s;
+  animation-timing-function: cubic-bezier(.22, 1, .36, 1);
 }
 
 button,
@@ -62,7 +222,7 @@ textarea { -webkit-tap-highlight-color: transparent; }
 img { max-width: 100%; }
 
 :focus-visible {
-  outline: 3px solid #806013;
+  outline: 3px solid var(--vibee-focus);
   outline-offset: 3px;
 }
 
@@ -87,7 +247,7 @@ summary { -webkit-tap-highlight-color: transparent; }
 button { touch-action: manipulation; }
 
 input[type="range"],
-input[type="checkbox"] { accent-color: #79601c; }
+input[type="checkbox"] { accent-color: var(--vibee-yellow-deep); }
 
 input[type="range"] { min-height: 24px; }
 
@@ -97,7 +257,8 @@ input[type="range"] { min-height: 24px; }
   top: -100px;
   left: 20px;
   padding: 12px;
-  background: #fff;
+  color: var(--vibee-ink);
+  background: var(--vibee-surface);
 }
 
 .skip-link:focus { top: 12px; }

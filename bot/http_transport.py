@@ -1,8 +1,10 @@
 """Асинхронный HTTP-транспорт для передачи Telegram-событий Vibee."""
 
 import asyncio
+from collections import deque
 from datetime import datetime, timezone
 from math import isfinite
+from time import monotonic
 from typing import Callable
 from urllib.parse import quote
 from uuid import uuid4
@@ -10,6 +12,10 @@ from uuid import uuid4
 import httpx
 
 from .intake import BindingStatus
+
+
+# Сколько хранить отправленные eventId, чтобы не отправить событие дважды.
+DEDUP_TTL_SECONDS = 24 * 60 * 60
 
 
 class TransportError(Exception):
@@ -43,6 +49,7 @@ class HttpTransport:
         client: httpx.AsyncClient | None = None,
         now: Callable[[], datetime] | None = None,
         sleep: Callable[[float], object] | None = None,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._raw_binding_id = binding_id
@@ -52,6 +59,9 @@ class HttpTransport:
         self._owns_client = client is None
         self._now = now or (lambda: datetime.now(timezone.utc))
         self._sleep = sleep or asyncio.sleep
+        self._clock = clock or monotonic
+        self._delivered_events: dict[str, float] = {}
+        self._delivered_order: deque[tuple[float, str]] = deque()
 
     async def send_text(self, event: dict[str, object]) -> dict[str, object]:
         """Передаёт только контрактные поля и отображает ответы API."""
@@ -61,6 +71,9 @@ class HttpTransport:
         if not isinstance(text, str):
             raise TransportError("Telegram event text must be a string")
         payload["text"] = text[:4096]
+        event_id = payload["eventId"]
+        if not isinstance(event_id, str) or not event_id:
+            raise TransportError("Telegram event id must be a string")
         url = f"{self._base_url}/api/bot/v1/bindings/{self._binding_id}/events"
         try:
             sent_at = datetime.fromisoformat(str(payload["sentAt"]).replace("Z", "+00:00"))
@@ -68,17 +81,22 @@ class HttpTransport:
             raise TransportError("Invalid event timestamp") from None
         if sent_at.tzinfo is None:
             raise TransportError("Invalid event timestamp")
+        if self._is_duplicate(event_id):
+            # Событие уже подтверждено сервером: повтор не нужен даже без сети.
+            return {"eventId": event_id, "result": "duplicate"}
+        headers = self._post_headers()
         for attempt in range(3):
             if (self._now() - sent_at).total_seconds() > 60:
                 break
             try:
-                response = await self._client.post(url, headers=self._headers(), json=payload)
+                response = await self._client.post(url, headers=headers, json=payload)
             except (httpx.TimeoutException, httpx.RequestError):
                 response = None
             if response is not None:
                 if response.status_code not in {429} and response.status_code < 500:
                     body = self._response_body(response)
                     if response.status_code == 200 and body.get("result") in {"accepted", "duplicate", "paused"}:
+                        self._remember_delivery(event_id)
                         return body
                     code = self._error_code(body)
                     if response.status_code == 409 and code == "STALE_REVISION":
@@ -111,7 +129,7 @@ class HttpTransport:
     async def _pause(self, expected_revision: int, reason: str, request_id: str) -> BindingStatus:
         url = f"{self._base_url}/api/bot/v1/bindings/{self._binding_id}/pause"
         try:
-            response = await self._client.post(url, headers=self._headers(), json={
+            response = await self._client.post(url, headers=self._post_headers(), json={
                 "requestId": request_id, "expectedRevision": expected_revision, "reason": reason,
             })
         except (httpx.TimeoutException, httpx.RequestError) as error:
@@ -155,7 +173,7 @@ class HttpTransport:
             raise TransportError("Invalid Telegram user")
         url = f"{self._base_url}/api/bot/v1/bindings/{self._binding_id}/notifications/subscribe"
         try:
-            response = await self._client.post(url, headers=self._headers(), json={
+            response = await self._client.post(url, headers=self._post_headers(), json={
                 "telegramUserId": str(telegram_user_id),
                 "chatId": str(telegram_user_id),
             })
@@ -195,7 +213,7 @@ class HttpTransport:
             "submittedAt": submitted_at,
         }
         try:
-            response = await self._client.post(url, headers=self._headers(), json=payload)
+            response = await self._client.post(url, headers=self._post_headers(), json=payload)
         except (httpx.TimeoutException, httpx.RequestError) as error:
             raise TransportError("Vibee check-in submission failed") from error
         body = self._response_body(response)
@@ -227,6 +245,29 @@ class HttpTransport:
             "Authorization": f"Bearer {self._token}",
             "Content-Type": "application/json",
         }
+
+    def _post_headers(self) -> dict[str, str]:
+        """Заголовки POST: уникальный X-Request-Id для журналов сервера."""
+        return {**self._headers(), "X-Request-Id": str(uuid4())}
+
+    def _is_duplicate(self, event_id: str) -> bool:
+        """Проверяет, подтверждал ли сервер этот eventId за последние 24 часа."""
+        self._prune_deliveries()
+        return event_id in self._delivered_events
+
+    def _remember_delivery(self, event_id: str) -> None:
+        """Запоминает подтверждённый eventId, чтобы не отправить его снова."""
+        if event_id in self._delivered_events:
+            return
+        self._delivered_events[event_id] = self._clock() + DEDUP_TTL_SECONDS
+        self._delivered_order.append((self._delivered_events[event_id], event_id))
+
+    def _prune_deliveries(self) -> None:
+        """Удаляет из памяти eventId, срок хранения которых истёк."""
+        now = self._clock()
+        while self._delivered_order and self._delivered_order[0][0] <= now:
+            _, event_id = self._delivered_order.popleft()
+            self._delivered_events.pop(event_id, None)
 
     @staticmethod
     def _response_body(response: httpx.Response) -> dict[str, object]:
