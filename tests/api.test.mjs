@@ -227,6 +227,27 @@ test('invitations are single-use and ordinary participants cannot create them', 
   assert.equal((await people[1]('/invitations', {})).status, 403)
 })
 
+test('room key is generated on workspace creation and allows fast participant onboarding via /join-by-key', async t => {
+  const { client } = await start(t)
+  const owner = client()
+  const created = await owner('/workspaces', { name: 'Альфа', displayName: 'Тимлид' })
+  assert.equal(created.status, 201)
+  const roomKey = created.body.workspace.roomKey
+  assert.equal(typeof roomKey, 'string')
+  assert.match(roomKey, /^[A-F0-9]{8}$/)
+
+  const participant = client()
+  const joined = await participant('/join-by-key', { roomKey: roomKey.toLowerCase() })
+  assert.equal(joined.status, 201)
+  assert.equal(joined.body.workspace.name, 'Альфа')
+  assert.equal(joined.body.member.role, 'participant')
+  assert.equal(joined.body.workspace.roomKey, undefined)
+
+  const badJoin = await client()('/join-by-key', { roomKey: 'ZZZZ9999' })
+  assert.equal(badJoin.status, 400)
+  assert.equal(badJoin.body.error.code, 'INVALID_ROOM_KEY')
+})
+
 test('session, JSON values, request origin and workspace boundaries are enforced', async t => {
   const { owner, client, roundId } = await team(t, 1)
   const outsider = client()

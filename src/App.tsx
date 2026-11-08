@@ -13,15 +13,16 @@ import './App.css'
 export default function App() {
   const [scenario, setScenario] = useState<keyof typeof demoRounds>('clarity')
   const [demo, setDemo] = useState(() => window.location.pathname === '/demo')
-  const [team, setTeam] = useState(() => window.location.pathname !== '/demo' && (new URLSearchParams(window.location.search).get('mode') === 'team' || window.location.hash.startsWith('#invite=')))
-  const [enteredWorkspace, setEnteredWorkspace] = useState(() => window.location.pathname !== '/demo' && (new URLSearchParams(window.location.search).get('mode') === 'team' || window.location.hash.startsWith('#invite=')))
+  const hasTeamHash = () => window.location.hash.startsWith('#invite=') || window.location.hash.startsWith('#room=')
+  const [team, setTeam] = useState(() => window.location.pathname !== '/demo' && (new URLSearchParams(window.location.search).get('mode') === 'team' || hasTeamHash()))
+  const [enteredWorkspace, setEnteredWorkspace] = useState(() => window.location.pathname !== '/demo' && (new URLSearchParams(window.location.search).get('mode') === 'team' || hasTeamHash()))
   const summary = aggregateRound(demoRounds[scenario])
   const knownPath = window.location.pathname === '/' || window.location.pathname === '/demo'
 
   useEffect(() => {
     function syncRoute() {
       const demoRoute = window.location.pathname === '/demo'
-      const teamRoute = !demoRoute && (new URLSearchParams(window.location.search).get('mode') === 'team' || window.location.hash.startsWith('#invite='))
+      const teamRoute = !demoRoute && (new URLSearchParams(window.location.search).get('mode') === 'team' || window.location.hash.startsWith('#invite=') || window.location.hash.startsWith('#room='))
       setDemo(demoRoute)
       setTeam(teamRoute)
       setEnteredWorkspace(teamRoute)
@@ -56,7 +57,16 @@ export default function App() {
   }
   if (!knownPath) return <NotFoundPage />
   if (!enteredWorkspace) {
-    return <LandingPage onEnter={() => mode(true)} onDemo={openDemo} />
+    return <LandingPage
+      onEnter={() => mode(true)}
+      onDemo={openDemo}
+      onJoinByKey={key => {
+        window.history.pushState(null, '', '/?mode=team#room=' + encodeURIComponent(key))
+        setDemo(false)
+        setTeam(true)
+        setEnteredWorkspace(true)
+      }}
+    />
   }
   return <main className="workspace">
     <header><a className="brand" href="/" onClick={event => {

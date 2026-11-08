@@ -120,6 +120,47 @@
 .workspace .entrance h2 { margin-bottom: 12px; font-size: clamp(30px, 5vw, 40px); }
 .entrance > p { margin-bottom: 26px; }
 .entrance form .button { width: 100%; min-height: 54px; margin-top: 8px; font-size: 15px; }
+.room-key-box {
+  margin-bottom: 24px;
+  border: 1px solid rgba(23, 23, 25, .1);
+  border-radius: 22px;
+  padding: 16px 18px;
+  background: linear-gradient(145deg, rgba(255, 253, 244, .96), rgba(255, 246, 206, .48));
+}
+.room-key-box .team-field { margin: 0; }
+.room-key-box__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.room-key-box__row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 680;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.room-key-box__row input::placeholder {
+  font-weight: 450;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.entrance form.room-key-box .room-key-box__submit {
+  width: auto;
+  min-height: 52px;
+  flex: 0 0 auto;
+  margin-top: 0;
+  padding-inline: 22px;
+}
+.room-key-share {
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--vibee-line);
+  padding-bottom: 12px;
+}
+.room-key-share input {
+  font-weight: 740;
+  letter-spacing: .08em;
+}
 .entrance__submit { position: relative; overflow: hidden; }
 .entrance__submit::before {
   position: absolute;

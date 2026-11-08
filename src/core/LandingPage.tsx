@@ -1,9 +1,10 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import './LandingPage.css'
 
 interface LandingPageProps {
   onEnter: () => void;
   onDemo: () => void;
+  onJoinByKey?: (roomKey: string) => void;
 }
 
 const features = [
@@ -48,7 +49,9 @@ const steps = [
   },
 ]
 
-export function LandingPage({ onEnter, onDemo }: LandingPageProps) {
+export function LandingPage({ onEnter, onDemo, onJoinByKey }: LandingPageProps) {
+  const [roomKey, setRoomKey] = useState('')
+
   useEffect(() => {
     const revealElements = Array.from(document.querySelectorAll<HTMLElement>('.landing-reveal'))
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -105,6 +108,40 @@ export function LandingPage({ onEnter, onDemo }: LandingPageProps) {
             </a>
             <span className="landing-demo-note">Демонстрация на вымышленных данных</span>
           </div>
+          <form
+            className="landing-room-key"
+            aria-label="У меня есть ключ комнаты"
+            onSubmit={event => {
+              event.preventDefault()
+              const trimmed = roomKey.trim().toUpperCase()
+              if (!trimmed) return
+              if (onJoinByKey) {
+                onJoinByKey(trimmed)
+              } else {
+                window.history.pushState(null, '', '/?mode=team#room=' + encodeURIComponent(trimmed))
+                onEnter()
+              }
+            }}
+          >
+            <label className="landing-room-key__label" htmlFor="landing-room-key-input">
+              У меня есть ключ комнаты
+            </label>
+            <div className="landing-room-key__controls">
+              <input
+                id="landing-room-key-input"
+                name="roomKey"
+                value={roomKey}
+                onChange={event => setRoomKey(event.target.value.toUpperCase())}
+                maxLength={16}
+                autoComplete="off"
+                placeholder="Код от тимлида (напр. A1B2C3D4)"
+                required
+              />
+              <button className="landing-room-key__submit" type="submit">
+                Войти
+              </button>
+            </div>
+          </form>
         </div>
         <div className="landing-mascot landing-reveal landing-reveal--mascot" aria-hidden="true">
           <div className="landing-mascot-glow" />

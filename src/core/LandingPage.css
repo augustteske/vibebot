@@ -241,6 +241,87 @@
   font-weight: 550;
 }
 
+.landing-room-key {
+  max-width: 480px;
+  margin-top: 22px;
+  border: 1px solid rgba(23, 23, 25, .1);
+  border-radius: 22px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, .82);
+  box-shadow: 0 10px 30px rgba(23, 23, 25, .06);
+  backdrop-filter: blur(12px);
+}
+
+.landing-room-key__label {
+  display: block;
+  margin-bottom: 9px;
+  color: #39393f;
+  font-size: 12px;
+  font-weight: 740;
+  letter-spacing: .02em;
+}
+
+.landing-room-key__controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.landing-room-key__controls input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 46px;
+  border: 1px solid rgba(23, 23, 25, .16);
+  border-radius: 999px;
+  padding: 0 16px;
+  color: var(--landing-ink);
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+
+.landing-room-key__controls input::placeholder {
+  color: #8a8a90;
+  font-weight: 450;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.landing-room-key__controls input:focus {
+  border-color: #c79c00;
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(255, 214, 56, .26);
+}
+
+.landing-room-key__submit {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  min-height: 46px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--landing-ink);
+  border-radius: 999px;
+  padding: 0 20px;
+  color: #fff;
+  background: linear-gradient(135deg, #262629, #111113 70%);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 720;
+  cursor: pointer;
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+
+.landing-room-key__submit:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px rgba(23, 23, 25, .18);
+}
+
 .landing-github {
   min-height: 56px;
   border-color: rgba(23, 23, 25, .12);

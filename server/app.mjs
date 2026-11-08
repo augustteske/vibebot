@@ -265,9 +265,12 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
       const input = req.method === 'POST' ? await body(req) : null
       const token = tokenFrom(req)
       const member = store.authenticate(token)
-      if (req.method === 'POST' && ['/api/workspaces', '/api/join', '/api/restore'].includes(url.pathname)) {
+      if (req.method === 'POST' && ['/api/workspaces', '/api/join', '/api/join-by-key', '/api/restore'].includes(url.pathname)) {
         if (member) throw new AppError(409, 'ALREADY_SIGNED_IN', 'Сначала выйдите из текущего пространства')
-        const newToken = url.pathname === '/api/workspaces' ? store.createWorkspace(input) : url.pathname === '/api/restore' ? store.restore(input) : store.join(input)
+        const newToken = url.pathname === '/api/workspaces' ? store.createWorkspace(input)
+          : url.pathname === '/api/restore' ? store.restore(input)
+          : url.pathname === '/api/join-by-key' ? store.joinByKey(input)
+          : store.join(input)
         res.setHeader('Set-Cookie', cookie(newToken))
         return json(res, 201, store.snapshot(store.authenticate(newToken)))
       }

@@ -36,9 +36,20 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
     CREATE TABLE IF NOT EXISTS actions(id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), round_id TEXT NOT NULL REFERENCES rounds(id), kind TEXT NOT NULL, title TEXT NOT NULL, goal TEXT NOT NULL, created_at TEXT NOT NULL, feedback_closed_at TEXT, feedback_summary TEXT, UNIQUE(round_id,kind));
     CREATE TABLE IF NOT EXISTS feedback(action_id TEXT NOT NULL REFERENCES actions(id), voter_key TEXT NOT NULL, helpful INTEGER NOT NULL CHECK(helpful IN (0,1)), PRIMARY KEY(action_id,voter_key));
   `)
+  const workspaceColumns = db.prepare('PRAGMA table_info(workspaces)').all()
+  if (!workspaceColumns.some(column => column.name === 'room_key')) {
+    db.exec('ALTER TABLE workspaces ADD COLUMN room_key TEXT; CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_room_key ON workspaces(room_key);')
+  }
   const one = (sql, ...args) => db.prepare(sql).get(...args)
   const all = (sql, ...args) => db.prepare(sql).all(...args)
   const run = (sql, ...args) => db.prepare(sql).run(...args)
+  const generateRoomKey = () => {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const candidate = randomBytes(4).toString('hex').toUpperCase()
+      if (!one('SELECT 1 FROM workspaces WHERE room_key=?', candidate)) return candidate
+    }
+    return randomBytes(4).toString('hex').toUpperCase()
+  }
   const key = (scope, member) => createHmac('sha256', secret).update(scope + ':' + member.id).digest('hex')
   const tx = fn => { db.exec('BEGIN IMMEDIATE'); try { const result = fn(); db.exec('COMMIT'); return result } catch (error) { db.exec('ROLLBACK'); throw error } }
   const requireOrganizer = member => { if (member.role !== 'organizer') fail(403, 'FORBIDDEN', 'Это действие доступно организатору') }
@@ -95,8 +106,8 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
       const name = text(input.name, 80, 'Название команды')
       const memberName = text(input.displayName, 60, 'Имя участника')
       return tx(() => {
-        const workspaceId = randomUUID(), memberId = randomUUID()
-        run('INSERT INTO workspaces VALUES(?,?)', workspaceId, name)
+        const workspaceId = randomUUID(), memberId = randomUUID(), roomKey = generateRoomKey()
+        run('INSERT INTO workspaces(id,name,room_key) VALUES(?,?,?)', workspaceId, name, roomKey)
         run('INSERT INTO members VALUES(?,?,?,?)', memberId, workspaceId, memberName, 'organizer')
         createRound(workspaceId)
         return session(memberId)
@@ -107,9 +118,24 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
       const token = randomBytes(32).toString('hex')
       const expiresAt = now() + 86400000
       run('INSERT INTO invitations(token_hash,workspace_id,expires) VALUES(?,?,?)', hash(token), member.workspace_id, expiresAt)
-      return { token, expiresAt: new Date(expiresAt).toISOString() }
+      const ws = one('SELECT room_key FROM workspaces WHERE id=?', member.workspace_id)
+      return { token, ...(ws?.room_key ? { roomKey: ws.room_key } : {}), expiresAt: new Date(expiresAt).toISOString() }
+    },
+    joinByKey(input) {
+      const rawKey = input?.roomKey ?? input?.key ?? input?.token
+      const roomKey = text(rawKey, 16, 'Ключ комнаты').toUpperCase()
+      const rawName = typeof input?.displayName === 'string' && input.displayName.trim() ? input.displayName : 'Участник'
+      const name = text(rawName, 60, 'Имя участника')
+      return tx(() => {
+        const workspace = one('SELECT id FROM workspaces WHERE UPPER(room_key)=?', roomKey)
+        if (!workspace) fail(400, 'INVALID_ROOM_KEY', 'Ключ комнаты не найден. Проверьте код у организатора и попробуйте снова.')
+        const id = randomUUID()
+        run('INSERT INTO members VALUES(?,?,?,?)', id, workspace.id, name, 'participant')
+        return session(id)
+      })
     },
     join(input) {
+      if (input?.roomKey !== undefined) return this.joinByKey(input)
       const token = text(input.token, 64, 'Приглашение')
       const name = text(input.displayName, 60, 'Имя участника')
       return tx(() => {
@@ -122,7 +148,17 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
       })
     },
     snapshot(member) {
-      const workspace = one('SELECT id,name FROM workspaces WHERE id=?', member.workspace_id)
+      let workspaceRow = one('SELECT id,name,room_key FROM workspaces WHERE id=?', member.workspace_id)
+      if (workspaceRow && !workspaceRow.room_key) {
+        const roomKey = generateRoomKey()
+        run('UPDATE workspaces SET room_key=? WHERE id=?', roomKey, workspaceRow.id)
+        workspaceRow = { ...workspaceRow, room_key: roomKey }
+      }
+      const workspace = {
+        id: workspaceRow.id,
+        name: workspaceRow.name,
+        ...(member.role === 'organizer' && workspaceRow.room_key ? { roomKey: workspaceRow.room_key } : {}),
+      }
       const round = roundFor(member)
       const actions = all('SELECT * FROM actions WHERE workspace_id=? ORDER BY rowid DESC LIMIT 12', member.workspace_id).map(action => ({
         id: action.id, title: action.title, goal: action.goal, createdAt: action.created_at,
