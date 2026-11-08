@@ -442,13 +442,20 @@
 .landing-snowflake {
   position: absolute;
   top: -20px;
+  border: 1px solid rgba(217, 174, 0, .32);
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(255, 255, 255, .95) 0%, rgba(255, 214, 56, .55) 100%);
-  box-shadow: 0 0 8px rgba(255, 214, 56, .35);
-  opacity: .72;
+  background: radial-gradient(circle, rgba(255, 255, 255, .96) 0%, rgba(255, 214, 56, .62) 100%);
+  box-shadow: 0 0 8px rgba(217, 174, 0, .32);
+  opacity: .76;
   animation-name: landing-snow-fall;
   animation-timing-function: linear;
   animation-iteration-count: infinite;
+}
+
+:root[data-theme="dark"] .landing-snowflake {
+  border-color: rgba(255, 255, 255, .28);
+  background: radial-gradient(circle, rgba(255, 255, 255, .98) 0%, rgba(255, 214, 56, .58) 100%);
+  box-shadow: 0 0 10px rgba(255, 255, 255, .32);
 }
 
 @keyframes landing-snow-fall {
@@ -1228,6 +1235,27 @@
 
   .landing-mascot img {
     width: min(112%, 440px);
+  }
+
+  .landing-mascot-hat {
+    top: 3%;
+    width: clamp(72px, 22vw, 108px);
+  }
+
+  .landing-room-key__controls {
+    flex-wrap: wrap;
+  }
+
+  .landing-room-key__submit {
+    width: 100%;
+  }
+
+  .landing-contrast {
+    padding-block: 64px;
+  }
+
+  .landing-contrast-controls {
+    margin-top: 18px;
   }
 
   .landing-orbit {
