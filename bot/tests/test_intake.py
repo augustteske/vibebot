@@ -4,10 +4,18 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
+from uuid import UUID
 
 import httpx
 
-from bot.http_transport import DeliveryUncertainError, HttpTransport, PausedError, StaleRevisionError, TransportError
+from bot.http_transport import (
+    DEDUP_TTL_SECONDS,
+    DeliveryUncertainError,
+    HttpTransport,
+    PausedError,
+    StaleRevisionError,
+    TransportError,
+)
 from bot.intake import BindingStatus, CommunicationView, ConsentSnapshot, TelegramIntake
 from bot.pause_state import PauseState
 from bot.__main__ import create_dispatcher
@@ -422,6 +430,63 @@ class HttpTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(headers["Content-Type"], "application/json")
         self.assertNotIn("unexpected", sent_json)
         self.assertEqual(result["result"], "accepted")
+
+    async def test_post_sends_a_unique_request_id_for_each_event(self):
+        response = httpx.Response(200, json={"result": "accepted", "revision": 3})
+        client = FakeHttpClient(response=response)
+        transport = HttpTransport("http://localhost:8787", "binding-1", "token", client, now=FIXED_NOW)
+        base = {"expectedRevision": 2, "chatId": "-1001", "messageId": "5", "senderId": "11",
+            "sentAt": "2026-10-31T08:00:00.000Z", "text": "message"}
+
+        await transport.send_text({**base, "eventId": "evt-1"})
+        await transport.send_text({**base, "eventId": "evt-2"})
+
+        first = UUID(client.calls[0][2]["X-Request-Id"])
+        second = UUID(client.calls[1][2]["X-Request-Id"])
+        self.assertNotEqual(first, second)
+
+    async def test_retries_of_one_event_keep_the_same_request_id(self):
+        client = FakeHttpClient(sequence=[httpx.ReadTimeout("lost"),
+            httpx.Response(200, json={"result": "accepted", "revision": 3})])
+        transport = HttpTransport("http://localhost:8787", "binding-1", "token", client,
+            now=FIXED_NOW, sleep=no_sleep, clock=lambda: 0.0)
+
+        await transport.send_text({
+            "eventId": "evt", "expectedRevision": 2, "chatId": "-1001", "messageId": "5",
+            "senderId": "11", "sentAt": "2026-10-31T08:00:00.000Z", "text": "message",
+        })
+
+        self.assertEqual(len(client.calls), 2)
+        self.assertEqual(client.calls[0][2]["X-Request-Id"], client.calls[1][2]["X-Request-Id"])
+
+    async def test_repeated_event_id_is_not_delivered_twice_within_24_hours(self):
+        clock = [1_000.0]
+        client = FakeHttpClient(response=httpx.Response(200, json={"result": "accepted", "revision": 3}))
+        transport = HttpTransport("http://localhost:8787", "binding-1", "token", client,
+            now=FIXED_NOW, clock=lambda: clock[0])
+        event = {"eventId": "evt", "expectedRevision": 2, "chatId": "-1001", "messageId": "5",
+            "senderId": "11", "sentAt": "2026-10-31T08:00:00.000Z", "text": "message"}
+
+        self.assertEqual((await transport.send_text(event))["result"], "accepted")
+        self.assertEqual((await transport.send_text(event))["result"], "duplicate")
+        self.assertEqual(len(client.calls), 1)
+
+        clock[0] += DEDUP_TTL_SECONDS + 1
+        self.assertEqual((await transport.send_text(event))["result"], "accepted")
+        self.assertEqual(len(client.calls), 2)
+
+    async def test_uncertain_delivery_is_retried_with_the_same_event_id(self):
+        client = FakeHttpClient(sequence=[httpx.Response(500), httpx.Response(502),
+            httpx.Response(503), httpx.Response(200, json={"result": "accepted", "revision": 3})])
+        transport = HttpTransport("http://localhost:8787", "binding-1", "token", client,
+            now=FIXED_NOW, sleep=no_sleep, clock=lambda: 0.0)
+        event = {"eventId": "evt", "expectedRevision": 2, "chatId": "-1001", "messageId": "5",
+            "senderId": "11", "sentAt": "2026-10-31T08:00:00.000Z", "text": "message"}
+
+        with self.assertRaises(DeliveryUncertainError):
+            await transport.send_text(event)
+        self.assertEqual((await transport.send_text(event))["result"], "accepted")
+        self.assertEqual(len(client.calls), 4)
 
     async def test_post_truncates_long_text_to_contract_limit(self):
         response = httpx.Response(200, json={"result": "accepted", "revision": 3})
