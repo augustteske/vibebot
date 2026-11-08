@@ -3,7 +3,10 @@ import type { SyntheticEvent } from 'react'
 import { ThemeToggle } from './ThemeToggle'
 import { isNewYearSeason } from './theme'
 import { HoneycombBackground } from './HoneycombBackground'
+import { DemoStamp } from './DemoStamp'
 import './LandingPage.css'
+
+export { DemoStamp }
 
 // Большая картинка идёт через прокси предпросмотра и иногда получает 502.
 // Одна повторная загрузка с новым адресом возвращает её без перезагрузки страницы.
@@ -551,7 +554,7 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
         ref={privacyRef}
         aria-labelledby="landing-privacy-title"
       >
-        <HoneycombBackground opacity={0.92} interactive={true} />
+        <HoneycombBackground opacity={0.85} interactive={true} />
         <div className="landing-privacy-inner landing-reveal">
           <div className={`landing-lock-wrapper${isPrivacyLocked ? ' is-locked' : ''}`}>
             <div className="landing-lock__shockwave" aria-hidden="true" />

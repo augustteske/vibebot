@@ -8,7 +8,7 @@ interface HoneycombBackgroundProps {
 
 export function HoneycombBackground({
   className = '',
-  opacity = 0.95,
+  opacity = 0.88,
   interactive = true,
 }: HoneycombBackgroundProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -28,7 +28,7 @@ export function HoneycombBackground({
 
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-    // Pointer tracking for interactive 3D wave
+    // Pointer coordinates with smooth easing
     let mouseX = -9999
     let mouseY = -9999
     let targetMouseX = -9999
@@ -80,24 +80,24 @@ export function HoneycombBackground({
     parentEl.addEventListener('pointermove', handlePointerMove as EventListener, { passive: true })
     parentEl.addEventListener('pointerleave', handlePointerLeave as EventListener, { passive: true })
 
-    // Honeycomb 3D scale dimensions
-    const radius = 32 // scale outer radius
+    // Tactile cap dimensions (refined proportions)
+    const radius = 28 // cap outer radius
     const hexWidth = Math.sqrt(3) * radius
     const xStep = hexWidth
     const yStep = radius * 1.5
 
-    // Periodic travelling pulse waves
-    let waveRadius = -80
-    let waveCenterX = width * 0.2
-    let waveCenterY = height * 0.35
-    const waveSpeed = 280 // px/sec
+    // Periodic gentle travelling sheen waves
+    let waveRadius = -60
+    let waveCenterX = width * 0.25
+    let waveCenterY = height * 0.4
+    const waveSpeed = 220 // px/sec
     let waveActive = true
     let lastWaveTime = performance.now()
     let lastFrameTime = performance.now()
 
     function launchWave(now: number) {
-      waveCenterX = width * (0.15 + Math.random() * 0.7)
-      waveCenterY = height * (0.2 + Math.random() * 0.6)
+      waveCenterX = width * (0.2 + Math.random() * 0.6)
+      waveCenterY = height * (0.25 + Math.random() * 0.5)
       waveRadius = 0
       waveActive = true
       lastWaveTime = now
@@ -127,23 +127,23 @@ export function HoneycombBackground({
 
       // Smooth pointer interpolation
       if (targetMouseX > -5000) {
-        mouseX += (targetMouseX - mouseX) * Math.min(1, dt * 10)
-        mouseY += (targetMouseY - mouseY) * Math.min(1, dt * 10)
+        mouseX += (targetMouseX - mouseX) * Math.min(1, dt * 8)
+        mouseY += (targetMouseY - mouseY) * Math.min(1, dt * 8)
       } else {
         mouseX = -9999
         mouseY = -9999
       }
 
-      // Progress radial travelling wave
+      // Progress radial sheen wave
       if (!prefersReducedMotion) {
         if (waveActive) {
           waveRadius += waveSpeed * dt
-          const maxDist = Math.hypot(width, height) + 160
+          const maxDist = Math.hypot(width, height) + 120
           if (waveRadius > maxDist) {
             waveActive = false
             lastWaveTime = now
           }
-        } else if (now - lastWaveTime > 2600) {
+        } else if (now - lastWaveTime > 3200) {
           launchWave(now)
         }
       }
@@ -152,13 +152,13 @@ export function HoneycombBackground({
 
       const cols = Math.ceil(width / xStep) + 2
       const rows = Math.ceil(height / yStep) + 2
-      const timeSec = now * 0.0016
+      const timeSec = now * 0.0014
 
-      // Light vector from upper-left (angled down and right)
-      const lx = -0.58
-      const ly = -0.81
+      // Directional light vector from top-left (elegant satin angle)
+      const lx = -0.55
+      const ly = -0.83
 
-      const waveBandWidth = 200
+      const waveBandWidth = 180
 
       for (let row = -1; row < rows; row++) {
         const cy = row * yStep
@@ -167,13 +167,12 @@ export function HoneycombBackground({
         for (let col = -1; col < cols; col++) {
           const cx = col * xStep + xOffset
 
-          // 1. Organic continuous 3D breathing wave
-          const ambientWave = prefersReducedMotion
-            ? 0.3
-            : (Math.sin(cx * 0.014 - cy * 0.011 + timeSec * 1.6) * 0.5 + 0.5) *
-              (Math.cos(cx * 0.009 + cy * 0.015 - timeSec * 1.1) * 0.4 + 0.6)
+          // 1. Gentle ambient breathing undulation
+          const ambient = prefersReducedMotion
+            ? 0.2
+            : (Math.sin(cx * 0.013 - cy * 0.01 + timeSec * 1.5) * 0.5 + 0.5) * 0.35
 
-          // 2. Travelling impulse wave
+          // 2. Traveling sheen wave
           let waveFactor = 0
           if (waveActive && !prefersReducedMotion) {
             const distFromWave = Math.hypot(cx - waveCenterX, cy - waveCenterY)
@@ -183,119 +182,114 @@ export function HoneycombBackground({
             }
           }
 
-          // 3. Interactive pointer proximity wave
+          // 3. Pointer proximity
           let mouseFactor = 0
           if (mouseX > -5000) {
             const distToMouse = Math.hypot(cx - mouseX, cy - mouseY)
-            const mouseRadius = 180
+            const mouseRadius = 140
             if (distToMouse < mouseRadius) {
               mouseFactor = Math.cos((distToMouse / mouseRadius) * (Math.PI / 2))
             }
           }
 
-          // Combined 3D elevation Z in range [0, 1]
-          const zNorm = Math.min(1, ambientWave * 0.32 + waveFactor * 0.68 + mouseFactor * 0.85)
+          // Combined tactile Z-lift (subtle, 0 to 1)
+          const zNorm = Math.min(1, ambient + waveFactor * 0.65 + mouseFactor * 0.75)
 
-          // 3D parameters for scale
-          // Tile outer size (leaves visible gap between neighbouring scales)
-          const baseRadius = radius * 0.88
-          // Top plateau face shrinks slightly as scale rises in 3D perspective
-          const topRadius = baseRadius * (0.74 - zNorm * 0.06)
+          // Proportions of the "cap"
+          // Outer seam base
+          const capRadius = radius * 0.89 // Leaves an elegant 2.5px seam gap
+          // Subtle micro-shift towards light when elevated (max 2.8px)
+          const liftPx = 0.5 + zNorm * 2.8
+          const capCx = cx + lx * liftPx * 0.7
+          const capCy = cy + ly * liftPx * 0.7
 
-          // Elevation offset: higher scales shift up and toward the light source
-          const zPixels = 3 + zNorm * 9 // 3px to 12px height
-          const topCx = cx + lx * zPixels * 0.6
-          const topCy = cy + ly * zPixels * 0.6
+          const capPts = getHexVertices(capCx, capCy, capRadius)
 
-          const basePts = getHexVertices(cx, cy, baseRadius)
-          const topPts = getHexVertices(topCx, topCy, topRadius)
+          // --- 1. Soft Micro-Drop Shadow underneath cap plate ---
+          const shadowOffsetX = -lx * liftPx * 0.75
+          const shadowOffsetY = -ly * liftPx * 0.75
+          const shadowPts = getHexVertices(cx + shadowOffsetX, cy + shadowOffsetY, capRadius * 0.96)
 
-          // --- Cast Shadow underneath elevated scale ---
-          if (zNorm > 0.05) {
-            const shadowOffsetX = -lx * zPixels * 0.8
-            const shadowOffsetY = -ly * zPixels * 0.8
-            const shadowPts = getHexVertices(cx + shadowOffsetX, cy + shadowOffsetY, baseRadius * 0.98)
-
-            ctx.beginPath()
-            ctx.moveTo(shadowPts[0][0], shadowPts[0][1])
-            for (let i = 1; i < 6; i++) {
-              ctx.lineTo(shadowPts[i][0], shadowPts[i][1])
-            }
-            ctx.closePath()
-            ctx.fillStyle = `rgba(23, 23, 25, ${0.08 + zNorm * 0.16})`
-            ctx.fill()
+          ctx.beginPath()
+          ctx.moveTo(shadowPts[0][0], shadowPts[0][1])
+          for (let i = 1; i < 6; i++) {
+            ctx.lineTo(shadowPts[i][0], shadowPts[i][1])
           }
+          ctx.closePath()
+          ctx.fillStyle = `rgba(23, 23, 25, ${0.04 + zNorm * 0.08})`
+          ctx.fill()
 
-          // --- 3D Bevel Facets (6 side slopes) ---
+          // --- 2. Cap Surface Fill (Satin Tone-on-Tone) ---
+          ctx.beginPath()
+          ctx.moveTo(capPts[0][0], capPts[0][1])
+          for (let i = 1; i < 6; i++) {
+            ctx.lineTo(capPts[i][0], capPts[i][1])
+          }
+          ctx.closePath()
+
+          // Satin gradient across cap face
+          const grad = ctx.createLinearGradient(
+            capCx - capRadius * 0.7,
+            capCy - capRadius * 0.7,
+            capCx + capRadius * 0.7,
+            capCy + capRadius * 0.7
+          )
+          grad.addColorStop(0, `rgba(255, 255, 255, ${0.16 + zNorm * 0.28})`)
+          grad.addColorStop(1, `rgba(225, 175, 20, ${0.06 + zNorm * 0.12})`)
+          ctx.fillStyle = grad
+          ctx.fill()
+
+          // --- 3. Micro-Bevel Hairline Edges ---
+          // Each edge catches light differently: top-left edges glint, bottom-right softly shadow
           for (let i = 0; i < 6; i++) {
             const next = (i + 1) % 6
-            const b1 = basePts[i]
-            const b2 = basePts[next]
-            const t1 = topPts[i]
-            const t2 = topPts[next]
+            const p1 = capPts[i]
+            const p2 = capPts[next]
 
-            // Calculate facet surface normal pointing outwards
-            const edgeDx = b2[0] - b1[0]
-            const edgeDy = b2[1] - b1[1]
+            // Normal pointing outwards
+            const edgeDx = p2[0] - p1[0]
+            const edgeDy = p2[1] - p1[1]
             const nx = -edgeDy
             const ny = edgeDx
             const len = Math.hypot(nx, ny) || 1
             const dot = (nx / len) * lx + (ny / len) * ly
 
             ctx.beginPath()
-            ctx.moveTo(b1[0], b1[1])
-            ctx.lineTo(b2[0], b2[1])
-            ctx.lineTo(t2[0], t2[1])
-            ctx.lineTo(t1[0], t1[1])
-            ctx.closePath()
+            ctx.moveTo(p1[0], p1[1])
+            ctx.lineTo(p2[0], p2[1])
 
-            if (dot > 0.08) {
-              // Facet facing light: glossy specular highlight
-              // Bright pearlescent highlight on golden background
-              const highlightIntensity = Math.min(1, dot * (0.45 + zNorm * 0.5))
-              ctx.fillStyle = `rgba(255, 255, 255, ${0.28 + highlightIntensity * 0.52})`
-              ctx.fill()
+            if (dot > 0.05) {
+              // Highlight edge
+              const alpha = 0.35 + dot * 0.35 + zNorm * 0.30
+              ctx.strokeStyle = `rgba(255, 255, 255, ${Math.min(0.9, alpha)})`
+              ctx.lineWidth = 1.1
             } else {
-              // Facet facing away from light: deep sculpted shadow
-              const shadowIntensity = Math.min(1, Math.abs(dot) * (0.35 + zNorm * 0.45))
-              ctx.fillStyle = `rgba(23, 23, 25, ${0.12 + shadowIntensity * 0.28})`
-              ctx.fill()
+              // Shadow edge
+              const alpha = 0.08 + Math.abs(dot) * 0.12 + zNorm * 0.08
+              ctx.strokeStyle = `rgba(23, 23, 25, ${alpha})`
+              ctx.lineWidth = 0.8
             }
-
-            // Facet edge line for crisp polygonal definition
-            ctx.strokeStyle = dot > 0 ? 'rgba(255, 255, 255, 0.4)' : 'rgba(23, 23, 25, 0.16)'
-            ctx.lineWidth = 0.8
             ctx.stroke()
           }
 
-          // --- 3D Top Face Plateau ---
+          // --- 4. Designer Touch: Minimal Inner Micro-Ring ---
+          // Subtle concentric inner hexagon for refined hardware/ceramic look
+          const innerPts = getHexVertices(capCx, capCy, capRadius * 0.52)
           ctx.beginPath()
-          ctx.moveTo(topPts[0][0], topPts[0][1])
+          ctx.moveTo(innerPts[0][0], innerPts[0][1])
           for (let i = 1; i < 6; i++) {
-            ctx.lineTo(topPts[i][0], topPts[i][1])
+            ctx.lineTo(innerPts[i][0], innerPts[i][1])
           }
           ctx.closePath()
+          ctx.strokeStyle = `rgba(255, 255, 255, ${0.10 + zNorm * 0.20})`
+          ctx.lineWidth = 0.7
+          ctx.stroke()
 
-          // Plateau fill with subtle 3D lighting sheen
-          const plateauAlpha = 0.18 + zNorm * 0.48
-          ctx.fillStyle = `rgba(255, 255, 255, ${plateauAlpha})`
+          // Tiny minimal center pip
+          ctx.beginPath()
+          ctx.arc(capCx, capCy, 1.2, 0, Math.PI * 2)
+          ctx.fillStyle = `rgba(23, 23, 25, ${0.12 + zNorm * 0.16})`
           ctx.fill()
-
-          // Plateau perimeter ridge
-          ctx.strokeStyle = `rgba(23, 23, 25, ${0.16 + zNorm * 0.32})`
-          ctx.lineWidth = 1.2
-          ctx.stroke()
-
-          // Base tile outline for crisp depth layering
-          ctx.beginPath()
-          ctx.moveTo(basePts[0][0], basePts[0][1])
-          for (let i = 1; i < 6; i++) {
-            ctx.lineTo(basePts[i][0], basePts[i][1])
-          }
-          ctx.closePath()
-          ctx.strokeStyle = 'rgba(23, 23, 25, 0.09)'
-          ctx.lineWidth = 0.9
-          ctx.stroke()
         }
       }
 

@@ -1497,6 +1497,36 @@
   opacity: .88;
 }
 
+.landing-privacy-stamp,
+.vibee-stamp {
+  display: grid;
+  width: 112px;
+  height: 112px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px dashed rgba(23, 23, 25, .45);
+  border-radius: 50%;
+  color: var(--vibee-yellow-ink);
+  background: rgba(255, 255, 255, .18);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  font-size: 9px;
+  font-weight: 850;
+  line-height: 1.6;
+  letter-spacing: .8px;
+  text-align: center;
+  user-select: none;
+  box-shadow: 0 4px 16px rgba(23, 23, 25, .06);
+  transform: rotate(8deg);
+  transition: transform .3s cubic-bezier(0.22, 1, 0.36, 1), background .3s ease;
+}
+
+.landing-privacy-stamp:hover,
+.vibee-stamp:hover {
+  transform: rotate(0deg) scale(1.04);
+  background: rgba(255, 255, 255, .32);
+}
+
 .landing-footer {
   padding-block: 25px 30px;
   color: var(--vibee-footer-ink);
