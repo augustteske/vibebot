@@ -28,6 +28,37 @@
 
 <h2 align="center">Быстрый старт</h2>
 
+### Быстрый старт на VPS
+
+Для развёртывания на чистом сервере Ubuntu/Debian (например, Hetzner, Timeweb или любом другом VPS):
+
+1. **Подключитесь к серверу по SSH:**
+   ```sh
+   ssh root@YOUR_SERVER_IP
+   ```
+2. **Установите `git` (если на чистом образе его ещё нет) и склонируйте репозиторий:**
+   ```sh
+   apt-get update && apt-get install -y git
+   git clone --branch feat/august-core https://github.com/augustteske/vibebot.git
+   cd vibebot
+   ```
+3. **Запустите скрипт первичной подготовки `scripts/bootstrap.sh`:**
+   ```sh
+   bash scripts/bootstrap.sh
+   ```
+   - Скрипт автоматически проверит наличие `git`, `docker` и `docker compose` и при отсутствии установит их через `apt-get`.
+   - При первом запуске скрипт создаст `.env` из `.env.example` и остановится с сообщением: `Заполните .env (токен бота, домен) и запустите снова`.
+   - Откройте `.env` (например, `nano .env`), укажите `TELEGRAM_BOT_TOKEN`, `APP_ORIGIN` (например, `http://YOUR_SERVER_IP:8787` для проверки по IP или ваш HTTPS-домен) и `COOKIE_SECURE` (`false` для HTTP по IP, `true` для HTTPS), после чего запустите скрипт повторно:
+     ```sh
+     bash scripts/bootstrap.sh
+     ```
+4. **Проверьте, что всё работает:**
+   ```sh
+   docker compose ps
+   curl --fail http://127.0.0.1:8787/api/health
+   ```
+   В ответе должно вернуться `{"ok":true}`, а веб-интерфейс будет доступен по адресу `http://YOUR_SERVER_IP:8787`.
+
 ### Развёртывание одной командой
 
 На Ubuntu/Debian или macOS запустите из корня репозитория:
