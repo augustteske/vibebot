@@ -141,15 +141,22 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
 
     const observer = new IntersectionObserver(
       entries => {
-        if (entries[0]?.isIntersecting) {
-          // Delay by 450ms so the user first witnesses the open lock, then the deliberate slam shut
+        const entry = entries[0]
+        if (!entry) return
+
+        if (entry.isIntersecting) {
+          // При входе на слайд: задерживаем на 400мс в открытом состоянии, затем захлопываем
+          if (lockTimeoutRef.current) window.clearTimeout(lockTimeoutRef.current)
           lockTimeoutRef.current = window.setTimeout(() => {
             setIsPrivacyLocked(true)
-          }, 450)
-          observer.disconnect()
+          }, 400)
+        } else {
+          // При уходе со слайда: сбрасываем в открытое состояние, чтобы при возврате анимация повторилась
+          if (lockTimeoutRef.current) window.clearTimeout(lockTimeoutRef.current)
+          setIsPrivacyLocked(false)
         }
       },
-      { threshold: 0.25 }
+      { threshold: 0.2 }
     )
 
     observer.observe(el)
