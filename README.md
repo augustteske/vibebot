@@ -59,6 +59,29 @@
    ```
    В ответе должно вернуться `{"ok":true}`, а веб-интерфейс будет доступен по адресу `http://YOUR_SERVER_IP:8787`.
 
+### Деплой на Oracle Cloud (Ubuntu ARM / Ampere A1)
+
+Контейнеры `web` (`node:24-bookworm-slim`) и `bot` (`python:3.12-slim`), а также `scripts/bootstrap.sh` полностью поддерживают архитектуру `linux/arm64` (`aarch64`) без эмуляции.
+
+1. **Создайте ARM-инстанс в Oracle Cloud (OCI):**
+   - Выберите образ **Canonical Ubuntu 22.04** или **24.04 (aarch64)**.
+   - Выберите Shape **VM.Standard.A1.Flex** (процессор Ampere ARM64, например 1–4 OCPU и 6–24 ГБ ОЗУ в рамках Always Free) и добавьте свой SSH-ключ.
+2. **Откройте TCP-порт `8787`:**
+   - **В консоли Oracle Cloud:** перейдите в *Networking → Virtual Cloud Networks → ваша VCN → Subnet → Security Lists → Add Ingress Rules* и добавьте правило: Source CIDR `0.0.0.0/0`, IP Protocol `TCP`, Destination Port Range `8787`.
+   - **Внутри самой ВМ Ubuntu** (в образах Oracle по умолчанию активно блокирующее правило `iptables`):
+     ```sh
+     sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 8787 -j ACCEPT
+     sudo netfilter-persistent save
+     ```
+3. **Запустите `bootstrap.sh`:**
+   ```sh
+   ssh ubuntu@YOUR_ORACLE_IP
+   git clone --branch feat/august-core https://github.com/augustteske/vibebot.git
+   cd vibebot
+   bash scripts/bootstrap.sh
+   ```
+   Заполните созданный `.env` (`nano .env`) и выполните `bash scripts/bootstrap.sh` повторно.
+
 ### Развёртывание одной командой
 
 На Ubuntu/Debian или macOS запустите из корня репозитория:
