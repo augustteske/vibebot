@@ -88,6 +88,20 @@
 .demo-dashboard__aside { display: grid; min-width: 0; gap: 20px; }
 .demo-dashboard__interaction-note { margin: -8px 4px 0; color: var(--vibee-muted); font-size: 12px; }
 
+.demo-dashboard__share {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  border: 1px solid var(--vibee-yellow-line);
+  border-radius: var(--vibee-radius-card);
+  padding: 16px 20px;
+  background: var(--vibee-tint);
+}
+
+.demo-dashboard__share p { flex: 1 1 280px; margin: 0; color: var(--vibee-ink-soft); font-weight: 600; }
+
 .demo-dashboard__context {
   position: relative;
   overflow: hidden;

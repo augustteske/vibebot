@@ -37,6 +37,17 @@
 .team-pulse__values { display: block; margin-top: 8px; font-size: .9rem; }
 .team-pulse > .iw-container { padding: 0; border: 0; box-shadow: none; background: none; }
 
+.team-pulse__share-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+}
+
+.team-pulse__share-row p { flex: 1 1 320px; margin: 0; }
+.team-pulse__share-row--end { justify-content: flex-end; margin-top: 12px; }
+
 @media (max-width: 480px) {
   .team-pulse__period { width: 100%; }
 }

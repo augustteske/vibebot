@@ -1,6 +1,7 @@
 import { ActionRecommendationCard } from '../features/actions/ActionRecommendationCard'
 import { InsightsWidget } from '../features/insights/InsightsWidget'
 import type { InsightsMetrics } from '../features/insights/InsightsWidget'
+import { ShareCardButton } from '../features/insights/ShareCardButton'
 import { ThemeToggle } from './ThemeToggle'
 import './DemoDashboard.css'
 
@@ -55,6 +56,10 @@ export function DemoDashboard({ onBack, onEnter, onCreateTeam }: DemoDashboardPr
             periodLabel="Синтетическая неделя · закрытый период"
             demo
           />
+          <div className="demo-dashboard__share">
+            <p>Покажите команде итог недели на ретро — карточка содержит только общие показатели.</p>
+            <ShareCardButton data={{ periodLabel: 'Синтетическая неделя', teamName: 'Дизайнеры', metrics: demoMetrics, demo: true }}/>
+          </div>
           <ActionRecommendationCard
             observation="В этом вымышленном периоде 25% сообщений команды пришлись на время вне рабочего расписания."
             explanation="Возможно, участникам не всегда ясно, когда ответ можно отложить до следующего рабочего дня."
