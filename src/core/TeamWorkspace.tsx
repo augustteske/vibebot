@@ -106,7 +106,11 @@ function SecretField({ id, label, visible, onToggle, name, value, onChange, disa
   </div>
 }
 
-export function TeamWorkspace() {
+export interface TeamWorkspaceProps {
+  onOpenGuide?: () => void
+}
+
+export function TeamWorkspace({ onOpenGuide }: TeamWorkspaceProps = {}) {
   const [snapshot, setSnapshot] = useState<SessionSnapshot | null>(null)
   const [initialized, setInitialized] = useState(false)
   const [error, setError] = useState<unknown>(null)
@@ -317,7 +321,7 @@ export function TeamWorkspace() {
         </>}<button className="button entrance__submit" type="submit">{busy ? 'Сохраняем…' : restore ? 'Войти по коду' : join ? 'Войти по приглашению' : 'Создать команду'}</button>
       </fieldset></form><div className="button-row"><button className="text-button" onClick={() => { setRestore(false); setJoin(!join) }} disabled={busy}>{join ? 'Создать новую команду' : 'У меня есть приглашение'}</button><button className="text-button" onClick={() => { setShowAccessKey(false); setRestore(!restore) }} disabled={busy}>{restore ? 'Обычный вход' : 'У меня есть личный код входа'}</button></div>
     </section> : <>
-      <div className="team-heading" id="team-overview"><div><h2>{snapshot.workspace.name}</h2><p className="muted">{snapshot.member.name} · {snapshot.member.role === 'organizer' ? 'организатор' : 'участник'} · {browserTimeZone}</p></div><div className="button-row">{snapshot.member.role === 'organizer' && <InviteColleagueButton roomKey={snapshot.workspace.roomKey} inviteLink={inviteLink} onIssueInvite={async () => { await issueInvite(); return inviteLink }}/>}<button className="button secondary" onClick={() => void refresh()} disabled={busy || refreshing}>{refreshing ? 'Обновляем…' : 'Обновить'}</button><button className="text-button" onClick={() => setConfirm('logout')} disabled={busy}>Выйти</button></div></div>
+      <div className="team-heading" id="team-overview"><div><h2>{snapshot.workspace.name}</h2><p className="muted">{snapshot.member.name} · {snapshot.member.role === 'organizer' ? 'организатор' : 'участник'} · {browserTimeZone}</p></div><div className="button-row"><button type="button" className="text-button team-guide-link" onClick={() => { if (onOpenGuide) onOpenGuide(); else window.location.href = '/guide'; }}>Инструкция по подключению</button>{snapshot.member.role === 'organizer' && <InviteColleagueButton roomKey={snapshot.workspace.roomKey} inviteLink={inviteLink} onIssueInvite={async () => { await issueInvite(); return inviteLink }}/>}<button className="button secondary" onClick={() => void refresh()} disabled={busy || refreshing}>{refreshing ? 'Обновляем…' : 'Обновить'}</button><button className="text-button" onClick={() => setConfirm('logout')} disabled={busy}>Выйти</button></div></div>
       {showRestore && <section className="panel entrance" aria-labelledby="session-restore-title"><h2 id="session-restore-title">Войти снова</h2><p className="muted">Введите личный код, чтобы продолжить. Текущая форма останется открытой.</p><form onSubmit={event => { event.preventDefault(); void perform('/restore', { key: loginKey }, 'Вход восстановлен.') }}><SecretField id="restore-key" label="Личный код входа" visible={showLoginKey} onToggle={() => setShowLoginKey(value => !value)} value={loginKey} onChange={event => setLoginKey(event.target.value)} disabled={busy}/><button className="button" type="submit" disabled={busy}>{busy ? 'Входим…' : 'Войти по коду'}</button><button className="text-button" type="button" disabled={busy} onClick={() => { setShowRestore(false); setShowLoginKey(false); setError(null) }}>Продолжить просмотр</button></form></section>}
       {snapshot.member.role === 'participant' && <details className="panel participant-data">
         <summary>Мои данные</summary>

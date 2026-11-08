@@ -140,6 +140,7 @@
 .landing-nav-cta:active,
 .landing-cta:active,
 .landing-github:active,
+.landing-guide-link:active,
 .landing-demo-link:active,
 .landing-room-key__submit:active {
   transform: scale(0.98);
@@ -349,6 +350,36 @@
 .landing-github span {
   font-size: 17px;
 }
+
+.landing-guide-link {
+  position: relative;
+  overflow: hidden;
+  display: inline-flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border: 1px solid var(--vibee-yellow-line);
+  border-radius: 999px;
+  padding: 0 22px;
+  color: var(--vibee-ink);
+  background: var(--vibee-tint);
+  box-shadow: var(--vibee-shadow-soft);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform .22s ease, box-shadow .22s ease, background .22s ease, border-color .22s ease;
+}
+
+.landing-guide-link:hover {
+  transform: translateY(-3px);
+  border-color: var(--vibee-yellow-deep);
+  background: var(--vibee-tint-strong);
+  box-shadow: 0 12px 30px rgba(165, 127, 0, .18), 0 0 18px rgba(255, 214, 56, .2);
+}
+
+.landing-guide-link span { font-size: 17px; }
 
 .landing-demo-link {
   position: relative;

@@ -32,6 +32,7 @@ from .voice import LocalWhisperProvider, VoiceError, VoiceTranscription, install
 BOT_COMMANDS = [
     BotCommand(command="start", description="Открыть меню сценариев"),
     BotCommand(command="help", description="Доступные команды и сценарии"),
+    BotCommand(command="guide", description="Инструкция по подключению Vibee"),
     BotCommand(command="privacy", description="Как бот обрабатывает данные"),
     BotCommand(command="stop", description="Отменить сценарий и очистить черновик"),
     BotCommand(command="clean", description="Удалить сообщения бота в этом чате"),
@@ -228,14 +229,42 @@ def create_dispatcher(
             reply_markup=menu_keyboard(language),
         )
 
+    def resolve_guide_url() -> str:
+        base = (
+            os.environ.get("VIBEE_WEB_URL")
+            or os.environ.get("VIBEE_API_BASE_URL", "https://vibee.dev")
+        )
+        if base.endswith("/api"):
+            base = base[:-4]
+        return f"{base.rstrip('/')}/guide"
+
     @dispatcher.message(Command("help"))
     async def help_command(message: Message, state: FSMContext | None = None):
         language = await language_of(state)
-        await message.answer(i18n.help_text(
-            language,
-            voice_available=voice_transcription is not None,
-            notifications_available=notification_transport is not None,
-        ))
+        url = resolve_guide_url()
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=i18n.text(language, "guide.button"), url=url),
+        ]])
+        await message.answer(
+            i18n.help_text(
+                language,
+                voice_available=voice_transcription is not None,
+                notifications_available=notification_transport is not None,
+            ),
+            reply_markup=keyboard,
+        )
+
+    @dispatcher.message(Command("guide"))
+    async def guide_command(message: Message, state: FSMContext | None = None):
+        language = await language_of(state)
+        url = resolve_guide_url()
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=i18n.text(language, "guide.button"), url=url),
+        ]])
+        await message.answer(
+            i18n.text(language, "guide.text", url=url),
+            reply_markup=keyboard,
+        )
 
     @dispatcher.message(Command("privacy"))
     async def privacy(message: Message, state: FSMContext | None = None):

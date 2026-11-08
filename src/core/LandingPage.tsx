@@ -18,6 +18,7 @@ interface LandingPageProps {
   onEnter: () => void;
   onDemo: () => void;
   onJoinByKey?: (roomKey: string) => void;
+  onGuide?: () => void;
 }
 
 const features = [
@@ -100,7 +101,7 @@ const steps = [
   },
 ]
 
-export function LandingPage({ onEnter, onDemo, onJoinByKey }: LandingPageProps) {
+export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPageProps) {
   const [roomKey, setRoomKey] = useState('')
   const [newYear] = useState(() => isNewYearSeason())
   const [activeContrastIndex, setActiveContrastIndex] = useState(0)
@@ -165,6 +166,17 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey }: LandingPageProps) 
         <nav className="landing-nav" aria-label="Навигация по странице">
           <a href="#features">Преимущества</a>
           <a href="#how-it-works">Как это работает</a>
+          <a
+            href="/guide"
+            onClick={event => {
+              if (onGuide) {
+                event.preventDefault()
+                onGuide()
+              }
+            }}
+          >
+            Как подключить?
+          </a>
           <ThemeToggle />
           <button className="landing-nav-cta" onClick={onEnter}>Войти в кабинет</button>
         </nav>
@@ -181,6 +193,16 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey }: LandingPageProps) 
           <div className="landing-actions">
             <button className="landing-cta" onClick={onEnter}>
               Войти в кабинет <span aria-hidden="true">→</span>
+            </button>
+            <button
+              className="landing-guide-link"
+              type="button"
+              onClick={() => {
+                if (onGuide) onGuide()
+                else window.location.href = '/guide'
+              }}
+            >
+              Как подключить? <span aria-hidden="true">↗</span>
             </button>
             <button className="landing-demo-link" type="button" onClick={onDemo}>
               Посмотреть демо <span aria-hidden="true">↗</span>

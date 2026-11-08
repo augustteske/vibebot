@@ -99,9 +99,15 @@ _TEXTS: dict[str, dict[str, str]] = {
             "Подписка сохранена, но серверная отправка уведомлений выключена. "
             "Администратору нужно настроить доставку на сервере."
         ),
+        "guide.text": (
+            "📖 Инструкция по подключению Vibee:\n{url}\n\n"
+            "Пошаговый гайд: создание бота в BotFather, настройка .env, запуск и подключение рабочего чата."
+        ),
+        "guide.button": "📖 Открыть инструкцию",
         "help.title": "Команды Vibee:",
         "help.start": "/start — меню сценариев",
         "help.help": "/help — эта справка",
+        "help.guide": "/guide — руководство по подключению бота и кабинета",
         "help.privacy": "/privacy — что обрабатывается и где хранится",
         "help.stop": "/stop — отменить текущий чек-ин или расшифровку",
         "help.clean": "/clean — удалить сообщения бота в этом чате (до 48 часов)",
@@ -259,9 +265,15 @@ _TEXTS: dict[str, dict[str, str]] = {
             "The subscription is saved, but server delivery is disabled. "
             "An administrator needs to configure delivery on the server."
         ),
+        "guide.text": (
+            "📖 Vibee Connection Guide:\n{url}\n\n"
+            "Step-by-step guide: BotFather creation, .env configuration, running the project and connecting team chat."
+        ),
+        "guide.button": "📖 Open Guide",
         "help.title": "Vibee commands:",
         "help.start": "/start — scenario menu",
         "help.help": "/help — this help",
+        "help.guide": "/guide — getting started and connection guide",
         "help.privacy": "/privacy — what is processed and where it is stored",
         "help.stop": "/stop — cancel the current check-in or transcription",
         "help.clean": "/clean — delete the bot's messages in this chat (up to 48 hours)",
@@ -366,6 +378,7 @@ def help_text(language: object, voice_available: bool, notifications_available: 
         text(language, "help.title"),
         text(language, "help.start"),
         text(language, "help.help"),
+        text(language, "help.guide"),
         text(language, "help.privacy"),
         text(language, "help.stop"),
         text(language, "help.clean"),
