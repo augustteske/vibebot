@@ -4,7 +4,7 @@ import { templateRecommendationProvider, recommendationProviderContent } from '.
 
 const DAY = 86400000
 const LINK_TTL = 600000
-const TEXT_TTL = 900000
+const TEXT_TTL = 15 * 60 * 1000 // 15 minutes TTL for telegram_texts per privacy contract (P1-7)
 const MEDIA_POLICY_VERSION = 'synthetic-media-v1'
 const CLOSED_TTL = 7 * DAY
 const MAX_INTERVALS = 70

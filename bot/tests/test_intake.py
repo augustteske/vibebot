@@ -307,6 +307,44 @@ class IntakeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(results[10])
         self.assertEqual(len(transport.events), 10)
 
+    async def test_rate_limit_per_sender_and_window_expiry(self):
+        transport = FakeTransport()
+        current_time = 100.0
+        intake = TelegramIntake(full_consent(), transport, clock=lambda: current_time)
+
+        for mid in range(1, 11):
+            res = await intake.process(telegram_update(message_id=mid, **{"from": {"id": 101, "is_bot": False}}))
+            self.assertEqual(res["result"], "accepted")
+
+        res11 = await intake.process(telegram_update(message_id=11, **{"from": {"id": 101, "is_bot": False}}))
+        self.assertIsNone(res11)
+
+        for mid in range(21, 31):
+            res = await intake.process(telegram_update(message_id=mid, **{"from": {"id": 102, "is_bot": False}}))
+            self.assertEqual(res["result"], "accepted")
+
+        current_time += 61.0
+        res12 = await intake.process(telegram_update(message_id=12, **{"from": {"id": 101, "is_bot": False}}))
+        self.assertEqual(res12["result"], "accepted")
+
+    async def test_process_edited_message_pauses_chat_with_message_edit_reason(self):
+        transport = FakeTransport(status=BindingStatus("active", 9, "policy-2", 4))
+        intake = TelegramIntake(full_consent(), transport)
+        edit_update = {
+            "update_type": "edited_message",
+            "message": {
+                "chat": {"id": -100123},
+                "from": {"id": 101, "is_bot": False},
+                "message_id": 5,
+                "text": "changed secret text",
+            },
+        }
+        self.assertIsNone(await intake.process(edit_update))
+        self.assertEqual(len(transport.edit_pause_requests), 1)
+        self.assertEqual(intake._pause_state.reason, "message_edit")
+        self.assertFalse(intake._consent.active)
+        self.assertIsNone(await intake.process(telegram_update(message_id=6)))
+
     async def test_long_message_is_truncated_to_telegram_limit(self):
         transport = FakeTransport()
         intake = TelegramIntake(full_consent(), transport)

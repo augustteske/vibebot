@@ -241,6 +241,14 @@ class TelegramIntake:
                         # A failed status read must leave the local pause in place.
                         pass
             return None
+        if update.get("update_type") == "edited_message":
+            msg = update.get("edited_message") or update.get("message")
+            if isinstance(msg, dict):
+                chat = msg.get("chat")
+                if isinstance(chat, dict) and isinstance(chat.get("id"), int):
+                    if self.stop_after_message_edit(chat["id"]):
+                        await self.reconcile_pause()
+            return None
         if update.get("update_type") != "message":
             return None
         message = update.get("message")
