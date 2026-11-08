@@ -1149,19 +1149,9 @@
     var(--vibee-yellow-band);
 }
 
-.landing-privacy::before {
-  position: absolute;
-  z-index: -1;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='56' viewBox='0 0 64 56'%3E%3Cpath d='M16 1 31 9.5v17L16 35 1 26.5v-17L16 1Zm32 20 15 8.5v17L48 55l-15-8.5v-17L48 21Z' fill='none' stroke='%23171719' stroke-opacity='.10' stroke-width='1'/%3E%3C/svg%3E");
-  content: "";
-  opacity: .42;
-  pointer-events: none;
-}
-
 .landing-privacy-inner {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;

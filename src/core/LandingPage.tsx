@@ -551,7 +551,7 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
         ref={privacyRef}
         aria-labelledby="landing-privacy-title"
       >
-        <HoneycombBackground opacity={0.12} color="#171719" accentColor="#ffd638" />
+        <HoneycombBackground opacity={0.92} interactive={true} />
         <div className="landing-privacy-inner landing-reveal">
           <div className={`landing-lock-wrapper${isPrivacyLocked ? ' is-locked' : ''}`}>
             <div className="landing-lock__shockwave" aria-hidden="true" />

@@ -3,15 +3,13 @@ import { useEffect, useRef } from 'react'
 interface HoneycombBackgroundProps {
   className?: string
   opacity?: number
-  color?: string
-  accentColor?: string
+  interactive?: boolean
 }
 
 export function HoneycombBackground({
   className = '',
-  opacity = 0.16,
-  color = '#171719',
-  accentColor = '#ffd638',
+  opacity = 0.95,
+  interactive = true,
 }: HoneycombBackgroundProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
@@ -24,19 +22,34 @@ export function HoneycombBackground({
 
     let animationFrameId: number
     let isVisible = true
-    let width = (canvas.width = canvas.parentElement?.clientWidth || window.innerWidth)
-    let height = (canvas.height = canvas.parentElement?.clientHeight || 450)
+    let width = 0
+    let height = 0
+    let dpr = Math.min(window.devicePixelRatio || 1, 2)
 
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-    const resizeObserver = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        const { width: newW, height: newH } = entry.contentRect
-        if (newW > 0 && newH > 0 && (newW !== width || newH !== height)) {
-          width = canvas.width = newW
-          height = canvas.height = newH
-        }
-      }
+    // Pointer tracking for interactive 3D wave
+    let mouseX = -9999
+    let mouseY = -9999
+    let targetMouseX = -9999
+    let targetMouseY = -9999
+
+    function updateSize() {
+      if (!canvas) return
+      const parent = canvas.parentElement
+      const rect = parent ? parent.getBoundingClientRect() : { width: window.innerWidth, height: 450 }
+      width = Math.max(rect.width, 320)
+      height = Math.max(rect.height, 280)
+      dpr = Math.min(window.devicePixelRatio || 1, 2)
+      canvas.width = Math.floor(width * dpr)
+      canvas.height = Math.floor(height * dpr)
+      ctx?.setTransform(dpr, 0, 0, dpr, 0, 0)
+    }
+
+    updateSize()
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateSize()
     })
 
     if (canvas.parentElement) {
@@ -51,33 +64,50 @@ export function HoneycombBackground({
     )
     intersectionObserver.observe(canvas)
 
-    // Honeycomb 3D scale parameters
-    const radius = 26
+    function handlePointerMove(e: PointerEvent) {
+      if (!interactive || !canvas) return
+      const rect = canvas.getBoundingClientRect()
+      targetMouseX = e.clientX - rect.left
+      targetMouseY = e.clientY - rect.top
+    }
+
+    function handlePointerLeave() {
+      targetMouseX = -9999
+      targetMouseY = -9999
+    }
+
+    const parentEl = canvas.parentElement || window
+    parentEl.addEventListener('pointermove', handlePointerMove as EventListener, { passive: true })
+    parentEl.addEventListener('pointerleave', handlePointerLeave as EventListener, { passive: true })
+
+    // Honeycomb 3D scale dimensions
+    const radius = 32 // scale outer radius
     const hexWidth = Math.sqrt(3) * radius
     const xStep = hexWidth
     const yStep = radius * 1.5
 
-    // Ripple wave state
-    let waveCenterX = width * 0.25
-    let waveCenterY = height * 0.4
+    // Periodic travelling pulse waves
     let waveRadius = -80
-    const waveSpeed = 240 // px/sec
+    let waveCenterX = width * 0.2
+    let waveCenterY = height * 0.35
+    const waveSpeed = 280 // px/sec
     let waveActive = true
     let lastWaveTime = performance.now()
     let lastFrameTime = performance.now()
 
-    function startNewWave() {
-      waveCenterX = Math.random() * width
-      waveCenterY = Math.random() * height
+    function launchWave(now: number) {
+      waveCenterX = width * (0.15 + Math.random() * 0.7)
+      waveCenterY = height * (0.2 + Math.random() * 0.6)
       waveRadius = 0
       waveActive = true
-      lastWaveTime = performance.now()
+      lastWaveTime = now
     }
 
     // Helper: calculate 6 vertices of a regular pointy-top hexagon
     function getHexVertices(cx: number, cy: number, r: number): [number, number][] {
       const pts: [number, number][] = []
       for (let i = 0; i < 6; i++) {
+        // Pointy-topped hexagon angles: 30°, 90°, 150°, 210°, 270°, 330°
         const angle = (Math.PI / 3) * i - Math.PI / 6
         pts.push([cx + r * Math.cos(angle), cy + r * Math.sin(angle)])
       }
@@ -95,30 +125,40 @@ export function HoneycombBackground({
         return
       }
 
-      ctx.clearRect(0, 0, width, height)
+      // Smooth pointer interpolation
+      if (targetMouseX > -5000) {
+        mouseX += (targetMouseX - mouseX) * Math.min(1, dt * 10)
+        mouseY += (targetMouseY - mouseY) * Math.min(1, dt * 10)
+      } else {
+        mouseX = -9999
+        mouseY = -9999
+      }
 
-      // Update wave
+      // Progress radial travelling wave
       if (!prefersReducedMotion) {
         if (waveActive) {
           waveRadius += waveSpeed * dt
-          const maxDist = Math.hypot(width, height) + 120
+          const maxDist = Math.hypot(width, height) + 160
           if (waveRadius > maxDist) {
             waveActive = false
             lastWaveTime = now
           }
-        } else if (now - lastWaveTime > 3000) {
-          startNewWave()
+        } else if (now - lastWaveTime > 2600) {
+          launchWave(now)
         }
       }
 
-      const waveWidth = 160
+      ctx.clearRect(0, 0, width, height)
+
       const cols = Math.ceil(width / xStep) + 2
       const rows = Math.ceil(height / yStep) + 2
-      const t = now * 0.0015
+      const timeSec = now * 0.0016
 
-      // Light direction vector for 3D bevel shading
-      const lx = -0.6
-      const ly = -0.8
+      // Light vector from upper-left (angled down and right)
+      const lx = -0.58
+      const ly = -0.81
+
+      const waveBandWidth = 200
 
       for (let row = -1; row < rows; row++) {
         const cy = row * yStep
@@ -127,35 +167,66 @@ export function HoneycombBackground({
         for (let col = -1; col < cols; col++) {
           const cx = col * xStep + xOffset
 
-          // Ambient 3D undulating breathing
+          // 1. Organic continuous 3D breathing wave
           const ambientWave = prefersReducedMotion
-            ? 0
-            : Math.sin(cx * 0.012 + cy * 0.012 + t) * 0.5 + 0.5
+            ? 0.3
+            : (Math.sin(cx * 0.014 - cy * 0.011 + timeSec * 1.6) * 0.5 + 0.5) *
+              (Math.cos(cx * 0.009 + cy * 0.015 - timeSec * 1.1) * 0.4 + 0.6)
 
-          // Ripple wave influence
-          let waveInfluence = 0
+          // 2. Travelling impulse wave
+          let waveFactor = 0
           if (waveActive && !prefersReducedMotion) {
-            const dist = Math.hypot(cx - waveCenterX, cy - waveCenterY)
-            const diff = Math.abs(dist - waveRadius)
-            if (diff < waveWidth) {
-              waveInfluence = Math.cos((diff / waveWidth) * (Math.PI / 2))
+            const distFromWave = Math.hypot(cx - waveCenterX, cy - waveCenterY)
+            const diff = Math.abs(distFromWave - waveRadius)
+            if (diff < waveBandWidth) {
+              waveFactor = Math.cos((diff / waveBandWidth) * (Math.PI / 2))
             }
           }
 
-          // 3D elevation height in pixels
-          const totalInfluence = waveInfluence * 0.75 + ambientWave * 0.25
-          const zDepth = 2 + totalInfluence * 7
-          const scaleRadius = radius * (0.86 + totalInfluence * 0.08)
+          // 3. Interactive pointer proximity wave
+          let mouseFactor = 0
+          if (mouseX > -5000) {
+            const distToMouse = Math.hypot(cx - mouseX, cy - mouseY)
+            const mouseRadius = 180
+            if (distToMouse < mouseRadius) {
+              mouseFactor = Math.cos((distToMouse / mouseRadius) * (Math.PI / 2))
+            }
+          }
 
-          // Base hexagon (bottom)
-          const basePts = getHexVertices(cx, cy, scaleRadius)
+          // Combined 3D elevation Z in range [0, 1]
+          const zNorm = Math.min(1, ambientWave * 0.32 + waveFactor * 0.68 + mouseFactor * 0.85)
 
-          // Elevated top face (shifted slightly up and toward light in 3D)
-          const topCx = cx + lx * zDepth * 0.5
-          const topCy = cy + ly * zDepth * 0.8
-          const topPts = getHexVertices(topCx, topCy, scaleRadius * 0.88)
+          // 3D parameters for scale
+          // Tile outer size (leaves visible gap between neighbouring scales)
+          const baseRadius = radius * 0.88
+          // Top plateau face shrinks slightly as scale rises in 3D perspective
+          const topRadius = baseRadius * (0.74 - zNorm * 0.06)
 
-          // Draw 3D side bevel facets
+          // Elevation offset: higher scales shift up and toward the light source
+          const zPixels = 3 + zNorm * 9 // 3px to 12px height
+          const topCx = cx + lx * zPixels * 0.6
+          const topCy = cy + ly * zPixels * 0.6
+
+          const basePts = getHexVertices(cx, cy, baseRadius)
+          const topPts = getHexVertices(topCx, topCy, topRadius)
+
+          // --- Cast Shadow underneath elevated scale ---
+          if (zNorm > 0.05) {
+            const shadowOffsetX = -lx * zPixels * 0.8
+            const shadowOffsetY = -ly * zPixels * 0.8
+            const shadowPts = getHexVertices(cx + shadowOffsetX, cy + shadowOffsetY, baseRadius * 0.98)
+
+            ctx.beginPath()
+            ctx.moveTo(shadowPts[0][0], shadowPts[0][1])
+            for (let i = 1; i < 6; i++) {
+              ctx.lineTo(shadowPts[i][0], shadowPts[i][1])
+            }
+            ctx.closePath()
+            ctx.fillStyle = `rgba(23, 23, 25, ${0.08 + zNorm * 0.16})`
+            ctx.fill()
+          }
+
+          // --- 3D Bevel Facets (6 side slopes) ---
           for (let i = 0; i < 6; i++) {
             const next = (i + 1) % 6
             const b1 = basePts[i]
@@ -163,13 +234,13 @@ export function HoneycombBackground({
             const t1 = topPts[i]
             const t2 = topPts[next]
 
-            // Calculate facet normal orientation relative to light
+            // Calculate facet surface normal pointing outwards
             const edgeDx = b2[0] - b1[0]
             const edgeDy = b2[1] - b1[1]
-            const normalX = -edgeDy
-            const normalY = edgeDx
-            const len = Math.hypot(normalX, normalY) || 1
-            const dot = (normalX / len) * lx + (normalY / len) * ly
+            const nx = -edgeDy
+            const ny = edgeDx
+            const len = Math.hypot(nx, ny) || 1
+            const dot = (nx / len) * lx + (ny / len) * ly
 
             ctx.beginPath()
             ctx.moveTo(b1[0], b1[1])
@@ -178,22 +249,26 @@ export function HoneycombBackground({
             ctx.lineTo(t1[0], t1[1])
             ctx.closePath()
 
-            if (waveInfluence > 0.08) {
-              // Radiant golden highlight on wave
-              const goldAlpha = Math.max(0.04, (dot * 0.5 + 0.5) * (0.35 + waveInfluence * 0.5))
-              ctx.fillStyle = accentColor
-              ctx.globalAlpha = goldAlpha
+            if (dot > 0.08) {
+              // Facet facing light: glossy specular highlight
+              // Bright pearlescent highlight on golden background
+              const highlightIntensity = Math.min(1, dot * (0.45 + zNorm * 0.5))
+              ctx.fillStyle = `rgba(255, 255, 255, ${0.28 + highlightIntensity * 0.52})`
               ctx.fill()
             } else {
-              // Subtle dimensional shading
-              const shadeAlpha = Math.max(0.03, (dot * 0.5 + 0.5) * 0.16)
-              ctx.fillStyle = dot > 0 ? '#ffffff' : color
-              ctx.globalAlpha = shadeAlpha
+              // Facet facing away from light: deep sculpted shadow
+              const shadowIntensity = Math.min(1, Math.abs(dot) * (0.35 + zNorm * 0.45))
+              ctx.fillStyle = `rgba(23, 23, 25, ${0.12 + shadowIntensity * 0.28})`
               ctx.fill()
             }
+
+            // Facet edge line for crisp polygonal definition
+            ctx.strokeStyle = dot > 0 ? 'rgba(255, 255, 255, 0.4)' : 'rgba(23, 23, 25, 0.16)'
+            ctx.lineWidth = 0.8
+            ctx.stroke()
           }
 
-          // Draw top face of 3D scale
+          // --- 3D Top Face Plateau ---
           ctx.beginPath()
           ctx.moveTo(topPts[0][0], topPts[0][1])
           for (let i = 1; i < 6; i++) {
@@ -201,23 +276,26 @@ export function HoneycombBackground({
           }
           ctx.closePath()
 
-          if (waveInfluence > 0.1) {
-            ctx.fillStyle = accentColor
-            ctx.globalAlpha = 0.08 + waveInfluence * 0.22
-            ctx.fill()
-            ctx.strokeStyle = accentColor
-            ctx.lineWidth = 1.2
-            ctx.globalAlpha = 0.25 + waveInfluence * 0.55
-            ctx.stroke()
-          } else {
-            ctx.fillStyle = color
-            ctx.globalAlpha = 0.05 + ambientWave * 0.03
-            ctx.fill()
-            ctx.strokeStyle = color
-            ctx.lineWidth = 0.9
-            ctx.globalAlpha = 0.14 + ambientWave * 0.06
-            ctx.stroke()
+          // Plateau fill with subtle 3D lighting sheen
+          const plateauAlpha = 0.18 + zNorm * 0.48
+          ctx.fillStyle = `rgba(255, 255, 255, ${plateauAlpha})`
+          ctx.fill()
+
+          // Plateau perimeter ridge
+          ctx.strokeStyle = `rgba(23, 23, 25, ${0.16 + zNorm * 0.32})`
+          ctx.lineWidth = 1.2
+          ctx.stroke()
+
+          // Base tile outline for crisp depth layering
+          ctx.beginPath()
+          ctx.moveTo(basePts[0][0], basePts[0][1])
+          for (let i = 1; i < 6; i++) {
+            ctx.lineTo(basePts[i][0], basePts[i][1])
           }
+          ctx.closePath()
+          ctx.strokeStyle = 'rgba(23, 23, 25, 0.09)'
+          ctx.lineWidth = 0.9
+          ctx.stroke()
         }
       }
 
@@ -230,8 +308,10 @@ export function HoneycombBackground({
       cancelAnimationFrame(animationFrameId)
       resizeObserver.disconnect()
       intersectionObserver.disconnect()
+      parentEl.removeEventListener('pointermove', handlePointerMove as EventListener)
+      parentEl.removeEventListener('pointerleave', handlePointerLeave as EventListener)
     }
-  }, [accentColor, color])
+  }, [interactive])
 
   return (
     <canvas
@@ -244,7 +324,7 @@ export function HoneycombBackground({
         height: '100%',
         pointerEvents: 'none',
         opacity,
-        zIndex: 0,
+        zIndex: 1,
       }}
       aria-hidden="true"
     />
