@@ -10,8 +10,10 @@ from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
+from aiogram.methods import SendMessage
 from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from .cleanup import SentMessageJournal, delete_recent_messages
 from .flow import CheckinFlow, QUESTIONS
 from .http_transport import HttpTransport, OrganizerRequiredError, PausedError, TransportError
 from .intake import ConsentSnapshot, TelegramIntake
@@ -25,9 +27,40 @@ BOT_COMMANDS = [
     BotCommand(command="help", description="Доступные команды и сценарии"),
     BotCommand(command="privacy", description="Как бот обрабатывает данные"),
     BotCommand(command="stop", description="Отменить сценарий и очистить черновик"),
+    BotCommand(command="clean", description="Удалить сообщения бота в этом чате"),
     BotCommand(command="transcribe", description="Согласие на одну голосовую (нужна локальная модель)"),
     BotCommand(command="subscribe", description="Уведомления организатора (если настроены)"),
 ]
+
+CLEAN_DONE = (
+    "Чат очищен. Если остались старые сообщения, удалите их вручную "
+    "(Telegram не позволяет ботам удалять их).\n\n"
+    "⚠️ История диалога пропала: удалённые сообщения восстановить нельзя."
+)
+CLEAN_EMPTY = (
+    "Нечего очищать: за последние 48 часов бот не нашёл своих сообщений. "
+    "Если остались старые сообщения, удалите их вручную "
+    "(Telegram не позволяет ботам удалять их)."
+)
+CLEAN_PARTIAL = (
+    "Не удалось удалить часть сообщений: Telegram отклонил запрос. "
+    "Попробуйте /clean ещё раз позже; оставшиеся сообщения можно удалить вручную.\n\n"
+    "⚠️ Уже удалённые сообщения восстановить нельзя."
+)
+
+
+class JournalBot(Bot):
+    """Bot that remembers IDs of its private messages so /clean can delete them."""
+
+    def __init__(self, *args, journal: SentMessageJournal, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.journal = journal
+
+    async def __call__(self, method, request_timeout=None):
+        result = await super().__call__(method, request_timeout=request_timeout)
+        if isinstance(method, SendMessage) and isinstance(result, Message) and result.chat.type == "private":
+            self.journal.record(result.chat.id, result.message_id)
+        return result
 
 
 def create_dispatcher(
@@ -35,10 +68,12 @@ def create_dispatcher(
     voice: VoiceTranscription | None = None,
     notification_transport: HttpTransport | None = None,
     checkin_transport: HttpTransport | None = None,
+    message_log: SentMessageJournal | None = None,
 ) -> Dispatcher:
     dispatcher = Dispatcher()
     flow = CheckinFlow()
     voice_transcription = voice
+    journal = message_log if message_log is not None else SentMessageJournal()
     install_voice_handlers(dispatcher, voice_transcription)
 
     def menu_keyboard():
@@ -88,6 +123,7 @@ def create_dispatcher(
             "/help — эта справка",
             "/privacy — что обрабатывается и где хранится",
             "/stop — отменить текущий чек-ин или расшифровку",
+            "/clean — удалить сообщения бота в этом чате (до 48 часов)",
         ]
         if voice_transcription is not None:
             lines.append("/transcribe — запросить расшифровку одной личной голосовой")
@@ -124,6 +160,8 @@ def create_dispatcher(
             + "• Голосовая расшифровывается только после отдельного согласия на одну новую запись "
             "и только локальной моделью. Аудио и текст не записываются ботом в файл или БД; "
             "результат отправляется только в этот личный чат и остаётся в Telegram.\n"
+            "• Для /clean бот хранит только идентификаторы своих сообщений и время отправки "
+            "(не дольше 48 часов), без текста и содержимого.\n"
             "• Личные сценарии не анализируют групповые сообщения. Отдельный групповой контур "
             "требует серверной настройки и согласия компании и каждого участника."
         )
@@ -170,11 +208,29 @@ def create_dispatcher(
             "Текущий сценарий отменён. Черновик и разрешение на расшифровку очищены; "
             "обработка остановлена. "
             + (
-                "Уже переданные на сервер ответы не удаляются; сообщения в Telegram бот тоже не удаляет."
+                "Уже переданные на сервер ответы не удаляются; для сообщений в Telegram есть /clean."
                 if checkin_transport is not None else
-                "Сообщения в Telegram бот не удаляет."
+                "Сообщения в Telegram бот не удаляет; для них есть /clean."
             )
         )
+
+    @dispatcher.message(Command("clean"))
+    async def clean_command(message: Message):
+        if message.chat.type != "private":
+            await message.answer("Очистка истории доступна только в личном диалоге с ботом.")
+            return
+        if message.from_user is None or message.from_user.is_bot:
+            return
+        flow.cancel(message.from_user.id)
+        if voice_transcription is not None:
+            voice_transcription.cancel(message.from_user.id)
+        deleted, complete = await delete_recent_messages(message.bot, journal, message.chat.id)
+        if not complete:
+            await message.answer(CLEAN_PARTIAL)
+        elif deleted:
+            await message.answer(CLEAN_DONE)
+        else:
+            await message.answer(CLEAN_EMPTY)
 
     @dispatcher.message(Command("subscribe"))
     async def subscribe(message: Message):
@@ -361,6 +417,9 @@ async def main():
             voice_transcription = VoiceTranscription(LocalWhisperProvider(model_dir))
         except ValueError as error:
             raise SystemExit(str(error)) from None
+    data_dir = Path(os.environ.get("VIBEBOT_DATA_DIR", ".data"))
+    journal_name = "bot-clean-" + sha256((binding_id or "default").encode()).hexdigest() + ".json"
+    message_log = SentMessageJournal(data_dir / journal_name)
 
     if api_token and binding_id and chat_id_raw:
         try:
@@ -378,7 +437,7 @@ async def main():
         if isinstance(status, dict):
             await transport.close()
             raise SystemExit("Vibee binding status request was rejected; Telegram polling was not started.")
-        pause_path = Path(os.environ.get("VIBEBOT_DATA_DIR", ".data")) / ("bot-gap-" + sha256(binding_id.encode()).hexdigest() + ".json")
+        pause_path = data_dir / ("bot-gap-" + sha256(binding_id.encode()).hexdigest() + ".json")
         intake = TelegramIntake(ConsentSnapshot(
             chat_id=chat_id,
             binding_id=binding_id,
@@ -393,7 +452,7 @@ async def main():
             company_accepted=True,
         ), transport, PauseState(pause_path))
         await intake.reconcile_pause()
-    dispatcher, flow = create_dispatcher(intake, voice_transcription, transport, transport)
+    dispatcher, flow = create_dispatcher(intake, voice_transcription, transport, transport, message_log)
 
     async def cleanup():
         while True:
@@ -406,7 +465,7 @@ async def main():
 
     task = asyncio.create_task(cleanup())
     try:
-        async with Bot(token=token) as bot:
+        async with JournalBot(token=token, journal=message_log) as bot:
             print("Vibee: запускаю подключение к Telegram. Для проверки отправьте /start.", flush=True)
             try:
                 await bot.set_my_commands(BOT_COMMANDS)
