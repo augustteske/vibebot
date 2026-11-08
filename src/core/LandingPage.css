@@ -137,6 +137,14 @@
   box-shadow: var(--vibee-shadow-hover), 0 0 22px rgba(255, 214, 56, .16);
 }
 
+.landing-nav-cta:active,
+.landing-cta:active,
+.landing-github:active,
+.landing-demo-link:active,
+.landing-room-key__submit:active {
+  transform: scale(0.98);
+}
+
 .landing-hero {
   position: relative;
   display: grid;

@@ -82,28 +82,33 @@ export function InsightsWidget({ state, metrics, teamProfile, periodLabel, demo 
 
   if (state === 'paused') {
     return (
-      <div className="iw-container iw-state-warn">
+      <div className="iw-container iw-state-warn iw-empty-state">
+        <div className="iw-empty-state__icon">⏸️</div>
         <h2 className="iw-title">Анализ приостановлен</h2>
-        <p>Новые показатели не публикуются до возобновления.</p>
+        <p className="iw-empty-state__lead">Сбор временно на паузе.</p>
+        <p className="iw-hint">Новые показатели не публикуются до возобновления работы.</p>
       </div>
     );
   }
 
   if (state === 'calibrating') {
     return (
-      <div className="iw-container">
+      <div className="iw-container iw-empty-state">
+        <div className="iw-empty-state__icon">🐝🔍</div>
         <h2 className="iw-title">Идёт калибровка</h2>
-        <p>Пока накапливается история команды, сравнение с нормой недоступно.</p>
+        <p className="iw-empty-state__lead">Мы собираем первые сообщения, чтобы понять ритм и стиль вашей команды.</p>
+        <p className="iw-hint">Пока накапливается история, сравнение с привычной нормой недоступно.</p>
       </div>
     );
   }
 
   if (isInsufficient) {
     return (
-      <div className="iw-container">
+      <div className="iw-container iw-empty-state">
+        <div className="iw-empty-state__icon">🐝✨</div>
         <h2 className="iw-title">Недостаточно данных</h2>
-        <p>Для публикации показателей нужно минимум 5 участников и 20 сообщений.</p>
-        <p className="iw-hint">Отсутствие данных не означает ноль.</p>
+        <p className="iw-empty-state__lead">Пока нет данных для анализа. Пригласите коллег в чат, и мы начнём!</p>
+        <p className="iw-hint">Для бережной публикации нужно минимум 5 участников и 20 сообщений. Отсутствие данных не означает ноль.</p>
       </div>
     );
   }
@@ -125,8 +130,8 @@ export function InsightsWidget({ state, metrics, teamProfile, periodLabel, demo 
             <h3>Общение вне рабочих часов</h3>
             <MetricInfo
               label="Общение вне рабочих часов"
-              measures="долю сообщений, отправленных вне заданного рабочего графика команды."
-              doesNotProve="что люди перерабатывают: у кого-то может быть личный график или другая часовая зона."
+              measures={`${metrics.outsideHoursPercent}% сообщений пришлось на нерабочее время.`}
+              doesNotProve="что кто-то перерабатывает: возможно, у коллег гибкий график или команда просто активна вечером."
               note={teamProfile ? PROFILE_NOTE[teamProfile] : undefined}
             />
           </div>
@@ -139,8 +144,10 @@ export function InsightsWidget({ state, metrics, teamProfile, periodLabel, demo 
             <h3>Равномерность участия</h3>
             <MetricInfo
               label="Равномерность участия"
-              measures="насколько равномерно сообщения распределены между участниками, от 0 до 100%."
-              doesNotProve="вклад людей в результат и не показывает, кто «главный» в команде."
+              measures={metrics.participationEvenness >= 70
+                ? "Участие довольно равномерное. Все члены команды активно включены в обсуждение."
+                : "Распределение сообщений между участниками. Помогает заметить, если в чате говорят только 1–2 человека."}
+              doesNotProve="вклад людей в результат и не определяет «главного» в команде."
             />
           </div>
           <Suspense fallback={<div className="iw-chart" aria-hidden="true" />}>
@@ -152,8 +159,8 @@ export function InsightsWidget({ state, metrics, teamProfile, periodLabel, demo 
             <h3>Благодарности</h3>
             <MetricInfo
               label="Благодарности"
-              measures="долю сообщений с автоматически найденными признаками благодарности."
-              doesNotProve="качество работы и настоящую культуру признания: распознавание приблизительное."
+              measures={`${metrics.recognitionPercent}% сообщений содержат слова признательности и поддержки.`}
+              doesNotProve="настоящую культуру признания: автоматическое распознавание лишь подсвечивает добрые слова."
             />
           </div>
           <p className="iw-value">{metrics.recognitionPercent}%</p>

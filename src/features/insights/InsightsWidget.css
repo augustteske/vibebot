@@ -9,6 +9,28 @@
   box-shadow: var(--vibee-shadow-soft);
 }
 
+.iw-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: clamp(32px, 5vw, 48px) 24px;
+}
+
+.iw-empty-state__icon {
+  font-size: 42px;
+  margin-bottom: 12px;
+  filter: drop-shadow(0 4px 12px rgba(217, 174, 0, .2));
+}
+
+.iw-empty-state__lead {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--vibee-ink);
+  max-width: 480px;
+  margin: 8px 0 6px;
+}
+
 .iw-state-warn { background: var(--vibee-tint-strong); }
 
 .iw-header {

@@ -4,6 +4,10 @@
   gap: 8px;
 }
 
+.invite-colleague-trigger:active {
+  transform: scale(0.98);
+}
+
 .invite-modal-overlay {
   position: fixed;
   z-index: 1000;

@@ -23,6 +23,10 @@
   box-shadow: 0 14px 30px rgba(217, 174, 0, .32);
 }
 
+.share-card-trigger:active {
+  transform: scale(0.98);
+}
+
 .share-card-trigger:focus-visible { outline: 3px solid var(--vibee-focus); outline-offset: 3px; }
 
 .share-card-overlay {
