@@ -230,6 +230,12 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         return json(res, 201, store.snapshot(store.authenticate(newToken)))
       }
       if (!member) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
+      const requestedWorkspace = url.searchParams.get('workspaceId') ?? (input && typeof input.workspaceId === 'string' ? input.workspaceId : null)
+      if (requestedWorkspace && requestedWorkspace !== member.workspace_id) {
+        const requestId = req.headers['x-request-id'] || (typeof input?.requestId === 'string' ? input.requestId : null) || 'none'
+        console.warn('Vibee: security violation: requestId=' + requestId + ' userId=' + member.id + ' type=WORKSPACE_MISMATCH')
+        throw new AppError(403, 'FORBIDDEN', 'Доступ к чужой команде запрещён')
+      }
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, store.snapshot(member))
       if (req.method === 'GET' && url.pathname === '/api/summary') return json(res, 200, store.summary(member))
       if (req.method === 'POST') {

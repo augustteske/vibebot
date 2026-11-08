@@ -45,7 +45,13 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
   const roundFor = member => one('SELECT * FROM rounds WHERE workspace_id=? ORDER BY rowid DESC LIMIT 1', member.workspace_id)
   const requireAction = (member, id) => {
     const action = one('SELECT * FROM actions WHERE id=? AND workspace_id=?', id, member.workspace_id)
-    if (!action) fail(404, 'NOT_FOUND', 'Договорённость не найдена')
+    if (!action) {
+      const foreign = one('SELECT workspace_id FROM actions WHERE id=?', id)
+      if (foreign && foreign.workspace_id !== member.workspace_id) {
+        console.warn('Vibee: security violation: requestId=none userId=' + member.id + ' type=WORKSPACE_MISMATCH')
+      }
+      fail(404, 'NOT_FOUND', 'Договорённость не найдена')
+    }
     return action
   }
   const createRound = workspaceId => run('INSERT INTO rounds(id,workspace_id,created_at) VALUES(?,?,?)', randomUUID(), workspaceId, new Date(now()).toISOString())
