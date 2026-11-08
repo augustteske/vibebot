@@ -7,6 +7,7 @@ import logging
 from hashlib import sha256
 from datetime import timezone
 from pathlib import Path
+from time import monotonic
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
@@ -50,6 +51,9 @@ ERROR_KEYS = {
     "Выберите целую оценку от 1 до 5": "error.score_range",
     "Неверный выбор": "error.choice",
 }
+
+# Сколько держать завершённый чек-ин в памяти для кнопки «Повторить».
+RETRY_TTL_SECONDS = 300
 
 
 class JournalBot(Bot):
@@ -113,6 +117,75 @@ def create_dispatcher(
             InlineKeyboardButton(text=label(i18n.RU, "Русский"), callback_data=f"lang:{i18n.RU}"),
             InlineKeyboardButton(text=label(i18n.EN, "English"), callback_data=f"lang:{i18n.EN}"),
         ]])
+
+    # Завершённые чек-ины, доставку которых не удалось подтвердить:
+    # nonce -> (Telegram ID, оценки, срок хранения для кнопки «Повторить»).
+    pending_checkins: dict[str, tuple[int, dict[str, int], float]] = {}
+
+    def remember_pending_checkin(nonce: str, user_id: int, scores: dict[str, int]) -> None:
+        now = monotonic()
+        for key in list(pending_checkins):
+            if pending_checkins[key][2] <= now:
+                pending_checkins.pop(key, None)
+        pending_checkins[nonce] = (user_id, dict(scores), now + RETRY_TTL_SECONDS)
+
+    def take_pending_checkin(nonce: str, user_id: int) -> dict[str, int] | None:
+        entry = pending_checkins.get(nonce)
+        if entry is None:
+            return None
+        owner, scores, expires = entry
+        if owner != user_id or expires <= monotonic():
+            pending_checkins.pop(nonce, None)
+            return None
+        return scores
+
+    def retry_keyboard(language: str, action: str):
+        return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+            text=i18n.text(language, "button.retry"), callback_data=f"retry:{action}",
+        )]])
+
+    async def submit_checkin(message, user_id: int, scores: dict[str, int], nonce: str, language: str) -> None:
+        """Отправляет оценки на сервер; при сетевой ошибке даёт кнопку «Повторить»."""
+        if checkin_transport is None:
+            await message.answer(i18n.text(language, "checkin.done.demo"))
+            return
+        try:
+            await checkin_transport.submit_personal_checkin(user_id, scores, nonce)
+        except PausedError:
+            pending_checkins.pop(nonce, None)
+            await message.answer(i18n.text(language, "checkin.done.paused"))
+            return
+        except TransportError:
+            remember_pending_checkin(nonce, user_id, scores)
+            await message.answer(
+                i18n.text(language, "checkin.done.unknown")
+                + "\n\n" + i18n.text(language, "error.network"),
+                reply_markup=retry_keyboard(language, f"checkin:{nonce}"),
+            )
+            return
+        pending_checkins.pop(nonce, None)
+        await message.answer(i18n.text(language, "checkin.done.server"))
+
+    async def deliver_subscription(message, user_id: int, language: str) -> None:
+        """Включает уведомления; при сетевой ошибке даёт кнопку «Повторить»."""
+        if notification_transport is None:
+            await message.answer(i18n.text(language, "subscribe.no_config"))
+            return
+        try:
+            result = await notification_transport.subscribe_notifications(user_id)
+        except OrganizerRequiredError:
+            await message.answer(i18n.text(language, "subscribe.organizer_only"))
+            return
+        except TransportError:
+            await message.answer(
+                i18n.text(language, "error.network"),
+                reply_markup=retry_keyboard(language, "subscribe"),
+            )
+            return
+        if result.get("notificationsEnabled") is True:
+            await message.answer(i18n.text(language, "subscribe.enabled"))
+        else:
+            await message.answer(i18n.text(language, "subscribe.disabled"))
 
     async def question(message, nonce, step, language):
         key = QUESTION_KEYS[step]
@@ -207,6 +280,29 @@ def create_dispatcher(
                 reply_markup=language_keyboard(language),
             )
 
+    @dispatcher.callback_query(F.data.startswith("retry:"))
+    async def retry_callback(event: CallbackQuery, state: FSMContext | None = None):
+        language = await language_of(state)
+        message = event.message
+        if (message is None or getattr(getattr(message, "chat", None), "type", None) != "private"
+                or event.from_user.is_bot or not callable(getattr(message, "answer", None))):
+            await event.answer(i18n.text(language, "alert.checkin_private"), show_alert=True)
+            return
+        parts = event.data.split(":")
+        if len(parts) == 2 and parts[1] == "subscribe":
+            await event.answer()
+            await deliver_subscription(message, event.from_user.id, language)
+            return
+        if len(parts) == 3 and parts[1] == "checkin":
+            scores = take_pending_checkin(parts[2], event.from_user.id)
+            if scores is None:
+                await event.answer(i18n.text(language, "retry.expired"), show_alert=True)
+                return
+            await event.answer()
+            await submit_checkin(message, event.from_user.id, scores, parts[2], language)
+            return
+        await event.answer(i18n.text(language, "error.generic"), show_alert=True)
+
     @dispatcher.callback_query(F.data == "menu:checkin")
     async def select_checkin(event: CallbackQuery, state: FSMContext | None = None):
         language = await language_of(state)
@@ -268,21 +364,7 @@ def create_dispatcher(
                 or message.from_user.is_bot or message.chat.id != message.from_user.id):
             return
         language = await language_of(state)
-        if notification_transport is None:
-            await message.answer(i18n.text(language, "subscribe.no_config"))
-            return
-        try:
-            result = await notification_transport.subscribe_notifications(message.from_user.id)
-        except OrganizerRequiredError:
-            await message.answer(i18n.text(language, "subscribe.organizer_only"))
-            return
-        except TransportError:
-            await message.answer(i18n.text(language, "subscribe.error"))
-            return
-        if result.get("notificationsEnabled") is True:
-            await message.answer(i18n.text(language, "subscribe.enabled"))
-        else:
-            await message.answer(i18n.text(language, "subscribe.disabled"))
+        await deliver_subscription(message, message.from_user.id, language)
 
     async def submit_intake_text(message: Message, text: str) -> None:
         if intake is None or message.chat.type == "private" or message.from_user is None:
@@ -377,18 +459,7 @@ def create_dispatcher(
                 result = flow.answer(event.from_user.id, parts[1], step, int(parts[3]))
                 await event.answer()
                 if result is not None:
-                    if checkin_transport is not None:
-                        try:
-                            await checkin_transport.submit_personal_checkin(
-                                event.from_user.id, result, parts[1],
-                            )
-                            await message.answer(i18n.text(language, "checkin.done.server"))
-                        except PausedError:
-                            await message.answer(i18n.text(language, "checkin.done.paused"))
-                        except TransportError:
-                            await message.answer(i18n.text(language, "checkin.done.unknown"))
-                    else:
-                        await message.answer(i18n.text(language, "checkin.done.demo"))
+                    await submit_checkin(message, event.from_user.id, result, parts[1], language)
                 else:
                     await question(message, parts[1], step + 1, language)
             else:

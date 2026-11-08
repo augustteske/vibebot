@@ -92,9 +92,6 @@ _TEXTS: dict[str, dict[str, str]] = {
         "subscribe.organizer_only": (
             "Подписаться может только организатор, чей Telegram-аккаунт связан с этой командой."
         ),
-        "subscribe.error": (
-            "Не удалось включить уведомления. Проверьте подключение бота и настройки сервера."
-        ),
         "subscribe.enabled": (
             "Подписка включена. Уведомления о закрытых опубликованных периодах будут приходить сюда."
         ),
@@ -158,6 +155,13 @@ _TEXTS: dict[str, dict[str, str]] = {
         "error.score_range": "Выберите целую оценку от 1 до 5.",
         "error.choice": "Выберите один из вариантов кнопками.",
         "error.generic": "Не удалось обработать выбор. Откройте /start и попробуйте снова.",
+        "error.network": (
+            "🐝 Упс, кажется, у нас проблемы с сетью. Мы уже чиним! Попробуйте позже."
+        ),
+        "button.retry": "Повторить",
+        "retry.expired": (
+            "Данные этого чек-ина уже не сохранены. Пройдите чек-ин заново: /start."
+        ),
         "lang.saved": "Язык сохранён: русский.",
         "lang.current": "Текущий язык: {name}.",
         "lang.usage": "Сменить: /lang ru или /lang en.",
@@ -244,9 +248,6 @@ _TEXTS: dict[str, dict[str, str]] = {
         "subscribe.organizer_only": (
             "Only an organizer whose Telegram account is linked to this team can subscribe."
         ),
-        "subscribe.error": (
-            "Could not enable notifications. Check the bot connection and server settings."
-        ),
         "subscribe.enabled": (
             "Subscription enabled. Notifications about closed published periods will arrive here."
         ),
@@ -308,6 +309,14 @@ _TEXTS: dict[str, dict[str, str]] = {
         "error.score_range": "Choose a whole rating from 1 to 5.",
         "error.choice": "Choose one of the options with the buttons.",
         "error.generic": "Could not process the choice. Open /start and try again.",
+        "error.network": (
+            "🐝 Oops, looks like we're having network problems. We're fixing it! "
+            "Please try again later."
+        ),
+        "button.retry": "Retry",
+        "retry.expired": (
+            "This check-in's answers are no longer saved. Please take the check-in again: /start."
+        ),
         "lang.saved": "Language saved: English.",
         "lang.current": "Current language: {name}.",
         "lang.usage": "Switch: /lang ru or /lang en.",
