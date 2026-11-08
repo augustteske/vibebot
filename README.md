@@ -69,11 +69,19 @@ npm run dev
 
 ### Резервное копирование SQLite
 
-Скрипт [`scripts/backup.sh`](scripts/backup.sh) выполняет атомарное горячее копирование базы данных через SQLite `VACUUM INTO` и автоматически удаляет старые копии, сохраняя последние 7 штук:
+Скрипт [`scripts/backup.sh`](scripts/backup.sh) выполняет резервное копирование рабочей базы данных с соблюдением требований приватности:
+- **Запуск в Docker Compose по умолчанию:** выполняет `docker compose exec web node ...` с использованием встроенного модуля `node:sqlite`.
+- **Очистка конфиденциальных сырых данных:** во временной копии удаляются сырые таблицы (`telegram_texts`, `telegram_media_observations`), после чего выполняется финальный `VACUUM INTO`.
+- **Безопасность прав доступа:** права на резервные копии устанавливаются в `600` (`umask 077`), доступ имеет только владелец.
+- **Срок хранения:** копии хранятся **7 дней** (ротация автоматически удаляет старые бэкапы, сохраняя недельный архив).
+- **Режим вне Docker:** при необходимости запуска на хосте используйте флаг `--host` (или `VIBEE_BACKUP_MODE=host`).
 
 ```sh
-# Разовый запуск (по умолчанию база .data/vibebot.sqlite, каталог /backup):
-VIBEE_BACKUP_DIR=/backup bash scripts/backup.sh
+# Запуск через Docker Compose (по умолчанию):
+bash scripts/backup.sh
+
+# Запуск на хосте (без Docker):
+bash scripts/backup.sh --host
 ```
 
 Настройка ежедневного резервного копирования в 03:00 через `cron`:
@@ -83,7 +91,7 @@ VIBEE_BACKUP_DIR=/backup bash scripts/backup.sh
 crontab -e
 
 # Добавьте задачу (замените /path/to/vibebot на реальный путь):
-0 3 * * * cd /path/to/vibebot && VIBEE_BACKUP_DIR=/backup bash scripts/backup.sh >> /var/log/vibebot-backup.log 2>&1
+0 3 * * * cd /path/to/vibebot && bash scripts/backup.sh >> /var/log/vibebot-backup.log 2>&1
 ```
 
 ---
