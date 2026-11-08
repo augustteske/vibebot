@@ -120,6 +120,28 @@
 .workspace .entrance h2 { margin-bottom: 12px; font-size: clamp(30px, 5vw, 40px); }
 .entrance > p { margin-bottom: 26px; }
 .entrance form .button { width: 100%; min-height: 54px; margin-top: 8px; font-size: 15px; }
+.entrance__submit { position: relative; overflow: hidden; }
+.entrance__submit::before {
+  position: absolute;
+  top: -20%;
+  left: -60px;
+  width: 44px;
+  height: 140%;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, .55) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  transform: skewX(-20deg);
+  transition: left .65s cubic-bezier(.22, 1, .36, 1);
+  content: "";
+  pointer-events: none;
+}
+.entrance__submit:hover:not(:disabled)::before { left: calc(100% + 60px); }
+@media (prefers-reduced-motion: reduce) {
+  .entrance__submit::before { display: none; }
+}
 .entrance .button-row { justify-content: space-between; gap: 4px 14px; }
 
 .text-button {

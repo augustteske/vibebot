@@ -77,6 +77,8 @@
 .landing-nav-cta,
 .landing-cta,
 .landing-github {
+  position: relative;
+  overflow: hidden;
   display: inline-flex;
   min-height: 48px;
   align-items: center;
@@ -92,6 +94,41 @@
   font-weight: 720;
   cursor: pointer;
   transition: transform .24s ease, box-shadow .24s ease, background .24s ease;
+}
+
+.landing-nav-cta::before,
+.landing-cta::before,
+.landing-demo-link::before {
+  position: absolute;
+  top: -20%;
+  left: -60px;
+  width: 40px;
+  height: 140%;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, .52) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  transform: skewX(-20deg);
+  transition: left .6s cubic-bezier(.22, 1, .36, 1);
+  content: "";
+  pointer-events: none;
+}
+
+.landing-nav-cta::before {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, .26) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+}
+
+.landing-nav-cta:hover::before,
+.landing-cta:hover::before,
+.landing-demo-link:hover::before {
+  left: calc(100% + 60px);
 }
 
 .landing-nav-cta:hover {
@@ -225,6 +262,8 @@
 }
 
 .landing-demo-link {
+  position: relative;
+  overflow: hidden;
   display: inline-flex;
   min-height: 56px;
   align-items: center;
@@ -985,5 +1024,11 @@
     opacity: 1;
     transform: none;
     will-change: auto;
+  }
+
+  .landing-nav-cta::before,
+  .landing-cta::before,
+  .landing-demo-link::before {
+    display: none;
   }
 }
