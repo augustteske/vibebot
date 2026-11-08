@@ -7,6 +7,15 @@
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-11-09
+
+### Added
+
+- 📖 Страница гайда по подключению (Getting Started)
+- 🔒 Анимированный замок (щелчок, блик, ударная волна)
+- 🌊 3D-волновая анимация сот в секции «Приватность»
+- 🎨 Переработанный текст и карточки в секции «Приватность»
+
 ## [1.1.1] - 2026-11-08
 
 ### Added
@@ -32,7 +41,8 @@
 
 - Первый стабильный релиз Vibee.
 
-[Unreleased]: https://github.com/augustteske/vibebot/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/augustteske/vibebot/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/augustteske/vibebot/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/augustteske/vibebot/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/augustteske/vibebot/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/augustteske/vibebot/releases/tag/v1.0.0
