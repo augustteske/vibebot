@@ -471,4 +471,65 @@ test('createApp cleans up expired records on startup and periodic interval', asy
   }
 })
 
+test('store testability: custom now controls sessions, invitations, and 24h action limit', async t => {
+  let currentTime = 1700000000000
+  const now = () => currentTime
+  const store = createStore({ path: ':memory:', secret, now })
+  t.after(() => store.close())
+
+  // 1. Workspace and session
+  const token = store.createWorkspace({ name: 'Тестовая команда', displayName: 'Организатор' })
+  const member = store.authenticate(token)
+  assert.ok(member, 'Session should be valid immediately')
+
+  // 2. Invitation
+  const invitation = store.invite(member)
+  assert.ok(invitation.token, 'Invitation token generated')
+
+  // 3. Close round and add two actions
+  const round = store.snapshot(member).round
+  store.closeRound(member, { roundId: round.id })
+  store.accept(member, { roundId: round.id, suggestionId: 'recognition', goal: 'Первый шаг' })
+
+  // Open next round to accept another action
+  store.openRound(member)
+  const round2 = store.snapshot(member).round
+  store.closeRound(member, { roundId: round2.id })
+  store.accept(member, { roundId: round2.id, suggestionId: 'recognition', goal: 'Второй шаг' })
+
+  // 4. Third action within 24 hours must fail due to DAILY_LIMIT
+  store.openRound(member)
+  const round3 = store.snapshot(member).round
+  store.closeRound(member, { roundId: round3.id })
+  assert.throws(
+    () => store.accept(member, { roundId: round3.id, suggestionId: 'recognition', goal: 'Третий шаг' }),
+    err => err?.code === 'DAILY_LIMIT'
+  )
+
+  // 5. Advance time by 24 hours + 10 seconds:
+  // - Daily limit resets (new action can be accepted)
+  // - Invitation expires (join throws INVALID_INVITATION)
+  // - Session is still active (7 days TTL)
+  currentTime += 86400000 + 10000
+
+  // Check invitation expired:
+  assert.throws(
+    () => store.join({ token: invitation.token, displayName: 'Участник' }),
+    err => err?.code === 'INVALID_INVITATION'
+  )
+
+  // Check daily limit reset:
+  store.accept(member, { roundId: round3.id, suggestionId: 'recognition', goal: 'Третий шаг на следующий день' })
+  assert.equal(store.snapshot(member).actions.length, 3)
+
+  // Check session still active:
+  assert.ok(store.authenticate(token), 'Session should still be active after 24h')
+
+  // 6. Advance time past 7 days (e.g. + 7 * 86400000):
+  // Session must expire
+  currentTime += 7 * 86400000
+  assert.equal(store.authenticate(token), null, 'Session should expire after 7 days')
+})
+
+
 
