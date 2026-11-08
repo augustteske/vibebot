@@ -18,4 +18,5 @@ test('share card: short period and text version for published aggregates', () =>
   assert.match(text, /Благодарности: 20%/)
   assert.match(text, /Демо: вымышленные данные/)
   assert.match(text, /Почувствовать команду\. Сделать следующий шаг\./)
+  assert.match(text, /Попробуйте Vibee для своей команды: https:\/\/github\.com\/augustteske\/vibebot/)
 })

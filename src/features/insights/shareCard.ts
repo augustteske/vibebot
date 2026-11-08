@@ -20,6 +20,8 @@ export interface ShareCardData {
 export const SHARE_CARD_WIDTH = 1200
 export const SHARE_CARD_HEIGHT = 630
 export const SHARE_CARD_SLOGAN = 'Почувствовать команду. Сделать следующий шаг.'
+export const SHARE_CARD_REFERRAL_URL = 'https://github.com/augustteske/vibebot'
+export const SHARE_CARD_REFERRAL_TEXT = 'Попробуйте Vibee для своей команды: github.com/augustteske/vibebot'
 
 const FONT = 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif'
 const INK = '#171719'
@@ -59,6 +61,7 @@ export function shareCardText(data: ShareCardData) {
     ...SHARE_CARD_METRICS.map(metric => `• ${metric.label}: ${formatSharePercent(data.metrics[metric.key])}`),
     ...(data.demo ? ['Демо: вымышленные данные.'] : []),
     `Vibee — ${SHARE_CARD_SLOGAN}`,
+    `Попробуйте Vibee для своей команды: ${SHARE_CARD_REFERRAL_URL}`,
   ].join('\n')
 }
 
@@ -202,13 +205,23 @@ export async function renderShareCard(data: ShareCardData, scale = 2): Promise<H
     ctx.fillText(formatSharePercent(data.metrics[metric.key]), x + 22, top + 146)
   })
 
-  // Слоган и подпись.
+  // Слоган, подпись и реферальная плашка.
   ctx.fillStyle = INK
   ctx.font = `780 27px ${FONT}`
-  ctx.fillText(SHARE_CARD_SLOGAN, 64, 556)
+  ctx.fillText(SHARE_CARD_SLOGAN, 64, 546)
   ctx.fillStyle = 'rgba(23, 23, 25, .64)'
   ctx.font = `560 16px ${FONT}`
-  ctx.fillText('Общие показатели команды · без слежки и персональных оценок', 64, 588)
+  ctx.fillText('Общие показатели команды · без слежки и персональных оценок', 64, 574)
+
+  // Реферальная ссылка / бейдж
+  const referralLabel = 'Попробуйте Vibee для своей команды → github.com/augustteske/vibebot'
+  ctx.font = `700 14px ${FONT}`
+  const refWidth = ctx.measureText(referralLabel).width + 28
+  roundedRect(ctx, 64, 588, refWidth, 28, 14)
+  ctx.fillStyle = 'rgba(23, 23, 25, .08)'
+  ctx.fill()
+  ctx.fillStyle = INK
+  ctx.fillText(referralLabel, 78, 607)
 
   return canvas
 }
