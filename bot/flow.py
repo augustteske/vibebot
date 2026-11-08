@@ -3,11 +3,7 @@ from dataclasses import dataclass, field
 import secrets
 import time
 
-QUESTIONS = (
-    ("energy", "Сколько сил на работу сегодня?"),
-    ("clarity", "Насколько понятно, что сейчас главное?"),
-    ("support", "Насколько легко сейчас попросить помощи?"),
-)
+QUESTION_KEYS = ("energy", "clarity", "support")
 
 
 @dataclass
@@ -53,13 +49,13 @@ class CheckinFlow:
 
     def answer(self, user, nonce, step, value):
         draft = self._current(user, nonce)
-        if draft.step != step or step not in range(3):
+        if draft.step != step or step not in range(len(QUESTION_KEYS)):
             raise ValueError("Эта кнопка устарела. Ответьте на текущий вопрос.")
         if type(value) is not int or value not in range(1, 6):
             raise ValueError("Выберите целую оценку от 1 до 5")
-        draft.values[QUESTIONS[step][0]] = value
+        draft.values[QUESTION_KEYS[step]] = value
         draft.step += 1
-        if draft.step == 3:
+        if draft.step == len(QUESTION_KEYS):
             result = draft.values.copy()
             self.cancel(user)
             return result
