@@ -243,6 +243,10 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
       }
       if (req.method === 'POST') checkBrowser(req)
       const input = req.method === 'POST' ? await body(req) : null
+      if (url.pathname === '/api/feedback') {
+        if (req.method !== 'POST') throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Метод не поддерживается')
+        return json(res, 201, store.submitFeedback(input))
+      }
       const token = tokenFrom(req)
       const member = store.authenticate(token)
       if (req.method === 'POST' && ['/api/workspaces', '/api/join', '/api/restore'].includes(url.pathname)) {

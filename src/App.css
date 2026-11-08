@@ -265,6 +265,11 @@
 }
 
 .workspace footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 16px;
   padding: 28px 0 0;
   color: var(--vibee-muted);
   font-size: 12px;
