@@ -48,10 +48,10 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
     if (!action) fail(404, 'NOT_FOUND', 'Договорённость не найдена')
     return action
   }
-  const createRound = workspaceId => run('INSERT INTO rounds(id,workspace_id,created_at) VALUES(?,?,?)', randomUUID(), workspaceId, new Date().toISOString())
+  const createRound = workspaceId => run('INSERT INTO rounds(id,workspace_id,created_at) VALUES(?,?,?)', randomUUID(), workspaceId, new Date(now()).toISOString())
   const session = memberId => {
     const token = randomBytes(32).toString('hex')
-    run('INSERT INTO sessions VALUES(?,?,?)', hash(token), memberId, Date.now() + 7 * 86400000)
+    run('INSERT INTO sessions VALUES(?,?,?)', hash(token), memberId, now() + 7 * 86400000)
     return token
   }
   const suggestions = round => {
@@ -62,23 +62,32 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
 
   const telegram = createTelegramStore({ db, secret, bootstrapCredential: telegramBootstrapCredential, fail,
     enabled: telegramSynthetic, now, recommendationProvider, recommendationTimeoutMs })
+  const cleanup = () => tx(() => {
+    const time = now()
+    run('DELETE FROM sessions WHERE expires<=?', time)
+    run('DELETE FROM invitations WHERE expires<=?', time)
+    run('DELETE FROM recovery_keys WHERE expires<=?', time)
+  })
+  cleanup()
+
   return {
     telegram,
+    cleanup,
     close: () => db.close(),
     authenticate(token) {
       if (!token || !/^[a-f0-9]{64}$/.test(token)) return null
-      return one('SELECT members.* FROM members JOIN sessions ON members.id=sessions.member_id WHERE sessions.token_hash=? AND sessions.expires>?', hash(token), Date.now()) ?? null
+      return one('SELECT members.* FROM members JOIN sessions ON members.id=sessions.member_id WHERE sessions.token_hash=? AND sessions.expires>?', hash(token), now()) ?? null
     },
     logout(token) { if (token) run('DELETE FROM sessions WHERE token_hash=?', hash(token)) },
     recoveryKey(member) {
       const token = randomBytes(32).toString('hex')
-      const expiresAt = Date.now() + 30 * 86400000
+      const expiresAt = now() + 30 * 86400000
       run('INSERT INTO recovery_keys VALUES(?,?,?) ON CONFLICT(member_id) DO UPDATE SET token_hash=excluded.token_hash,expires=excluded.expires', hash(token), member.id, expiresAt)
       return { key: token, expiresAt: new Date(expiresAt).toISOString() }
     },
     restore(input) {
       const token = text(input.key, 64, 'Код входа')
-      const saved = one('SELECT member_id FROM recovery_keys WHERE token_hash=? AND expires>?', hash(token), Date.now())
+      const saved = one('SELECT member_id FROM recovery_keys WHERE token_hash=? AND expires>?', hash(token), now())
       if (!saved) fail(400, 'INVALID_ACCESS_KEY', 'Код входа неверен или срок его действия истёк')
       return session(saved.member_id)
     },
@@ -96,7 +105,7 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
     invite(member) {
       requireOrganizer(member)
       const token = randomBytes(32).toString('hex')
-      const expiresAt = Date.now() + 86400000
+      const expiresAt = now() + 86400000
       run('INSERT INTO invitations(token_hash,workspace_id,expires) VALUES(?,?,?)', hash(token), member.workspace_id, expiresAt)
       return { token, expiresAt: new Date(expiresAt).toISOString() }
     },
@@ -104,7 +113,7 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
       const token = text(input.token, 64, 'Приглашение')
       const name = text(input.displayName, 60, 'Имя участника')
       return tx(() => {
-        const invite = one('SELECT * FROM invitations WHERE token_hash=? AND used=0 AND expires>?', hash(token), Date.now())
+        const invite = one('SELECT * FROM invitations WHERE token_hash=? AND used=0 AND expires>?', hash(token), now())
         if (!invite) fail(400, 'INVALID_INVITATION', 'Приглашение уже использовано, истекло или неверно')
         run('UPDATE invitations SET used=1 WHERE token_hash=?', hash(token))
         const id = randomUUID()
@@ -171,7 +180,7 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
         if (round.closed_at) fail(409, 'ROUND_CLOSED', 'Раунд уже закрыт')
         const answers = all('SELECT energy,clarity,support FROM checkins WHERE round_id=?', round.id)
         const summary = aggregateRound({ closed: true, answers })
-        run('UPDATE rounds SET closed_at=?,summary=? WHERE id=?', new Date().toISOString(), JSON.stringify(summary), round.id)
+        run('UPDATE rounds SET closed_at=?,summary=? WHERE id=?', new Date(now()).toISOString(), JSON.stringify(summary), round.id)
         run('DELETE FROM checkins WHERE round_id=?', round.id)
       })
     },
@@ -187,9 +196,9 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
       if (!suggestion) fail(400, 'INVALID_SUGGESTION', 'Предложение недоступно для этого раунда')
       const goal = text(input.goal, 500, 'Следующий шаг')
       if (one('SELECT id FROM actions WHERE round_id=? AND kind=?', round.id, suggestion.id)) fail(409, 'ALREADY_ACCEPTED', 'Эта договорённость уже создана')
-      const since = new Date(Date.now() - 86400000).toISOString()
+      const since = new Date(now() - 86400000).toISOString()
       if (one('SELECT COUNT(*) AS n FROM actions WHERE workspace_id=? AND created_at>?', member.workspace_id, since).n >= 2) fail(409, 'DAILY_LIMIT', 'На ближайшие 24 часа уже выбраны два шага. Сначала попробуйте их.')
-      run('INSERT INTO actions(id,workspace_id,round_id,kind,title,goal,created_at) VALUES(?,?,?,?,?,?,?)', randomUUID(), member.workspace_id, round.id, suggestion.id, suggestion.title, goal, new Date().toISOString())
+      run('INSERT INTO actions(id,workspace_id,round_id,kind,title,goal,created_at) VALUES(?,?,?,?,?,?,?)', randomUUID(), member.workspace_id, round.id, suggestion.id, suggestion.title, goal, new Date(now()).toISOString())
     },
     feedback(member, id, input) {
       const action = requireAction(member, id)
@@ -204,7 +213,7 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
         if (action.feedback_closed_at) fail(409, 'FEEDBACK_CLOSED', 'Сбор отзывов уже завершён')
         const totals = one('SELECT COUNT(*) AS n,SUM(helpful) AS yes FROM feedback WHERE action_id=?', id)
         const result = totals.n >= 5 ? { status: 'published', helpfulPercent: Math.round(100 * totals.yes / totals.n) } : { status: 'insufficient' }
-        run('UPDATE actions SET feedback_closed_at=?,feedback_summary=? WHERE id=?', new Date().toISOString(), JSON.stringify(result), id)
+        run('UPDATE actions SET feedback_closed_at=?,feedback_summary=? WHERE id=?', new Date(now()).toISOString(), JSON.stringify(result), id)
         run('DELETE FROM feedback WHERE action_id=?', id)
       })
     },

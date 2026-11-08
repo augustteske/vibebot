@@ -24,7 +24,12 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
   const store = createStore({ path: dbPath, secret, telegramBootstrapCredential, telegramSynthetic, now,
     recommendationProvider, recommendationTimeoutMs })
   const cleanupTimer = setInterval(() => {
-    try { store.telegram.cleanup() } catch (error) { console.error('Vibee: Telegram cleanup failed', formatSafeError(error)) }
+    try {
+      store.cleanup()
+      store.telegram.cleanup()
+    } catch (error) {
+      console.error('Vibee: periodic cleanup failed', formatSafeError(error))
+    }
   }, 60000)
   cleanupTimer.unref()
   const cookie = token => 'vibebot_session=' + token + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=' + (token ? 604800 : 0) + (secureCookies ? '; Secure' : '')
@@ -293,7 +298,9 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
     } catch (error) {
       if (res.headersSent) return res.end()
       if (error instanceof AppError) return json(res, error.status, { error: { code: error.code, message: error.message } })
-      console.error('Vibee: request failed', formatSafeError(error, { requestId, method: req.method }))
+      const errorName = error?.name ?? 'Error'
+      if (error?.stack) console.error(errorName, error.stack)
+      else console.error(errorName)
       return json(res, 500, { error: { code: 'INTERNAL_ERROR', message: 'Не удалось выполнить действие. Попробуйте ещё раз.' } })
     }
   })
@@ -301,7 +308,24 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
     server,
     close: () => new Promise((resolveClose, reject) => {
       clearInterval(cleanupTimer)
-      server.close(error => { try { store.close(); error ? reject(error) : resolveClose() } catch (failure) { reject(failure) } })
+      if (!server.listening) {
+        try {
+          store.close()
+          resolveClose()
+        } catch (failure) {
+          reject(failure)
+        }
+        return
+      }
+      server.close(error => {
+        try {
+          store.close()
+          if (error) reject(error)
+          else resolveClose()
+        } catch (failure) {
+          reject(failure)
+        }
+      })
       server.closeIdleConnections()
     }),
   }
