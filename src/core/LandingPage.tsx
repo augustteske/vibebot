@@ -46,22 +46,28 @@ const contrastPairs = [
     id: 'focus',
     beforeTitle: 'Размытые приоритеты в потоке чатов',
     beforeText: 'Десятки параллельных обсуждений и срочных пингов: к середине дня непонятно, какая задача действительно главная.',
+    beforeDetail: 'Хаотичные переписки отнимают время команды. Люди переключаются между тредами и теряют контекст важных договорённостей.',
     afterTitle: 'Понятный фокус на день',
     afterText: 'Короткий чек-ин и сводка показывают уровень ясности приоритетов и помогают команде выбрать одну главную цель.',
+    afterDetail: 'Один вопрос утром задаёт единый фокус всей команде. В чате появляется прозрачность: каждый понимает приоритеты на сегодня.',
   },
   {
     id: 'rhythm',
     beforeTitle: 'Незаметная усталость и переработки',
     beforeText: 'Ночные сообщения и неравномерная вовлечённость видны только постфактум, когда у людей уже закончился ресурс.',
+    beforeDetail: 'Поздние ответы создают негласное давление отвечать 24/7. Команда незаметно выгорает, а тимлид узнаёт об этом слишком поздно.',
     afterTitle: 'Бережные командные метрики',
     afterText: 'Агрегаты без личных рейтингов подсвечивают долю сообщений вне расписания, равномерность участия и уровень поддержки.',
+    afterDetail: 'Анонимная агрегация фиксирует баланс общения и мягко сигнализирует о перегрузке без слежки за конкретными людьми.',
   },
   {
     id: 'action',
     beforeTitle: 'Обсуждения без конкретного шага',
     beforeText: 'Проблемы озвучиваются на созвонах, но теряются в переписке без понятной договорённости и проверки результата.',
+    beforeDetail: 'Ретроспективы превращаются в бесконечные разговоры: много жалоб, но никто не фиксирует одно простое действие на следующую неделю.',
     afterTitle: 'Готовая рекомендация и обратная связь',
     afterText: 'Vibee предлагает конкретный следующий шаг по самому заметному сигналу, а команда отмечает, принёс ли он пользу.',
+    afterDetail: 'Готовые шаблоны гипотез и голосование за 10 секунд: команда выбирает шаг и через неделю проверяет, стало ли лучше.',
   },
 ]
 
@@ -98,7 +104,13 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey }: LandingPageProps) 
   const [roomKey, setRoomKey] = useState('')
   const [newYear] = useState(() => isNewYearSeason())
   const [activeContrastIndex, setActiveContrastIndex] = useState(0)
+  const [expandedContrastCard, setExpandedContrastCard] = useState<string | null>(null)
   const [contrastView, setContrastView] = useState<'split' | 'before' | 'after'>('split')
+
+  const handleToggleContrast = (cardKey: string, index: number) => {
+    setActiveContrastIndex(index)
+    setExpandedContrastCard((prev) => (prev === cardKey ? null : cardKey))
+  }
 
   useEffect(() => {
     document.documentElement.dataset.season = newYear ? 'new-year' : 'default'
@@ -293,22 +305,59 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey }: LandingPageProps) 
                   <h3>Было: хаос в чатах, непонятные задачи</h3>
                 </div>
                 <ul className="landing-contrast-list">
-                  {contrastPairs.map((pair, index) => (
-                    <li key={pair.id}>
-                      <button
-                        type="button"
-                        className={'landing-contrast-item' + (activeContrastIndex === index ? ' is-selected' : '')}
-                        onClick={() => setActiveContrastIndex(index)}
-                        aria-pressed={activeContrastIndex === index}
-                      >
-                        <span className="landing-contrast-item__index">0{index + 1}</span>
-                        <div>
-                          <strong>{pair.beforeTitle}</strong>
-                          <p>{pair.beforeText}</p>
-                        </div>
-                      </button>
-                    </li>
-                  ))}
+                  {contrastPairs.map((pair, index) => {
+                    const cardKey = `before-${index}`
+                    const isExpanded = expandedContrastCard === cardKey
+                    const isSelected = activeContrastIndex === index
+                    return (
+                      <li key={pair.id}>
+                        <button
+                          type="button"
+                          className={
+                            'landing-contrast-item' +
+                            (isSelected ? ' is-selected' : '') +
+                            (isExpanded ? ' is-expanded' : '')
+                          }
+                          onClick={() => handleToggleContrast(cardKey, index)}
+                          aria-expanded={isExpanded}
+                          aria-pressed={isSelected}
+                          aria-label={`Было 0${index + 1}: ${pair.beforeTitle}`}
+                        >
+                          <span className="landing-contrast-item__index">0{index + 1}</span>
+                          <div className="landing-contrast-item__body">
+                            <strong>{pair.beforeTitle}</strong>
+                            <p>{pair.beforeText}</p>
+                            <div className="landing-contrast-item__expanded">
+                              <div className="landing-contrast-item__expanded-inner">
+                                <p className="landing-contrast-item__detail">{pair.beforeDetail}</p>
+                                <div className="landing-contrast-video-box" aria-label="Видео подключения">
+                                  <div className="landing-contrast-video-placeholder">
+                                    <div className="landing-contrast-video-play-btn" aria-hidden="true">
+                                      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M8 5v14l11-7z" />
+                                      </svg>
+                                    </div>
+                                    <span className="landing-contrast-video-title">Видео подключения</span>
+                                    <span className="landing-contrast-video-badge">демо · без звука</span>
+                                  </div>
+                                  {/* Временная заглушка: для подключения видео добавьте src="/demo/contrast-before.mp4" */}
+                                  <video
+                                    className="landing-contrast-video"
+                                    autoPlay
+                                    muted
+                                    loop
+                                    playsInline
+                                    aria-hidden="true"
+                                    tabIndex={-1}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      </li>
+                    )
+                  })}
                 </ul>
               </article>
             )}
@@ -326,22 +375,59 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey }: LandingPageProps) 
                   <h3>Стало: понятные метрики и рекомендации</h3>
                 </div>
                 <ul className="landing-contrast-list">
-                  {contrastPairs.map((pair, index) => (
-                    <li key={pair.id}>
-                      <button
-                        type="button"
-                        className={'landing-contrast-item' + (activeContrastIndex === index ? ' is-selected' : '')}
-                        onClick={() => setActiveContrastIndex(index)}
-                        aria-pressed={activeContrastIndex === index}
-                      >
-                        <span className="landing-contrast-item__index">0{index + 1}</span>
-                        <div>
-                          <strong>{pair.afterTitle}</strong>
-                          <p>{pair.afterText}</p>
-                        </div>
-                      </button>
-                    </li>
-                  ))}
+                  {contrastPairs.map((pair, index) => {
+                    const cardKey = `after-${index}`
+                    const isExpanded = expandedContrastCard === cardKey
+                    const isSelected = activeContrastIndex === index
+                    return (
+                      <li key={pair.id}>
+                        <button
+                          type="button"
+                          className={
+                            'landing-contrast-item' +
+                            (isSelected ? ' is-selected' : '') +
+                            (isExpanded ? ' is-expanded' : '')
+                          }
+                          onClick={() => handleToggleContrast(cardKey, index)}
+                          aria-expanded={isExpanded}
+                          aria-pressed={isSelected}
+                          aria-label={`Стало 0${index + 1}: ${pair.afterTitle}`}
+                        >
+                          <span className="landing-contrast-item__index">0{index + 1}</span>
+                          <div className="landing-contrast-item__body">
+                            <strong>{pair.afterTitle}</strong>
+                            <p>{pair.afterText}</p>
+                            <div className="landing-contrast-item__expanded">
+                              <div className="landing-contrast-item__expanded-inner">
+                                <p className="landing-contrast-item__detail">{pair.afterDetail}</p>
+                                <div className="landing-contrast-video-box" aria-label="Видео подключения">
+                                  <div className="landing-contrast-video-placeholder">
+                                    <div className="landing-contrast-video-play-btn" aria-hidden="true">
+                                      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M8 5v14l11-7z" />
+                                      </svg>
+                                    </div>
+                                    <span className="landing-contrast-video-title">Видео подключения</span>
+                                    <span className="landing-contrast-video-badge">демо · без звука</span>
+                                  </div>
+                                  {/* Временная заглушка: для подключения видео добавьте src="/demo/contrast-after.mp4" */}
+                                  <video
+                                    className="landing-contrast-video"
+                                    autoPlay
+                                    muted
+                                    loop
+                                    playsInline
+                                    aria-hidden="true"
+                                    tabIndex={-1}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </button>
+                      </li>
+                    )
+                  })}
                 </ul>
               </article>
             )}

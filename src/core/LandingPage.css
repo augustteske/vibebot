@@ -690,7 +690,13 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: transform .2s ease, border-color .2s ease, background .2s ease, box-shadow .2s ease;
+  overflow: hidden;
+  position: relative;
+  transition: all 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.landing-contrast-item:active {
+  transform: scale(0.99);
 }
 
 .landing-contrast-card--before .landing-contrast-item {
@@ -700,6 +706,7 @@
 }
 
 .landing-contrast-card--before .landing-contrast-item.is-selected,
+.landing-contrast-card--before .landing-contrast-item.is-expanded,
 .landing-contrast-card--before .landing-contrast-item:hover {
   transform: translateY(-2px);
   border-color: rgba(255, 214, 56, .65);
@@ -713,6 +720,7 @@
 }
 
 .landing-contrast-card--after .landing-contrast-item.is-selected,
+.landing-contrast-card--after .landing-contrast-item.is-expanded,
 .landing-contrast-card--after .landing-contrast-item:hover {
   transform: translateY(-2px);
   border-color: var(--vibee-yellow-line);
@@ -731,6 +739,12 @@
   font-weight: 820;
 }
 
+.landing-contrast-item__body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .landing-contrast-item strong {
   display: block;
   margin-bottom: 6px;
@@ -743,6 +757,148 @@
   font-size: 14px;
   line-height: 1.6;
   opacity: .84;
+}
+
+.landing-contrast-item__expanded {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  margin-top: 0;
+  transition: all 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.landing-contrast-item__expanded-inner {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .landing-contrast-item:hover .landing-contrast-item__expanded {
+    grid-template-rows: 1fr;
+    opacity: 1;
+    margin-top: 14px;
+  }
+}
+
+.landing-contrast-item.is-expanded .landing-contrast-item__expanded {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  margin-top: 14px;
+}
+
+.landing-contrast-item p.landing-contrast-item__detail {
+  margin: 0 0 12px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  opacity: 0.92;
+}
+
+.landing-contrast-video-box {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 14px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.landing-contrast-card--before .landing-contrast-video-box {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px dashed rgba(255, 255, 255, 0.22);
+}
+
+.landing-contrast-card--after .landing-contrast-video-box {
+  background: rgba(0, 0, 0, 0.04);
+  border: 1px dashed var(--vibee-line);
+}
+
+:root[data-theme="dark"] .landing-contrast-card--after .landing-contrast-video-box {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+}
+
+.landing-contrast-video-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  padding: 16px;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.landing-contrast-video-play-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--vibee-yellow-ink);
+  background: var(--vibee-yellow);
+  box-shadow: 0 8px 20px rgba(217, 174, 0, 0.35);
+  transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.landing-contrast-item:hover .landing-contrast-video-play-btn,
+.landing-contrast-item.is-expanded .landing-contrast-video-play-btn {
+  transform: scale(1.08);
+}
+
+.landing-contrast-video-title {
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.landing-contrast-card--before .landing-contrast-video-title {
+  color: #fff;
+}
+
+.landing-contrast-card--after .landing-contrast-video-title {
+  color: var(--vibee-ink);
+}
+
+.landing-contrast-video-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  opacity: 0.75;
+}
+
+.landing-contrast-card--before .landing-contrast-video-badge {
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.landing-contrast-card--after .landing-contrast-video-badge {
+  color: var(--vibee-muted);
+  background: rgba(0, 0, 0, 0.06);
+}
+
+:root[data-theme="dark"] .landing-contrast-card--after .landing-contrast-video-badge {
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.landing-contrast-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+.landing-contrast-video[src],
+.landing-contrast-video:has(source[src]) {
+  opacity: 1;
 }
 
 .landing-contrast-arrow {
