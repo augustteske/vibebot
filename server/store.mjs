@@ -43,12 +43,14 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
   const tx = fn => { db.exec('BEGIN IMMEDIATE'); try { const result = fn(); db.exec('COMMIT'); return result } catch (error) { db.exec('ROLLBACK'); throw error } }
   const requireOrganizer = member => { if (member.role !== 'organizer') fail(403, 'FORBIDDEN', 'Это действие доступно организатору') }
   const roundFor = member => one('SELECT * FROM rounds WHERE workspace_id=? ORDER BY rowid DESC LIMIT 1', member.workspace_id)
-  const requireAction = (member, id) => {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  const requireAction = (member, id, requestId) => {
     const action = one('SELECT * FROM actions WHERE id=? AND workspace_id=?', id, member.workspace_id)
     if (!action) {
       const foreign = one('SELECT workspace_id FROM actions WHERE id=?', id)
       if (foreign && foreign.workspace_id !== member.workspace_id) {
-        console.warn('Vibee: security violation: requestId=none userId=' + member.id + ' type=WORKSPACE_MISMATCH')
+        const safeReqId = typeof requestId === 'string' && uuidRegex.test(requestId) ? requestId : 'none'
+        console.warn('type=WORKSPACE_MISMATCH userId=' + member.id + ' requestId=' + safeReqId)
       }
       fail(404, 'NOT_FOUND', 'Договорённость не найдена')
     }
@@ -185,16 +187,16 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
       if (one('SELECT COUNT(*) AS n FROM actions WHERE workspace_id=? AND created_at>?', member.workspace_id, since).n >= 2) fail(409, 'DAILY_LIMIT', 'На ближайшие 24 часа уже выбраны два шага. Сначала попробуйте их.')
       run('INSERT INTO actions(id,workspace_id,round_id,kind,title,goal,created_at) VALUES(?,?,?,?,?,?,?)', randomUUID(), member.workspace_id, round.id, suggestion.id, suggestion.title, goal, new Date(now()).toISOString())
     },
-    feedback(member, id, input) {
-      const action = requireAction(member, id)
+    feedback(member, id, input, requestId) {
+      const action = requireAction(member, id, requestId)
       if (action.feedback_closed_at) fail(409, 'FEEDBACK_CLOSED', 'Сбор отзывов уже завершён')
       if (typeof input.helpful !== 'boolean') fail(400, 'INVALID_FEEDBACK', 'Выберите оценку пользы')
       run('INSERT INTO feedback VALUES(?,?,?) ON CONFLICT(action_id,voter_key) DO UPDATE SET helpful=excluded.helpful', action.id, key('feedback:' + action.id, member), input.helpful ? 1 : 0)
     },
-    closeFeedback(member, id) {
+    closeFeedback(member, id, requestId) {
       requireOrganizer(member)
       return tx(() => {
-        const action = requireAction(member, id)
+        const action = requireAction(member, id, requestId)
         if (action.feedback_closed_at) fail(409, 'FEEDBACK_CLOSED', 'Сбор отзывов уже завершён')
         const totals = one('SELECT COUNT(*) AS n,SUM(helpful) AS yes FROM feedback WHERE action_id=?', id)
         const result = totals.n >= 5 ? { status: 'published', helpfulPercent: Math.round(100 * totals.yes / totals.n) } : { status: 'insufficient' }

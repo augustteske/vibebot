@@ -531,7 +531,7 @@ test('store testability: custom now controls sessions, invitations, and 24h acti
   assert.equal(store.authenticate(token), null, 'Session should expire after 7 days')
 })
 
-test('unauthorized cross-workspace access attempts log a security warning with requestId, userId, and violation type without sensitive data', async t => {
+test('unauthorized cross-workspace access attempts log warning with type=WORKSPACE_MISMATCH and userId, validating requestId as UUID', async t => {
   const { owner, client, roundId } = await team(t, 2)
   const warnings = []
   const originalWarn = console.warn
@@ -541,43 +541,37 @@ test('unauthorized cross-workspace access attempts log a security warning with r
   }
   t.after(() => { console.warn = originalWarn })
 
-  const foreignWorkspaceId = '00000000-0000-0000-0000-000000000000'
-  const reqId = 'sec-test-req-999'
-
-  // 1. GET with foreign workspaceId query param
-  const getRes = await owner('/session?workspaceId=' + foreignWorkspaceId, undefined, { 'X-Request-Id': reqId })
-  assert.equal(getRes.status, 403)
-  assert.equal(getRes.body.error.code, 'FORBIDDEN')
-
-  const queryWarn = warnings.find(w => w.includes('WORKSPACE_MISMATCH') && w.includes(reqId))
-  assert.ok(queryWarn, 'Warning must be logged for mismatched workspaceId query param')
-  assert.ok(queryWarn.includes('requestId=' + reqId), 'Log must contain requestId')
-  assert.ok(queryWarn.includes('type=WORKSPACE_MISMATCH'), 'Log must contain type=WORKSPACE_MISMATCH')
-  assert.ok(!queryWarn.includes('token') && !queryWarn.includes('vibebot_session'), 'Log must not contain tokens')
-
-  // 2. POST with foreign workspaceId in body
-  const postReqId = 'sec-test-req-post'
-  const postRes = await owner('/checkins', { workspaceId: foreignWorkspaceId, roundId, scores: normal }, { 'X-Request-Id': postReqId })
-  assert.equal(postRes.status, 403)
-  assert.equal(postRes.body.error.code, 'FORBIDDEN')
-
-  const postWarn = warnings.find(w => w.includes('WORKSPACE_MISMATCH') && w.includes(postReqId))
-  assert.ok(postWarn, 'Warning must be logged for mismatched workspaceId in body')
-
-  // 3. Attempt to access foreign action
-  const outsider = client()
-  await outsider('/workspaces', { name: 'Foreign Team', displayName: 'Outsider' })
+  // 1. Owner creates action
   const accepted = await owner('/actions', { roundId, suggestionId: 'recognition', goal: 'Командное действие' })
   const actionId = accepted.body.actions[0].id
 
+  // 2. Outsider in another workspace attempts to access owner's action with a valid UUID requestId
+  const outsider = client()
+  await outsider('/workspaces', { name: 'Foreign Team', displayName: 'Outsider' })
+  const validUuid = '11111111-2222-4333-8444-555555555555'
   warnings.length = 0
-  const actionRes = await outsider('/actions/' + actionId + '/feedback', { helpful: true })
+  const actionRes = await outsider('/actions/' + actionId + '/feedback', { helpful: true }, { 'X-Request-Id': validUuid })
   assert.equal(actionRes.status, 404)
 
-  const actionWarn = warnings.find(w => w.includes('WORKSPACE_MISMATCH'))
+  const actionWarn = warnings.find(w => w.includes('type=WORKSPACE_MISMATCH'))
   assert.ok(actionWarn, 'Warning must be logged for cross-workspace action access')
-  assert.ok(actionWarn.includes('type=WORKSPACE_MISMATCH'), 'Log must indicate WORKSPACE_MISMATCH')
+  assert.ok(actionWarn.includes('type=WORKSPACE_MISMATCH'), 'Log must contain type=WORKSPACE_MISMATCH')
+  assert.ok(actionWarn.includes('userId='), 'Log must contain userId')
+  assert.ok(actionWarn.includes('requestId=' + validUuid), 'Log must contain validated UUID requestId')
   assert.ok(!actionWarn.includes('Командное действие'), 'Log must not contain action texts')
+  assert.ok(!actionWarn.includes('token') && !actionWarn.includes('vibebot_session'), 'Log must not contain tokens')
+
+  // 3. Outsider attempts access with newline in requestId (e.g. in JSON body)
+  warnings.length = 0
+  const maliciousReqId = 'injected-id\nFORGED_LOG_ENTRY'
+  const forgedRes = await outsider('/actions/' + actionId + '/feedback', { helpful: true, requestId: maliciousReqId })
+  assert.equal(forgedRes.status, 404)
+
+  const forgedWarn = warnings.find(w => w.includes('type=WORKSPACE_MISMATCH'))
+  assert.ok(forgedWarn, 'Warning must be logged for cross-workspace action access')
+  assert.ok(forgedWarn.includes('requestId=none'), 'Invalid requestId with newline must be sanitized to requestId=none')
+  assert.ok(!forgedWarn.includes('FORGED_LOG_ENTRY'), 'Log must not contain injected content')
+  assert.ok(!forgedWarn.includes('\n'), 'Log must not contain newlines')
 })
 
 

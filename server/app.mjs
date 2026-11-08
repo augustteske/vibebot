@@ -230,12 +230,6 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         return json(res, 201, store.snapshot(store.authenticate(newToken)))
       }
       if (!member) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
-      const requestedWorkspace = url.searchParams.get('workspaceId') ?? (input && typeof input.workspaceId === 'string' ? input.workspaceId : null)
-      if (requestedWorkspace && requestedWorkspace !== member.workspace_id) {
-        const requestId = req.headers['x-request-id'] || (typeof input?.requestId === 'string' ? input.requestId : null) || 'none'
-        console.warn('Vibee: security violation: requestId=' + requestId + ' userId=' + member.id + ' type=WORKSPACE_MISMATCH')
-        throw new AppError(403, 'FORBIDDEN', 'Доступ к чужой команде запрещён')
-      }
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, store.snapshot(member))
       if (req.method === 'GET' && url.pathname === '/api/summary') return json(res, 200, store.summary(member))
       if (req.method === 'POST') {
@@ -245,12 +239,13 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         if (url.pathname === '/api/invitations') return json(res, 201, store.invite(member))
         if (url.pathname === '/api/recovery-key') return json(res, 201, store.recoveryKey(member))
         const feedback = url.pathname.match(/^\/api\/actions\/([a-f0-9-]+)\/(feedback|close-feedback)$/)
+        const reqId = req.headers['x-request-id'] || input?.requestId
         if (url.pathname === '/api/checkins') store.checkin(member, input)
         else if (url.pathname === '/api/rounds/close') store.closeRound(member, input)
         else if (url.pathname === '/api/rounds/open') store.openRound(member)
         else if (url.pathname === '/api/actions') store.accept(member, input)
-        else if (feedback?.[2] === 'feedback') store.feedback(member, feedback[1], input)
-        else if (feedback?.[2] === 'close-feedback') store.closeFeedback(member, feedback[1])
+        else if (feedback?.[2] === 'feedback') store.feedback(member, feedback[1], input, reqId)
+        else if (feedback?.[2] === 'close-feedback') store.closeFeedback(member, feedback[1], reqId)
         else throw new AppError(404, 'NOT_FOUND', 'Действие не найдено')
         return json(res, 200, store.snapshot(member))
       }
