@@ -67,6 +67,25 @@ npm run dev
 
 Откройте <http://127.0.0.1:5173>. Команда запускает Vite и локальный Node.js API. Она не включает реальную Telegram-интеграцию.
 
+### Резервное копирование SQLite
+
+Скрипт [`scripts/backup.sh`](scripts/backup.sh) выполняет атомарное горячее копирование базы данных через SQLite `VACUUM INTO` и автоматически удаляет старые копии, сохраняя последние 7 штук:
+
+```sh
+# Разовый запуск (по умолчанию база .data/vibebot.sqlite, каталог /backup):
+VIBEE_BACKUP_DIR=/backup bash scripts/backup.sh
+```
+
+Настройка ежедневного резервного копирования в 03:00 через `cron`:
+
+```sh
+# Откройте crontab:
+crontab -e
+
+# Добавьте задачу (замените /path/to/vibebot на реальный путь):
+0 3 * * * cd /path/to/vibebot && VIBEE_BACKUP_DIR=/backup bash scripts/backup.sh >> /var/log/vibebot-backup.log 2>&1
+```
+
 ---
 
 <h2 align="center">Архитектура</h2>
