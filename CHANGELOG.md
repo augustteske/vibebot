@@ -7,6 +7,13 @@
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-08
+
+### Added
+
+- 📸 Реферальная ссылка в карточке «Пульс команды»
+- 🔗 Кнопка «Пригласить коллегу» и модалка с ключом комнаты
+
 ## [1.1.0] - 2026-11-08
 
 ### Added
@@ -25,6 +32,7 @@
 
 - Первый стабильный релиз Vibee.
 
-[Unreleased]: https://github.com/augustteske/vibebot/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/augustteske/vibebot/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/augustteske/vibebot/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/augustteske/vibebot/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/augustteske/vibebot/releases/tag/v1.0.0
