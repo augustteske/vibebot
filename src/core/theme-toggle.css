@@ -29,8 +29,14 @@
 }
 
 .theme-toggle__icon {
+  display: inline-block;
   font-size: 19px;
   line-height: 1;
+  transition: transform .32s cubic-bezier(.22, 1, .36, 1);
+}
+
+.theme-toggle[aria-pressed="true"] .theme-toggle__icon {
+  transform: rotate(180deg);
 }
 
 @media (max-width: 640px) {

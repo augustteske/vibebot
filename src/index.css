@@ -190,6 +190,22 @@ body {
   margin: 0;
   color: var(--vibee-ink);
   background: var(--vibee-paper);
+  transition: background-color .32s cubic-bezier(.22, 1, .36, 1), color .32s cubic-bezier(.22, 1, .36, 1);
+}
+
+:root.theme-transitioning,
+:root.theme-transitioning *,
+:root.theme-transitioning *::before,
+:root.theme-transitioning *::after {
+  transition-property: background-color, border-color, color, fill, stroke, box-shadow;
+  transition-duration: .32s;
+  transition-timing-function: cubic-bezier(.22, 1, .36, 1);
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: .32s;
+  animation-timing-function: cubic-bezier(.22, 1, .36, 1);
 }
 
 button,
