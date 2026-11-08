@@ -31,6 +31,16 @@
 
 ---
 
+## 🆕 Что нового в v1.1.0
+
+- 🎄 **Новогодняя тема** — включается сама с 1 декабря по 15 января: шапочка на пчёлке и лёгкий снегопад (превью — `/?newyear=1`).
+- 📊 **Блок «Было — Стало»** — интерактивное сравнение «хаос в чатах → понятные метрики» на лендинге.
+- 📸 **Шеринг «Пульса команды»** — PNG-карточка с периодом и тремя общими показателями для ретро: скачать, скопировать или отправить.
+- 🌍 **EN/RU в боте** — переключение языка командой `/lang`.
+- 🛡️ **Обработка сетевых ошибок** — бот бережно сообщает о сбое и предлагает кнопку «Повторить».
+
+---
+
 ## 🚀 Быстрый старт
 
 ```bash
@@ -40,6 +50,23 @@ docker compose up -d --build
 ```
 
 После запуска веб-кабинет доступен по адресу **[http://127.0.0.1:8787](http://127.0.0.1:8787)** (для локальной разработки без Docker: `npm ci && npm run dev`).
+
+> Локально по HTTP задайте `COOKIE_SECURE=false` и `APP_ORIGIN=http://127.0.0.1:8787` (в `.env` или перед командой) — иначе вход в кабинет не сохранит сессию.
+
+## ☁️ Деплой на сервер
+
+На чистом Ubuntu/Debian, включая **Oracle Cloud ARM (Ampere A1, `linux/arm64`)**:
+
+```bash
+git clone --branch feat/august-core https://github.com/augustteske/vibebot.git
+cd vibebot
+bash scripts/bootstrap.sh   # установит Docker, создаст .env и остановится
+nano .env                   # TELEGRAM_BOT_TOKEN, APP_ORIGIN, COOKIE_SECURE
+bash scripts/bootstrap.sh   # соберёт и запустит контейнеры
+curl --fail http://127.0.0.1:8787/api/health
+```
+
+В Oracle Cloud откройте TCP-порт `8787` в Security List подсети и внутри ВМ (`sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 8787 -j ACCEPT && sudo netfilter-persistent save`). Данные SQLite живут в volume `vibebot_data` — не используйте `docker compose down -v`.
 
 ---
 
