@@ -1,6 +1,17 @@
 import { useEffect } from 'react'
+import type { SyntheticEvent } from 'react'
 import { ThemeToggle } from './ThemeToggle'
 import './LandingPage.css'
+
+// Большая картинка идёт через прокси предпросмотра и иногда получает 502.
+// Одна повторная загрузка с новым адресом возвращает её без перезагрузки страницы.
+function retryImageOnce(event: SyntheticEvent<HTMLImageElement>) {
+  const image = event.currentTarget
+  if (image.dataset.retry) return
+  image.dataset.retry = '1'
+  const source = image.src.split('?')[0]
+  window.setTimeout(() => { image.src = source + '?retry=' + Date.now() }, 600)
+}
 
 interface LandingPageProps {
   onEnter: () => void;
@@ -111,7 +122,7 @@ export function LandingPage({ onEnter, onDemo }: LandingPageProps) {
         <div className="landing-mascot landing-reveal landing-reveal--mascot" aria-hidden="true">
           <div className="landing-mascot-glow" />
           <div className="landing-orbit landing-orbit--outer" />
-          <img src="/bee-mascot.png" alt="" width="1280" height="1280" fetchPriority="high" />
+          <img src="/bee-mascot.png" alt="" width="1280" height="1280" fetchPriority="high" onError={retryImageOnce} />
           <span className="landing-float-card landing-float-card--top">Решения — за командой</span>
           <span className="landing-float-card landing-float-card--bottom">Только общие сигналы</span>
         </div>
