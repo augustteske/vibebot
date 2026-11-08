@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { ThemeToggle } from './ThemeToggle'
 import './LandingPage.css'
 
 interface LandingPageProps {
@@ -84,6 +85,7 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey }: LandingPageProps) 
         <nav className="landing-nav" aria-label="Навигация по странице">
           <a href="#features">Преимущества</a>
           <a href="#how-it-works">Как это работает</a>
+          <ThemeToggle />
           <button className="landing-nav-cta" onClick={onEnter}>Войти в кабинет</button>
         </nav>
       </header>

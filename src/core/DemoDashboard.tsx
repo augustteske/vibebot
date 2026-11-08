@@ -1,6 +1,7 @@
 import { ActionRecommendationCard } from '../features/actions/ActionRecommendationCard'
 import { InsightsWidget } from '../features/insights/InsightsWidget'
 import type { InsightsMetrics } from '../features/insights/InsightsWidget'
+import { ThemeToggle } from './ThemeToggle'
 import './DemoDashboard.css'
 
 interface DemoDashboardProps {
@@ -27,6 +28,7 @@ export function DemoDashboard({ onBack, onEnter, onCreateTeam }: DemoDashboardPr
         </a>
         <div className="demo-dashboard__header-actions">
           <span className="demo-dashboard__badge">ДЕМО-ДАННЫЕ</span>
+          <ThemeToggle />
           <button className="button secondary" onClick={onEnter}>Войти в кабинет</button>
         </div>
       </header>

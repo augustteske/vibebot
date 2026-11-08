@@ -1,1 +1,26 @@
-<!doctype html><html lang="ru"><head><meta charset="UTF-8"/><link rel="icon" type="image/svg+xml" href="/favicon.svg"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><meta name="description" content="Vibee — почувствовать команду и сделать следующий шаг."/><title>Vibee — пространство команды</title></head><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Vibee — почувствовать команду и сделать следующий шаг." />
+    <title>Vibee — пространство команды</title>
+    <script>
+      // Тема ставится до первой отрисовки, чтобы не было вспышки светлого экрана.
+      try {
+        var theme = localStorage.getItem('vibee-theme')
+        if (theme !== 'light' && theme !== 'dark') {
+          theme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+        }
+        document.documentElement.dataset.theme = theme
+      } catch (error) {
+        document.documentElement.dataset.theme = 'light'
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
