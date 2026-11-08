@@ -8,7 +8,7 @@
 }
 
 .not-found__code {
-  color: #725600;
+  color: var(--vibee-eyebrow);
   font-size: clamp(3rem, 16vw, 6rem);
   font-weight: 850;
   letter-spacing: -.07em;

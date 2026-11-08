@@ -9,7 +9,7 @@
   border: 1px solid var(--vibee-line);
   border-radius: var(--vibee-radius-card);
   padding: 22px 26px;
-  background: linear-gradient(145deg, rgba(255,255,255,.96), rgba(255,252,240,.92));
+  background: var(--vibee-surface-gradient);
   box-shadow: var(--vibee-shadow-soft);
 }
 
@@ -22,7 +22,7 @@
   flex-direction: column;
   gap: 9px;
   margin: 18px 0;
-  color: #333338;
+  color: var(--vibee-ink-soft);
   font-size: 14px;
   font-weight: 620;
 }
@@ -32,12 +32,12 @@
 .team-field select {
   width: 100%;
   min-height: 52px;
-  border: 1px solid rgba(23, 23, 25, .16);
+  border: 1px solid var(--vibee-line-strong);
   border-radius: var(--vibee-radius-control);
   padding: 13px 15px;
   color: var(--vibee-ink);
-  background: #fff;
-  box-shadow: inset 0 1px 2px rgba(23, 23, 25, .025);
+  background: var(--vibee-field-bg);
+  box-shadow: inset 0 1px 2px var(--vibee-line);
   font: inherit;
   font-size: 15px;
   font-weight: 450;
@@ -45,18 +45,18 @@
 }
 
 .team-field input::placeholder,
-.team-field textarea::placeholder { color: #8a8a90; }
+.team-field textarea::placeholder { color: var(--vibee-muted); }
 
 .team-field input:hover,
 .team-field textarea:hover,
-.team-field select:hover { border-color: rgba(23, 23, 25, .3); }
+.team-field select:hover { border-color: var(--vibee-line-strong); }
 
 .team-field input:focus,
 .team-field textarea:focus,
 .team-field select:focus {
-  border-color: #c79c00;
+  border-color: var(--vibee-yellow-line);
   outline: none;
-  background: #fffefa;
+  background: var(--vibee-field-focus-bg);
   box-shadow: 0 0 0 4px rgba(255, 214, 56, .26), 0 4px 14px rgba(23, 23, 25, .06);
 }
 
@@ -81,13 +81,13 @@
   border: 0;
   border-radius: 12px;
   padding: 0;
-  color: #5c5326;
+  color: var(--vibee-eyebrow);
   background: transparent;
   cursor: pointer;
   transition: color .18s ease, background-color .18s ease;
 }
-.secret-field__toggle:hover:not(:disabled) { color: #171719; background: rgba(255, 214, 56, .24); }
-.secret-field__toggle:focus-visible { outline: 2px solid #171719; outline-offset: 1px; box-shadow: 0 0 0 5px rgba(255, 214, 56, .32); }
+.secret-field__toggle:hover:not(:disabled) { color: var(--vibee-ink); background: rgba(255, 214, 56, .24); }
+.secret-field__toggle:focus-visible { outline: 2px solid var(--vibee-focus); outline-offset: 1px; box-shadow: 0 0 0 5px rgba(255, 214, 56, .32); }
 .secret-field__toggle:disabled { opacity: .42; cursor: default; }
 
 .team-space fieldset { min-width: 0; margin: 0; border: 0; padding: 0; }
@@ -96,12 +96,12 @@
 .entrance {
   max-width: 600px;
   margin: clamp(28px, 5vh, 54px) auto 34px;
-  border-color: rgba(23, 23, 25, .08);
+  border-color: var(--vibee-line);
   border-radius: 30px;
   padding: clamp(28px, 5vw, 48px);
   background:
     radial-gradient(ellipse at 100% 0%, rgba(255, 214, 56, .18), transparent 19rem),
-    rgba(255, 255, 255, .96);
+    var(--vibee-surface-translucent);
   box-shadow: var(--vibee-shadow-card);
 }
 
@@ -126,7 +126,7 @@
   border: 0;
   border-radius: 999px;
   padding: 11px 9px;
-  color: #4f420f;
+  color: var(--vibee-link);
   background: transparent;
   cursor: pointer;
   font: inherit;
@@ -135,15 +135,15 @@
   transition: color .18s ease, background .18s ease;
 }
 
-.text-button:hover:not(:disabled) { color: #171719; background: rgba(255, 214, 56, .2); }
+.text-button:hover:not(:disabled) { color: var(--vibee-ink); background: rgba(255, 214, 56, .2); }
 .text-button:disabled { opacity: .48; cursor: default; }
 
 .error {
-  border: 1px solid rgba(164, 0, 0, .12);
+  border: 1px solid var(--vibee-danger-line);
   border-radius: 15px;
   padding: 15px 17px;
-  color: #751d1d;
-  background: #fff3ee;
+  color: var(--vibee-danger);
+  background: var(--vibee-danger-bg);
   line-height: 1.55;
 }
 
@@ -163,10 +163,10 @@
 
 .confirmation {
   margin-top: 16px;
-  border: 1px solid rgba(190, 150, 0, .16);
+  border: 1px solid var(--vibee-tint-border);
   border-radius: 17px;
   padding: 18px;
-  background: linear-gradient(135deg, #fff9df, #fff2bd);
+  background: var(--vibee-tint);
 }
 
 .confirmation p { margin: 0; font-size: 14px; }

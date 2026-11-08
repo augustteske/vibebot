@@ -18,6 +18,16 @@ interface InsightsChartsProps {
   value: number;
 }
 
+// Подсказка и легенда читаются в обеих темах: цвета берутся из CSS-переменных.
+const tooltipStyle = {
+  background: 'var(--vibee-surface)',
+  border: '1px solid var(--vibee-line)',
+  borderRadius: '10px',
+  color: 'var(--vibee-ink)',
+}
+
+const tooltipTextStyle = { color: 'var(--vibee-ink)' }
+
 export function InsightsCharts({ metric, value }: InsightsChartsProps) {
   if (metric === 'outsideHoursPercent') {
     const data = [
@@ -31,11 +41,17 @@ export function InsightsCharts({ metric, value }: InsightsChartsProps) {
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie data={data} dataKey="value" nameKey="name" innerRadius="62%"
-              outerRadius="84%" paddingAngle={2} stroke="#fff" strokeWidth={2}>
-              <Cell fill="#FFD329" />
-              <Cell fill="#111" />
+              outerRadius="84%" paddingAngle={2}
+              stroke="var(--vibee-surface)" strokeWidth={2}>
+              <Cell fill="var(--vibee-yellow)" />
+              <Cell fill="var(--vibee-ink)" />
             </Pie>
-            <Tooltip formatter={(value) => [`${value}%`]} />
+            <Tooltip
+              formatter={(value) => [`${value}%`]}
+              contentStyle={tooltipStyle}
+              itemStyle={tooltipTextStyle}
+              labelStyle={tooltipTextStyle}
+            />
             <Legend verticalAlign="bottom" height={28} iconType="circle" />
           </PieChart>
         </ResponsiveContainer>
@@ -49,13 +65,20 @@ export function InsightsCharts({ metric, value }: InsightsChartsProps) {
     <div className="iw-chart" role="img" aria-label={`Равномерность участия: ${value} процентов`}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 24, right: 12, bottom: 4, left: 0 }}>
-            <CartesianGrid vertical={false} stroke="#ddd" strokeDasharray="3 3" />
+            <CartesianGrid vertical={false} stroke="var(--vibee-line)" strokeDasharray="3 3" />
             <XAxis dataKey="name" hide />
             <YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickLine={false}
               axisLine={false} tickFormatter={value => `${value}%`} />
-            <Tooltip formatter={value => [`${value}%`, 'Равномерность участия']} />
-            <Bar dataKey="value" fill="#FFD329" stroke="#111" strokeWidth={1} radius={[6, 6, 0, 0]}>
-              <LabelList dataKey="value" position="top" formatter={value => `${value}%`} fill="#111" />
+            <Tooltip
+              formatter={value => [`${value}%`, 'Равномерность участия']}
+              contentStyle={tooltipStyle}
+              itemStyle={tooltipTextStyle}
+              labelStyle={tooltipTextStyle}
+            />
+            <Bar dataKey="value" fill="var(--vibee-yellow)" stroke="var(--vibee-ink)" strokeWidth={1}
+              radius={[6, 6, 0, 0]}>
+              <LabelList dataKey="value" position="top" formatter={value => `${value}%`}
+                fill="var(--vibee-chart-text)" />
             </Bar>
           </BarChart>
         </ResponsiveContainer>

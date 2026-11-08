@@ -8,6 +8,7 @@ import { TeamWorkspace } from './core/TeamWorkspace'
 import { LandingPage } from './core/LandingPage'
 import { DemoDashboard } from './core/DemoDashboard'
 import { NotFoundPage } from './core/NotFoundPage'
+import { ThemeToggle } from './core/ThemeToggle'
 import './App.css'
 
 export default function App() {
@@ -62,7 +63,7 @@ export default function App() {
     <header><a className="brand" href="/" onClick={event => {
       event.preventDefault()
       openHome()
-    }}><img src="/bee.svg" alt=""/>Vibee</a><span className="badge">{team ? 'Пространство команды' : 'Демонстрация · вымышленные данные'}</span></header>
+    }}><img src="/bee.svg" alt=""/>Vibee</a><div className="header-actions"><span className="badge">{team ? 'Пространство команды' : 'Демонстрация · вымышленные данные'}</span><ThemeToggle /></div></header>
     <section className="intro"><span className="eyebrow">ПРОСТРАНСТВО КОМАНДЫ</span><h1>Почувствовать команду.<br/>Сделать следующий шаг.</h1><p>Ресурс, ясность и поддержка — повод договориться о том, что поможет сегодня. Утилита для рабочих чатов — в разработке.</p></section>
     <nav className="mode-switch" aria-label="Режим"><button className="button secondary" aria-pressed={!team} onClick={() => mode(false)}>Демонстрационный режим</button><button className="button secondary" aria-pressed={team} onClick={() => mode(true)}>Моя команда</button></nav>
     {team ? <TeamWorkspace/> : <>

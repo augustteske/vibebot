@@ -21,16 +21,16 @@
   width: 100%;
   min-height: 44px;
   padding: 8px 12px;
-  border: 1px solid #777;
+  border: 1px solid var(--vibee-line-strong);
   border-radius: var(--vibee-radius-control);
-  background: #fff;
+  background: var(--vibee-field-bg);
   color: var(--vibee-ink);
 }
 
-.team-pulse__hint { color: #555; }
+.team-pulse__hint { color: var(--vibee-subtle); }
 .team-pulse__demo { font-weight: 650; }
 .team-pulse__history { display: grid; gap: 16px; min-width: 0; }
-.team-pulse__history article { min-width: 0; border-top: 1px solid #ddd; padding-top: 16px; }
+.team-pulse__history article { min-width: 0; border-top: 1px solid var(--vibee-line); padding-top: 16px; }
 .team-pulse__history h3 { font-size: 1rem; overflow-wrap: anywhere; }
 .team-pulse__history summary { cursor: pointer; padding: 10px 0; overflow-wrap: anywhere; }
 .team-pulse__history summary:focus-visible { outline: 2px solid var(--vibee-ink); outline-offset: 3px; }
