@@ -110,6 +110,15 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
   const [contrastView, setContrastView] = useState<'split' | 'before' | 'after'>('split')
   const [isPrivacyLocked, setIsPrivacyLocked] = useState(false)
   const privacyRef = useRef<HTMLElement | null>(null)
+  const lockTimeoutRef = useRef<number | null>(null)
+
+  const handleRetriggerLock = () => {
+    setIsPrivacyLocked(false)
+    if (lockTimeoutRef.current) window.clearTimeout(lockTimeoutRef.current)
+    lockTimeoutRef.current = window.setTimeout(() => {
+      setIsPrivacyLocked(true)
+    }, 280)
+  }
 
   const handleToggleContrast = (cardKey: string, index: number) => {
     setActiveContrastIndex(index)
@@ -130,7 +139,10 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
     const observer = new IntersectionObserver(
       entries => {
         if (entries[0]?.isIntersecting) {
-          setIsPrivacyLocked(true)
+          // Delay by 450ms so the user first witnesses the open lock, then the deliberate slam shut
+          lockTimeoutRef.current = window.setTimeout(() => {
+            setIsPrivacyLocked(true)
+          }, 450)
           observer.disconnect()
         }
       },
@@ -138,7 +150,10 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
     )
 
     observer.observe(el)
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      if (lockTimeoutRef.current) window.clearTimeout(lockTimeoutRef.current)
+    }
   }, [])
 
   useEffect(() => {
@@ -538,33 +553,47 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
       >
         <HoneycombBackground opacity={0.12} color="#171719" accentColor="#ffd638" />
         <div className="landing-privacy-inner landing-reveal">
-          <div
-            className={`landing-lock${isPrivacyLocked ? ' is-locked' : ''}`}
-            aria-hidden="true"
-          >
-            <div className="landing-lock__shimmer" />
-            <svg viewBox="0 0 32 32" fill="none">
-              <path
-                className="landing-lock__shackle"
-                d="M10 14V9.5a6 6 0 0 1 12 0V14"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <path
-                className="landing-lock__body"
-                d="M7 14h18a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-9a3 3 0 0 1 3-3Z"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinejoin="round"
-              />
-              <path
-                className="landing-lock__keyhole"
-                d="M16 19a2 2 0 0 0-1 3.73V24.5a1 1 0 0 0 2 0v-1.77A2 2 0 0 0 16 19Z"
-                fill="currentColor"
-              />
-            </svg>
+          <div className={`landing-lock-wrapper${isPrivacyLocked ? ' is-locked' : ''}`}>
+            <div className="landing-lock__shockwave" aria-hidden="true" />
+            <button
+              type="button"
+              className={`landing-lock${isPrivacyLocked ? ' is-locked' : ''}`}
+              onClick={handleRetriggerLock}
+              aria-label={
+                isPrivacyLocked
+                  ? 'Замок надёжно заблокирован. Нажмите, чтобы открыть и зафиксировать заново'
+                  : 'Замок открыт'
+              }
+              title="Нажмите, чтобы проверить жест закрытия замка"
+            >
+              <div className="landing-lock__shimmer" aria-hidden="true" />
+              <div className="landing-lock__spark" aria-hidden="true" />
+              <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+                <path
+                  className="landing-lock__shackle"
+                  d="M10 15V9.5a6 6 0 0 1 12 0V15"
+                  stroke="currentColor"
+                  strokeWidth="2.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  className="landing-lock__body"
+                  d="M6.5 14h19a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3h-19a3 3 0 0 1-3-3v-9a3 3 0 0 1 3-3Z"
+                  stroke="currentColor"
+                  strokeWidth="2.6"
+                  strokeLinejoin="round"
+                />
+                <path
+                  className="landing-lock__keyhole"
+                  d="M16 19a2 2 0 0 0-1 3.73V24.5a1 1 0 0 0 2 0v-1.77A2 2 0 0 0 16 19Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </button>
+            <span className="landing-lock-badge">
+              {isPrivacyLocked ? '🔒 Защищено' : '🔓 Нажмите'}
+            </span>
           </div>
           <div className="landing-privacy-copy">
             <span className="landing-eyebrow">ПРИВАТНОСТЬ И БЕЗОПАСНОСТЬ</span>
