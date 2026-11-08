@@ -35,6 +35,7 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
     CREATE TABLE IF NOT EXISTS checkins(round_id TEXT NOT NULL REFERENCES rounds(id), voter_key TEXT NOT NULL, energy INTEGER NOT NULL, clarity INTEGER NOT NULL, support INTEGER NOT NULL, PRIMARY KEY(round_id,voter_key));
     CREATE TABLE IF NOT EXISTS actions(id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), round_id TEXT NOT NULL REFERENCES rounds(id), kind TEXT NOT NULL, title TEXT NOT NULL, goal TEXT NOT NULL, created_at TEXT NOT NULL, feedback_closed_at TEXT, feedback_summary TEXT, UNIQUE(round_id,kind));
     CREATE TABLE IF NOT EXISTS feedback(action_id TEXT NOT NULL REFERENCES actions(id), voter_key TEXT NOT NULL, helpful INTEGER NOT NULL CHECK(helpful IN (0,1)), PRIMARY KEY(action_id,voter_key));
+    CREATE TABLE IF NOT EXISTS app_feedback(id TEXT PRIMARY KEY, type TEXT NOT NULL CHECK(type IN ('bug','idea','other')), message TEXT NOT NULL, created_at TEXT NOT NULL);
   `)
   const workspaceColumns = db.prepare('PRAGMA table_info(workspaces)').all()
   if (!workspaceColumns.some(column => column.name === 'room_key')) {
@@ -252,6 +253,14 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
         run('UPDATE actions SET feedback_closed_at=?,feedback_summary=? WHERE id=?', new Date(now()).toISOString(), JSON.stringify(result), id)
         run('DELETE FROM feedback WHERE action_id=?', id)
       })
+    },
+    submitFeedback(input) {
+      const type = input?.type
+      if (!['bug', 'idea', 'other'].includes(type)) fail(400, 'INVALID_INPUT', 'Тип отзыва: выберите вариант')
+      const message = text(input.message, 2000, 'Сообщение')
+      const id = randomUUID()
+      run('INSERT INTO app_feedback VALUES(?,?,?,?)', id, type, message, new Date().toISOString())
+      return { id }
     },
   }
 }

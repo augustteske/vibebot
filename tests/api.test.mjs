@@ -626,3 +626,40 @@ test('store testability: custom now controls sessions, invitations, and 24h acti
   currentTime += 7 * 86400000
   assert.equal(store.authenticate(token), null, 'Session should expire after 7 days')
 })
+
+test('app feedback is accepted without a session and stored in its own table', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'feedback-test-'))
+  const path = join(directory, 'test.sqlite')
+  const { client, close } = await start(t, path)
+  t.after(async () => {
+    await close()
+    await rm(directory, { recursive: true, force: true })
+  })
+  const anonymous = client()
+
+  const created = await anonymous('/feedback', { type: 'bug', message: '  Не работает кнопка «Отправить»  ' })
+  assert.equal(created.status, 201)
+  assert.match(created.body.id, /^[a-f0-9-]{36}$/)
+
+  assert.equal((await anonymous('/feedback', { type: 'spam', message: 'Здравствуйте' })).status, 400)
+  assert.equal((await anonymous('/feedback', { type: 'idea', message: '   ' })).status, 400)
+  assert.equal((await anonymous('/feedback', { type: 'other', message: 'x'.repeat(2001) })).status, 400)
+  assert.equal((await anonymous('/feedback', { type: 'idea' })).status, 400)
+
+  const withoutBrowserHeader = await anonymous('/feedback', { type: 'idea', message: 'Без заголовка' }, { 'X-VibeBot': '' })
+  assert.equal(withoutBrowserHeader.status, 403)
+  assert.equal(withoutBrowserHeader.body.error.code, 'REQUEST_REJECTED')
+
+  const wrongMethod = await anonymous('/feedback')
+  assert.equal(wrongMethod.status, 405)
+
+  await close()
+  const inspection = new DatabaseSync(path)
+  try {
+    const rows = inspection.prepare('SELECT type,message,created_at FROM app_feedback').all()
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0].type, 'bug')
+    assert.equal(rows[0].message, 'Не работает кнопка «Отправить»')
+    assert.ok(!Number.isNaN(Date.parse(rows[0].created_at)))
+  } finally { inspection.close() }
+})

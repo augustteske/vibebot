@@ -9,6 +9,7 @@ import { LandingPage } from './core/LandingPage'
 import { DemoDashboard } from './core/DemoDashboard'
 import { NotFoundPage } from './core/NotFoundPage'
 import { ThemeToggle } from './core/ThemeToggle'
+import { FeedbackModal } from './core/FeedbackModal'
 import './App.css'
 
 export default function App() {
@@ -80,6 +81,6 @@ export default function App() {
       <label className="scenario">Демо-сценарий <select value={scenario} onChange={e => setScenario(e.target.value as keyof typeof demoRounds)}><option value="clarity">Шесть участников · мало ясности</option><option value="small">Четыре участника · данные скрыты</option><option value="open">Раунд ещё открыт</option></select></label>
       <div className="grid"><section><InsightsPanel summary={summary}/><ActionsPanel key={scenario} summary={summary}/></section><aside><CheckinPanel/><div className="note"><strong>Ты управляешь следующим шагом</strong><p>Предложения публикуются после подтверждения. Этот режим использует вымышленные данные, без подключения ИИ. Для сохранения и совместной работы откройте «Моя команда».</p></div></aside></div>
     </>}
-    <footer>Vibee · Shertwg group</footer>
+    <footer><span>Vibee · Shertwg group</span><FeedbackModal/></footer>
   </main>
 }
