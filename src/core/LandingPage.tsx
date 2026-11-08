@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { SyntheticEvent } from 'react'
 import { ThemeToggle } from './ThemeToggle'
 import { isNewYearSeason } from './theme'
+import { HoneycombBackground } from './HoneycombBackground'
 import './LandingPage.css'
 
 // Большая картинка идёт через прокси предпросмотра и иногда получает 502.
@@ -107,6 +108,8 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
   const [activeContrastIndex, setActiveContrastIndex] = useState(0)
   const [expandedContrastCard, setExpandedContrastCard] = useState<string | null>(null)
   const [contrastView, setContrastView] = useState<'split' | 'before' | 'after'>('split')
+  const [isPrivacyLocked, setIsPrivacyLocked] = useState(false)
+  const privacyRef = useRef<HTMLElement | null>(null)
 
   const handleToggleContrast = (cardKey: string, index: number) => {
     setActiveContrastIndex(index)
@@ -116,6 +119,27 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
   useEffect(() => {
     document.documentElement.dataset.season = newYear ? 'new-year' : 'default'
   }, [newYear])
+
+  useEffect(() => {
+    const el = privacyRef.current
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      setIsPrivacyLocked(true)
+      return
+    }
+
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries[0]?.isIntersecting) {
+          setIsPrivacyLocked(true)
+          observer.disconnect()
+        }
+      },
+      { threshold: 0.25 }
+    )
+
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     const revealElements = Array.from(document.querySelectorAll<HTMLElement>('.landing-reveal'))
@@ -506,27 +530,73 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
         </div>
       </section>
 
-      <section className="landing-privacy" id="privacy" aria-labelledby="landing-privacy-title">
+      <section
+        className={`landing-privacy${isPrivacyLocked ? ' is-in-view' : ''}`}
+        id="privacy"
+        ref={privacyRef}
+        aria-labelledby="landing-privacy-title"
+      >
+        <HoneycombBackground opacity={0.12} color="#171719" accentColor="#ffd638" />
         <div className="landing-privacy-inner landing-reveal">
-          <div className="landing-lock" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none">
-              <path d="M7.5 10V7.5a4.5 4.5 0 0 1 9 0V10M6.75 10h10.5c.97 0 1.75.78 1.75 1.75v7.5c0 .97-.78 1.75-1.75 1.75H6.75C5.78 21 5 20.22 5 19.25v-7.5C5 10.78 5.78 10 6.75 10Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M12 14v3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+          <div
+            className={`landing-lock${isPrivacyLocked ? ' is-locked' : ''}`}
+            aria-hidden="true"
+          >
+            <div className="landing-lock__shimmer" />
+            <svg viewBox="0 0 32 32" fill="none">
+              <path
+                className="landing-lock__shackle"
+                d="M10 14V9.5a6 6 0 0 1 12 0V14"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                className="landing-lock__body"
+                d="M7 14h18a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-9a3 3 0 0 1 3-3Z"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinejoin="round"
+              />
+              <path
+                className="landing-lock__keyhole"
+                d="M16 19a2 2 0 0 0-1 3.73V24.5a1 1 0 0 0 2 0v-1.77A2 2 0 0 0 16 19Z"
+                fill="currentColor"
+              />
             </svg>
           </div>
           <div className="landing-privacy-copy">
-            <span className="landing-eyebrow">ПРИВАТНОСТЬ — ОСНОВА</span>
-            <h2 id="landing-privacy-title">Нет согласия — нет сбора.</h2>
-            <p>
-              Каждый участник может отказаться или отозвать согласие. Тогда обработка
-              останавливается, а сохранённые сообщения удаляются по правилам хранения.
+            <span className="landing-eyebrow">ПРИВАТНОСТЬ И БЕЗОПАСНОСТЬ</span>
+            <h2 id="landing-privacy-title">
+              Нет согласия —<br />
+              <span>нет сбора.</span>
+            </h2>
+            <p className="landing-privacy-lead">
+              Мы не читаем переписку без разрешения. Участие абсолютно добровольное: каждый участник
+              может отозвать согласие в любой момент — и мы сразу остановим анализ и удалим данные.
             </p>
+            <div className="landing-privacy-grid">
+              <div className="landing-privacy-card">
+                <span className="landing-privacy-card__badge">01</span>
+                <strong>Только агрегаты</strong>
+                <p>Никаких персональных рейтингов и оценок — команда видит только допустимые сводные метрики.</p>
+              </div>
+              <div className="landing-privacy-card">
+                <span className="landing-privacy-card__badge">02</span>
+                <strong>Мгновенный отзыв</strong>
+                <p>Команда <code>/stop</code> в боте или кнопка в кабинете мгновенно стирает черновики и останавливает сбор.</p>
+              </div>
+              <div className="landing-privacy-card">
+                <span className="landing-privacy-card__badge">03</span>
+                <strong>Защитный порог</strong>
+                <p>При менее 5 участниках метрики скрываются, чтобы защитить приватность каждого голоса.</p>
+              </div>
+            </div>
             <p className="landing-privacy-note">
-              Сейчас Telegram-контур проверяется только на вымышленных данных. Реальные
-              чаты не подключены, внешний ИИ не используется.
+              Строгое соблюдение приватности: данные не передаются третьим сторонам и не используются для обучения внешних моделей.
             </p>
           </div>
-          <span className="landing-privacy-stamp">ВЫМЫШЛЕННЫЕ<br />ДЕМО-ДАННЫЕ</span>
         </div>
       </section>
 
