@@ -23,6 +23,7 @@ from .http_transport import HttpTransport, OrganizerRequiredError, PausedError, 
 from .intake import ConsentSnapshot, TelegramIntake
 from .pause_state import PauseState
 from .question_images import DEFAULT_IMAGE_DIR, QuestionImageCache, send_question_image
+from .scheduler import CheckinHistoryJournal, CheckinReminderScheduler
 from .voice import LocalWhisperProvider, VoiceError, VoiceTranscription, install_voice_handlers
 
 
@@ -82,6 +83,7 @@ def create_dispatcher(
     message_log: SentMessageJournal | None = None,
     question_images: QuestionImageCache | None = None,
     question_images_dir: Path | None = None,
+    checkin_history: CheckinHistoryJournal | None = None,
 ) -> Dispatcher:
     dispatcher = Dispatcher(storage=MemoryStorage())
     flow = CheckinFlow()
@@ -146,6 +148,8 @@ def create_dispatcher(
 
     async def submit_checkin(message, user_id: int, scores: dict[str, int], nonce: str, language: str) -> None:
         """Отправляет оценки на сервер; при сетевой ошибке даёт кнопку «Повторить»."""
+        if checkin_history is not None:
+            checkin_history.record_checkin(user_id)
         if checkin_transport is None:
             await message.answer(i18n.text(language, "checkin.done.demo"))
             return
@@ -216,6 +220,8 @@ def create_dispatcher(
             return
         if message.from_user is None or message.from_user.is_bot:
             return
+        if checkin_history is not None:
+            checkin_history.register_user(message.from_user.id)
         flow.cancel(message.from_user.id)
         await message.answer(
             i18n.text(language, "start.private"),
@@ -500,6 +506,7 @@ async def main():
     journal_name = "bot-clean-" + suffix + ".json"
     message_log = SentMessageJournal(data_dir / journal_name)
     question_image_cache = QuestionImageCache(data_dir / ("bot-question-images-" + suffix + ".json"))
+    checkin_history = CheckinHistoryJournal(data_dir / ("bot-checkin-history-" + suffix + ".json"))
 
     if api_token and binding_id and chat_id_raw:
         try:
@@ -539,6 +546,7 @@ async def main():
         checkin_transport=transport,
         message_log=message_log,
         question_images=question_image_cache,
+        checkin_history=checkin_history,
     )
 
     async def cleanup():
@@ -553,6 +561,8 @@ async def main():
     task = asyncio.create_task(cleanup())
     try:
         async with JournalBot(token=token, journal=message_log) as bot:
+            reminder_scheduler = CheckinReminderScheduler(bot=bot, journal=checkin_history)
+            reminder_task = asyncio.create_task(reminder_scheduler.start_loop())
             print("Vibee: запускаю подключение к Telegram. Для проверки отправьте /start.", flush=True)
             try:
                 await bot.set_my_commands(BOT_COMMANDS)
@@ -562,8 +572,11 @@ async def main():
             await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types(), handle_signals=True)
     finally:
         task.cancel()
+        reminder_task.cancel()
         with suppress(asyncio.CancelledError):
             await task
+        with suppress(asyncio.CancelledError):
+            await reminder_task
         flow.drafts.clear()
         if voice_transcription is not None:
             await voice_transcription.close()

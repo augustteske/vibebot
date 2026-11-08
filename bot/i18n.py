@@ -158,6 +158,10 @@ _TEXTS: dict[str, dict[str, str]] = {
         "error.network": (
             "🐝 Упс, кажется, у нас проблемы с сетью. Мы уже чиним! Попробуйте позже."
         ),
+        "reminder.text": (
+            "🐝 Привет! Мы давно не видели твоих ответов. Не забудь пройти чек-ин на этой неделе."
+        ),
+        "reminder.button": "Пройти чек-ин",
         "button.retry": "Повторить",
         "retry.expired": (
             "Данные этого чек-ина уже не сохранены. Пройдите чек-ин заново: /start."
@@ -313,6 +317,10 @@ _TEXTS: dict[str, dict[str, str]] = {
             "🐝 Oops, looks like we're having network problems. We're fixing it! "
             "Please try again later."
         ),
+        "reminder.text": (
+            "🐝 Hey! We haven't seen your answers for a while. Don't forget to take your check-in this week."
+        ),
+        "reminder.button": "Take check-in",
         "button.retry": "Retry",
         "retry.expired": (
             "This check-in's answers are no longer saved. Please take the check-in again: /start."
