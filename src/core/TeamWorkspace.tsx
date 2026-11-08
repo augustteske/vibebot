@@ -75,13 +75,31 @@ interface SecretFieldProps {
   disabled?: boolean;
 }
 
+function EyeIcon() {
+  return <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M2.1 12.3a1 1 0 0 1 0-.6 10.8 10.8 0 0 1 19.8 0 1 1 0 0 1 0 .6 10.8 10.8 0 0 1-19.8 0"/>
+    <circle cx="12" cy="12" r="3"/>
+  </svg>
+}
+
+function EyeOffIcon() {
+  return <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M10.7 5.1a10.8 10.8 0 0 1 11.2 6.6 1 1 0 0 1 0 .6 10.8 10.8 0 0 1-1.4 2.5"/>
+    <path d="M14.1 14.2a3 3 0 0 1-4.2-4.2"/>
+    <path d="M17.5 17.5a10.8 10.8 0 0 1-15.4-5.2 1 1 0 0 1 0-.6 10.8 10.8 0 0 1 4.4-5.1"/>
+    <path d="m2 2 20 20"/>
+  </svg>
+}
+
 function SecretField({ id, label, visible, onToggle, name, value, onChange, disabled }: SecretFieldProps) {
   const action = visible ? 'Скрыть' : 'Показать'
   return <div className="team-field">
     <label htmlFor={id}>{label}</label>
     <div className="secret-field">
       <input id={id} name={name} type={visible ? 'text' : 'password'} autoComplete="off" maxLength={64} required value={value} onChange={onChange} disabled={disabled}/>
-      <button className="secret-field__toggle" type="button" aria-controls={id} aria-pressed={visible} aria-label={`${action} ${label.toLowerCase()}`} onClick={onToggle} disabled={disabled}>{action}</button>
+      <button className="secret-field__toggle" type="button" aria-controls={id} aria-pressed={visible} aria-label={`${action} ${label.toLowerCase()}`} title={`${action} ${label.toLowerCase()}`} onClick={onToggle} disabled={disabled}>
+        {visible ? <EyeOffIcon/> : <EyeIcon/>}
+      </button>
     </div>
   </div>
 }
