@@ -121,7 +121,14 @@ export function ActionRecommendationCard({
   return (
     <section className={cardClass} aria-labelledby="vibee-arc-title">
       <header className="vibee-arc__head">
-        <h3 id="vibee-arc-title" className="vibee-arc__title">Рекомендация</h3>
+        <div className="vibee-arc__title-row">
+          <span className="vibee-arc__icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+            </svg>
+          </span>
+          <h3 id="vibee-arc-title" className="vibee-arc__title">Рекомендация</h3>
+        </div>
         <div className="vibee-arc__badges">
           {demo && <span className="vibee-arc__badge vibee-arc__badge--demo">демо-данные</span>}
           <span className="vibee-arc__badge">источник данных: {DATA_SOURCE_LABEL[dataSource]}</span>
@@ -131,7 +138,15 @@ export function ActionRecommendationCard({
       </header>
 
       <div className="vibee-arc__action">
-        <p className="vibee-arc__action-label">Предлагаемый следующий шаг</p>
+        <p className="vibee-arc__action-label">
+          <span className="vibee-arc__action-icon" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="m10 8 4 4-4 4"/>
+            </svg>
+          </span>
+          Предлагаемый следующий шаг
+        </p>
         {phase === 'editing' || phase === 'saving' ? (
           <>
             <label className="vibee-arc__visually-hidden" htmlFor="vibee-arc-action-input">
@@ -211,6 +226,9 @@ export function ActionRecommendationCard({
               onClick={handleConfirm}
               disabled={busy}
             >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M20 6 9 17l-5-5"/>
+              </svg>
               Принять
             </button>
             {phase === 'review' ? (
@@ -219,6 +237,9 @@ export function ActionRecommendationCard({
                 className="vibee-arc__btn"
                 onClick={() => { setError(null); setPhase('editing'); }}
               >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+                </svg>
                 Изменить шаг
               </button>
             ) : (
@@ -237,6 +258,10 @@ export function ActionRecommendationCard({
               onClick={() => { setError(null); setPhase('later'); onLater?.(); }}
               disabled={busy}
             >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12 6 12 12 16 14"/>
+              </svg>
               Позже
             </button>
             <button
@@ -245,6 +270,9 @@ export function ActionRecommendationCard({
               onClick={() => { setError(null); setPhase('rejected'); onReject?.(); }}
               disabled={busy}
             >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M18 6 6 18M6 6l12 12"/>
+              </svg>
               Не подходит
             </button>
           </>

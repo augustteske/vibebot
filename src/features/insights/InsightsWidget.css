@@ -9,6 +9,28 @@
   box-shadow: var(--vibee-shadow-soft);
 }
 
+.iw-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: clamp(32px, 5vw, 48px) 24px;
+}
+
+.iw-empty-state__icon {
+  font-size: 42px;
+  margin-bottom: 12px;
+  filter: drop-shadow(0 4px 12px rgba(217, 174, 0, .2));
+}
+
+.iw-empty-state__lead {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--vibee-ink);
+  max-width: 480px;
+  margin: 8px 0 6px;
+}
+
 .iw-state-warn { background: var(--vibee-tint-strong); }
 
 .iw-header {
@@ -186,10 +208,76 @@
   font-style: italic;
 }
 
-/* Адаптив под мобилки (320px) */
-@media (max-width: 400px) {
-  .iw-grid { grid-template-columns: 1fr; }
-  .iw-value { font-size: 1.5rem; }
+.iw-hero-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0 14px;
+}
+
+.iw-hero-stat__number {
+  font-size: clamp(2rem, 3.2vw, 2.75rem);
+  font-weight: 850;
+  letter-spacing: -0.04em;
+  color: var(--vibee-ink);
+  line-height: 1;
+}
+
+.iw-hero-stat__label {
+  font-size: 0.88rem;
+  font-weight: 650;
+  color: var(--vibee-muted);
+}
+
+.iw-value-sub {
+  margin: 6px 0 0;
+  font-size: 0.85rem;
+  color: var(--vibee-muted);
+  line-height: 1.5;
+}
+
+.cute-bee-magnifier {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+  animation: beeFloat 3.4s ease-in-out infinite;
+}
+
+@keyframes beeFloat {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(2deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cute-bee-magnifier {
+    animation: none;
+  }
+}
+
+/* Адаптив под мобилки (320px - 360px) */
+@media (max-width: 480px) {
+  .iw-container {
+    padding: 18px 14px;
+    border-radius: 20px;
+  }
+  .iw-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .iw-card {
+    padding: 16px 14px;
+  }
+  .iw-hero-stat__number {
+    font-size: 2.1rem;
+  }
+  .iw-value {
+    font-size: 1.6rem;
+  }
 }
 
 .iw-header { gap: 12px; flex-wrap: wrap; }

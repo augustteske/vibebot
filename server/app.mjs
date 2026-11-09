@@ -157,6 +157,15 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
           notificationsEnabled: typeof telegramBotToken === 'string' && telegramBotToken.trim().length > 0,
         })
       }
+      const botSummaryRoute = url.pathname.match(/^\/api\/bot\/v1\/bindings\/([a-f0-9-]+)\/summary$/)
+      if (botSummaryRoute) {
+        if (req.method !== 'GET') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
+        if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
+        const actor = store.telegram.authenticate(req.headers.authorization)
+        if (!actor) throw new AppError(401, 'BOT_AUTH_REQUIRED', 'Нужна авторизация бота')
+        return json(res, 200, store.telegram.summaryForOrganizer(
+          actor, botSummaryRoute[1], url.searchParams.get('telegramUserId')))
+      }
       const transcriptionJobRoute = url.pathname.match(/^\/api\/bot\/v1\/bindings\/([a-f0-9-]+)\/transcription-jobs$/)
       if (transcriptionJobRoute) {
         if (req.method !== 'POST') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')

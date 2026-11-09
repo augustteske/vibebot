@@ -57,3 +57,20 @@ export function applyTheme(theme: Theme, animate = false): void {
 export function nextTheme(theme: Theme): Theme {
   return theme === 'dark' ? 'light' : 'dark'
 }
+
+/** Проверяет, активен ли новогодний сезон: с 1 декабря по 15 января (по дате браузера). */
+export function isNewYearSeason(date: Date = new Date()): boolean {
+  try {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('newyear') === '1') return true
+    if (params.get('newyear') === '0') return false
+    const stored = window.localStorage.getItem('vibee-newyear')
+    if (stored === '1') return true
+    if (stored === '0') return false
+  } catch {
+    // Игнорируем ошибки доступа к window/localStorage
+  }
+  const month = date.getMonth()
+  const day = date.getDate()
+  return month === 11 || (month === 0 && day >= 1 && day <= 15)
+}

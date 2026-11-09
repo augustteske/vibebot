@@ -992,6 +992,20 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
             period: { id: row.period_id, start: new Date(row.start_at).toISOString(), end: new Date(row.closed_at).toISOString() } })) }
       })
     },
+    summaryForOrganizer(actor, id, telegramUserId) {
+      unavailable()
+      if (!telegramId(telegramUserId)) invalid()
+      bindingFor(actor, id)
+      if (actor.kind !== 'bot') fail(403, 'FORBIDDEN', 'Нужен scoped credential бота')
+      const member = one(`SELECT m.id,m.role FROM telegram_links l
+        JOIN members m ON m.workspace_id=l.workspace_id AND m.id=l.member_id
+        WHERE l.binding_id=? AND l.workspace_id=? AND l.telegram_user_id=?`,
+        id, actor.workspace_id, telegramUserId)
+      if (!member || member.role !== 'organizer') {
+        fail(403, 'ORGANIZER_REQUIRED', 'Статистика доступна только связанному организатору')
+      }
+      return this.summary(actor, id)
+    },
     currentSummary(actor) {
       unavailable()
       organizerProfile(actor)

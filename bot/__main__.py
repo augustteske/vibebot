@@ -7,46 +7,59 @@ import logging
 from hashlib import sha256
 from datetime import timezone
 from pathlib import Path
+from math import isfinite
+from time import monotonic
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
-from aiogram.methods import SendMessage
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.methods import SendMessage, SendPhoto
 from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from . import i18n, styles
 from .cleanup import SentMessageJournal, delete_recent_messages
-from .flow import CheckinFlow, QUESTIONS
+from .flow import CheckinFlow, QUESTION_KEYS
 from .http_transport import HttpTransport, OrganizerRequiredError, PausedError, TransportError
 from .intake import ConsentSnapshot, TelegramIntake
 from .pause_state import PauseState
+from .question_images import DEFAULT_IMAGE_DIR, QuestionImageCache, send_question_image
+from .scheduler import CheckinHistoryJournal, CheckinReminderScheduler
 from .voice import LocalWhisperProvider, VoiceError, VoiceTranscription, install_voice_handlers
 
 
 # Список команд для синего меню Telegram; тексты согласованы с bot/BRANDING.md.
+# Меню общее для всех чатов, поэтому подписи русские; сами ответы — на выбранном языке.
 BOT_COMMANDS = [
     BotCommand(command="start", description="Открыть меню сценариев"),
     BotCommand(command="help", description="Доступные команды и сценарии"),
+    BotCommand(command="guide", description="Инструкция по подключению Vibee"),
     BotCommand(command="privacy", description="Как бот обрабатывает данные"),
     BotCommand(command="stop", description="Отменить сценарий и очистить черновик"),
     BotCommand(command="clean", description="Удалить сообщения бота в этом чате"),
+    BotCommand(command="lang", description="Язык / Language: ru, en"),
+    BotCommand(command="style", description="Режим общения: классик, ми-ми-ми, правдарубка"),
+    BotCommand(command="stats", description="Статистика команды (для организатора)"),
     BotCommand(command="transcribe", description="Согласие на одну голосовую (нужна локальная модель)"),
     BotCommand(command="subscribe", description="Уведомления организатора (если настроены)"),
 ]
 
-CLEAN_DONE = (
-    "Чат очищен. Если остались старые сообщения, удалите их вручную "
-    "(Telegram не позволяет ботам удалять их).\n\n"
-    "⚠️ История диалога пропала: удалённые сообщения восстановить нельзя."
-)
-CLEAN_EMPTY = (
-    "Нечего очищать: за последние 48 часов бот не нашёл своих сообщений. "
-    "Если остались старые сообщения, удалите их вручную "
-    "(Telegram не позволяет ботам удалять их)."
-)
-CLEAN_PARTIAL = (
-    "Не удалось удалить часть сообщений: Telegram отклонил запрос. "
-    "Попробуйте /clean ещё раз позже; оставшиеся сообщения можно удалить вручную.\n\n"
-    "⚠️ Уже удалённые сообщения восстановить нельзя."
-)
+CLEAN_DONE = i18n.text(i18n.RU, "clean.done")
+CLEAN_EMPTY = i18n.text(i18n.RU, "clean.empty")
+CLEAN_PARTIAL = i18n.text(i18n.RU, "clean.partial")
+
+# Русские тексты ошибок из CheckinFlow -> ключи локализации.
+ERROR_KEYS = {
+    "Этот чек-ин истёк. Начните заново: /start": "error.expired",
+    "Выбор уже обработан": "error.processed",
+    "Эта кнопка устарела. Ответьте на текущий вопрос.": "error.stale",
+    "Выберите целую оценку от 1 до 5": "error.score_range",
+    "Неверный выбор": "error.choice",
+}
+
+# Сколько держать завершённый чек-ин в памяти для кнопки «Повторить».
+RETRY_TTL_SECONDS = 300
+STATS_BAR_CELLS = 10
 
 
 class JournalBot(Bot):
@@ -58,7 +71,11 @@ class JournalBot(Bot):
 
     async def __call__(self, method, request_timeout=None):
         result = await super().__call__(method, request_timeout=request_timeout)
-        if isinstance(method, SendMessage) and isinstance(result, Message) and result.chat.type == "private":
+        if (
+            isinstance(method, (SendMessage, SendPhoto))
+            and isinstance(result, Message)
+            and result.chat.type == "private"
+        ):
             self.journal.record(result.chat.id, result.message_id)
         return result
 
@@ -68,156 +85,474 @@ def create_dispatcher(
     voice: VoiceTranscription | None = None,
     notification_transport: HttpTransport | None = None,
     checkin_transport: HttpTransport | None = None,
+    stats_transport: HttpTransport | None = None,
     message_log: SentMessageJournal | None = None,
+    question_images: QuestionImageCache | None = None,
+    question_images_dir: Path | None = None,
+    checkin_history: CheckinHistoryJournal | None = None,
 ) -> Dispatcher:
-    dispatcher = Dispatcher()
+    dispatcher = Dispatcher(storage=MemoryStorage())
     flow = CheckinFlow()
     voice_transcription = voice
     journal = message_log if message_log is not None else SentMessageJournal()
     install_voice_handlers(dispatcher, voice_transcription)
 
-    def menu_keyboard():
-        rows = [[InlineKeyboardButton(text="Пройти личный чек-ин", callback_data="menu:checkin")]]
+    async def language_of(state: FSMContext | None) -> str:
+        if state is None:
+            return i18n.DEFAULT_LANGUAGE
+        data = await state.get_data()
+        return i18n.normalize_language(data.get("lang")) or i18n.DEFAULT_LANGUAGE
+
+    async def remember_language(state: FSMContext | None, language: str) -> None:
+        if state is not None:
+            await state.update_data(lang=language)
+
+    async def style_of(state: FSMContext | None) -> str:
+        if state is None:
+            return styles.DEFAULT_STYLE
+        data = await state.get_data()
+        return styles.normalize_style(data.get("style")) or styles.DEFAULT_STYLE
+
+    async def remember_style(state: FSMContext | None, style: str) -> None:
+        if state is not None:
+            await state.update_data(style=style)
+
+    def chat_style(style: str, message) -> str:
+        """Режим для конкретного чата: в группах всегда классик."""
+        return styles.for_chat(style, getattr(getattr(message, "chat", None), "type", None))
+
+    def menu_keyboard(language: str):
+        rows = [[InlineKeyboardButton(
+            text=i18n.text(language, "menu.checkin"), callback_data="menu:checkin",
+        )]]
         if voice_transcription is not None:
-            rows.append([InlineKeyboardButton(text="Расшифровать голосовое", callback_data="menu:voice")])
+            rows.append([InlineKeyboardButton(
+                text=i18n.text(language, "menu.voice"), callback_data="menu:voice",
+            )])
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
-    async def question(message, nonce, step):
+    def language_keyboard(language: str):
+        def label(code: str, name: str) -> str:
+            return f"{name} ✓" if language == code else name
+
+        return InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=label(i18n.RU, "Русский"), callback_data=f"lang:{i18n.RU}"),
+            InlineKeyboardButton(text=label(i18n.EN, "English"), callback_data=f"lang:{i18n.EN}"),
+        ]])
+
+    def style_keyboard(language: str, current: str):
+        def label(code: str) -> str:
+            name = i18n.style_name(language, code)
+            return f"{name} ✓" if current == code else name
+
+        return InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=label(code), callback_data=f"style:{code}")
+            for code in styles.STYLES
+        ]])
+
+    # Завершённые чек-ины, доставку которых не удалось подтвердить:
+    # nonce -> (Telegram ID, оценки, срок хранения для кнопки «Повторить»).
+    pending_checkins: dict[str, tuple[int, dict[str, int], float]] = {}
+
+    def remember_pending_checkin(nonce: str, user_id: int, scores: dict[str, int]) -> None:
+        now = monotonic()
+        for key in list(pending_checkins):
+            if pending_checkins[key][2] <= now:
+                pending_checkins.pop(key, None)
+        pending_checkins[nonce] = (user_id, dict(scores), now + RETRY_TTL_SECONDS)
+
+    def take_pending_checkin(nonce: str, user_id: int) -> dict[str, int] | None:
+        entry = pending_checkins.get(nonce)
+        if entry is None:
+            return None
+        owner, scores, expires = entry
+        if owner != user_id or expires <= monotonic():
+            pending_checkins.pop(nonce, None)
+            return None
+        return scores
+
+    def retry_keyboard(language: str, action: str):
+        return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+            text=i18n.text(language, "button.retry"), callback_data=f"retry:{action}",
+        )]])
+
+    def percent_of(value: object) -> float | None:
+        """Процент из ответа сервера; всё вне 0–100 и нечисло — ``None``."""
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        number = float(value)
+        if not isfinite(number):
+            return None
+        return min(100.0, max(0.0, number))
+
+    def percent_text(value: float) -> str:
+        """Процент без лишнего нуля: 25.0 → «25», 89.8 → «89.8»."""
+        rounded = round(value, 1)
+        return str(int(rounded)) if rounded == int(rounded) else f"{rounded:.1f}"
+
+    def progress_bar(value: float) -> str:
+        filled = int(value / 100 * STATS_BAR_CELLS + 0.5)
+        return "█" * filled + "░" * (STATS_BAR_CELLS - filled)
+
+    def stats_message(language: str, style: str, view: dict[str, object]) -> str | None:
+        """Красивая сводка трёх метрик; ``None`` — сервер прислал неполные данные."""
+        metrics = view.get("metrics")
+        if not isinstance(metrics, dict):
+            return None
+        values = [
+            percent_of(metrics.get("outsideHoursPercent")),
+            percent_of(metrics.get("participationEvenness")),
+            percent_of(metrics.get("recognitionPercent")),
+        ]
+        if any(value is None for value in values):
+            return None
+        keys = ("stats.outside_hours", "stats.participation", "stats.recognition")
+        lines = [i18n.styled_text(language, style, "stats.header"), ""]
+        for key, value in zip(keys, values):
+            lines.append(i18n.text(language, key, value=percent_text(value)))
+            lines.append(progress_bar(value))
+        return "\n".join(lines)
+
+    async def deliver_stats(message, user_id: int, language: str, style: str) -> None:
+        """Показывает статистику команды; при сетевой ошибке даёт кнопку «Повторить»."""
+        if stats_transport is None:
+            await message.answer(i18n.text(language, "stats.no_connection"))
+            return
+        try:
+            view = await stats_transport.get_summary(telegram_user_id=user_id)
+        except OrganizerRequiredError:
+            await message.answer(i18n.styled_text(language, style, "stats.organizer_only"))
+            return
+        except TransportError:
+            await message.answer(
+                i18n.text(language, "error.network"),
+                reply_markup=retry_keyboard(language, "stats"),
+            )
+            return
+        status = view.get("status")
+        if status in ("calibrating", "insufficient"):
+            await message.answer(i18n.styled_text(language, style, "stats.insufficient"))
+            return
+        if status != "published":
+            await message.answer(i18n.styled_text(language, style, "stats.unavailable"))
+            return
+        text = stats_message(language, style, view)
+        if text is None:
+            await message.answer(i18n.text(language, "stats.error"))
+            return
+        report_url = getattr(stats_transport, "web_url", "")
+        keyboard = None
+        if isinstance(report_url, str) and report_url:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+                text=i18n.text(language, "stats.report"), url=report_url,
+            )]])
+        await message.answer(text, reply_markup=keyboard)
+
+    async def submit_checkin(
+        message, user_id: int, scores: dict[str, int], nonce: str, language: str, style: str,
+    ) -> None:
+        """Отправляет оценки на сервер; при сетевой ошибке даёт кнопку «Повторить»."""
+        if checkin_history is not None:
+            checkin_history.record_checkin(user_id)
+        if checkin_transport is None:
+            await message.answer(i18n.styled_text(language, style, "checkin.done.demo"))
+            return
+        try:
+            await checkin_transport.submit_personal_checkin(user_id, scores, nonce)
+        except PausedError:
+            pending_checkins.pop(nonce, None)
+            await message.answer(i18n.styled_text(language, style, "checkin.done.paused"))
+            return
+        except TransportError:
+            remember_pending_checkin(nonce, user_id, scores)
+            await message.answer(
+                i18n.styled_text(language, style, "checkin.done.unknown")
+                + "\n\n" + i18n.text(language, "error.network"),
+                reply_markup=retry_keyboard(language, f"checkin:{nonce}"),
+            )
+            return
+        pending_checkins.pop(nonce, None)
+        await message.answer(i18n.styled_text(language, style, "checkin.done.server"))
+
+    async def deliver_subscription(message, user_id: int, language: str, style: str) -> None:
+        """Включает уведомления; при сетевой ошибке даёт кнопку «Повторить»."""
+        if notification_transport is None:
+            await message.answer(i18n.text(language, "subscribe.no_config"))
+            return
+        try:
+            result = await notification_transport.subscribe_notifications(user_id)
+        except OrganizerRequiredError:
+            await message.answer(i18n.text(language, "subscribe.organizer_only"))
+            return
+        except TransportError:
+            await message.answer(
+                i18n.text(language, "error.network"),
+                reply_markup=retry_keyboard(language, "subscribe"),
+            )
+            return
+        if result.get("notificationsEnabled") is True:
+            await message.answer(i18n.styled_text(language, style, "subscribe.enabled"))
+        else:
+            await message.answer(i18n.text(language, "subscribe.disabled"))
+
+    async def clear_buttons(message) -> None:
+        """Убирает кнопки у уже отвеченного шага, чтобы чат не копил старые."""
+        edit = getattr(message, "edit_reply_markup", None)
+        if not callable(edit):
+            return
+        try:
+            await edit(reply_markup=None)
+        except Exception as error:  # noqa: BLE001 — кнопки не должны ронять сценарий
+            logging.getLogger(__name__).debug("Не удалось убрать кнопки шага: %s", error)
+
+    async def question(message, nonce, step, language, style) -> None:
+        """Задаёт вопрос одним сообщением: картинка, текст и оценки."""
+        key = QUESTION_KEYS[step]
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text=str(n), callback_data=f"score:{nonce}:{step}:{n}")
             for n in range(1, 6)
         ]])
-        await message.answer(
-            f"{step + 1}/3 · {QUESTIONS[step][1]}\n"
-            "1 — мало, 5 — много. Отмена: /stop.",
-            reply_markup=keyboard,
+        text = i18n.styled_text(
+            language, style, "question.ask",
+            index=step + 1, total=len(QUESTION_KEYS),
+            question=i18n.question(language, key),
         )
+        sent_with_photo = await send_question_image(
+            message, key, question_images,
+            question_images_dir or DEFAULT_IMAGE_DIR,
+            caption=text, reply_markup=keyboard,
+        )
+        if not sent_with_photo:
+            await message.answer(text, reply_markup=keyboard)
 
     @dispatcher.message(CommandStart())
-    async def start(message: Message):
+    async def start(message: Message, state: FSMContext | None = None):
+        language = await language_of(state)
+        style = chat_style(await style_of(state), message)
         if message.chat.type != "private":
-            await message.answer(
-                "Сбор сообщений из групп в этом запуске не настроен, "
-                "поэтому Vibee их не обрабатывает. "
-                "Личные сценарии доступны в личном диалоге."
-                if intake is None else
-                "Vibee обрабатывает сообщения этой группы только при включённом на сервере сборе "
-                "и подтверждённых согласиях компании и всех участников. "
-                "Сам по себе запуск бота не означает, что сбор активен: итоговый статус определяет сервер. "
-                "Личные сценарии доступны в личном диалоге."
-            )
+            await message.answer(i18n.text(
+                language, "start.group.intake" if intake is not None else "start.group.no_intake",
+            ))
             return
         if message.from_user is None or message.from_user.is_bot:
             return
+        if checkin_history is not None:
+            checkin_history.register_user(message.from_user.id)
         flow.cancel(message.from_user.id)
         await message.answer(
-            "Привет! Я Vibee 🐝\nВыберите сценарий. О данных — /privacy.",
-            reply_markup=menu_keyboard(),
+            i18n.styled_text(language, style, "start.private"),
+            reply_markup=menu_keyboard(language),
         )
+
+    def resolve_guide_url() -> str:
+        base = (
+            os.environ.get("VIBEE_WEB_URL")
+            or os.environ.get("VIBEE_API_BASE_URL", "https://vibee.dev")
+        )
+        if base.endswith("/api"):
+            base = base[:-4]
+        return f"{base.rstrip('/')}/guide"
 
     @dispatcher.message(Command("help"))
-    async def help_command(message: Message):
-        lines = [
-            "Команды Vibee:",
-            "/start — меню сценариев",
-            "/help — эта справка",
-            "/privacy — что обрабатывается и где хранится",
-            "/stop — отменить текущий чек-ин или расшифровку",
-            "/clean — удалить сообщения бота в этом чате (до 48 часов)",
-        ]
-        if voice_transcription is not None:
-            lines.append("/transcribe — запросить расшифровку одной личной голосовой")
-        else:
-            lines.append("Расшифровка голосовых сейчас недоступна: локальная модель не настроена.")
-        if notification_transport is not None:
-            lines.append("/subscribe — запросить уведомления; только для связанного организатора, сервер проверит права и доставку.")
-        else:
-            lines.append("Уведомления недоступны: серверное подключение не настроено.")
-        lines.append("Групповой сбор не запускается из меню; стандартный сервер его не включает.")
-        await message.answer("\n".join(lines))
-
-    @dispatcher.message(Command("privacy"))
-    async def privacy(message: Message):
-        if checkin_transport is not None:
-            checkin_note = (
-                "• Личный чек-ин — три оценки. Согласие спрашивается до вопросов. "
-                "Черновик хранится в памяти до 5 минут и очищается при завершении или /stop. "
-                "После завершения три оценки отправляются на сервер; Telegram ID используется, "
-                "чтобы проверить участие, поэтому полной анонимности нет. Организатор видит "
-                "только общую сводку, когда ответов достаточно. /stop очищает локальный черновик, "
-                "но не удаляет уже переданные данные и историю Telegram.\n"
-            )
-        else:
-            checkin_note = (
-                "• Личный чек-ин — три оценки. Согласие спрашивается до вопросов. "
-                "Черновик хранится в памяти до 5 минут и очищается при завершении или /stop. "
-                "Ответы остаются в личном сценарии и не отправляются на сервер или в командный кабинет. "
-                "/stop очищает локальный черновик, но не удаляет историю Telegram.\n"
-            )
-        await message.answer(
-            "Коротко о данных в этом боте:\n"
-            + checkin_note
-            + "• Голосовая расшифровывается только после отдельного согласия на одну новую запись "
-            "и только локальной моделью. Аудио и текст не записываются ботом в файл или БД; "
-            "результат отправляется только в этот личный чат и остаётся в Telegram.\n"
-            "• Для /clean бот хранит только идентификаторы своих сообщений и время отправки "
-            "(не дольше 48 часов), без текста и содержимого.\n"
-            "• Личные сценарии не анализируют групповые сообщения. Отдельный групповой контур "
-            "требует серверной настройки и согласия компании и каждого участника."
-        )
-
-    @dispatcher.callback_query(F.data == "menu:checkin")
-    async def select_checkin(event: CallbackQuery):
-        message = event.message
-        if (message is None or getattr(getattr(message, "chat", None), "type", None) != "private"
-                or event.from_user.is_bot or not callable(getattr(message, "answer", None))):
-            await event.answer("Личный чек-ин доступен только в личном чате.", show_alert=True)
-            return
-        user_id = event.from_user.id
-        flow.expire()
-        if user_id in flow.drafts:
-            await event.answer("Чек-ин уже открыт. Продолжите по последним кнопкам или нажмите /stop.", show_alert=True)
-            return
-        nonce = flow.begin(user_id)
-        await event.answer()
+    async def help_command(message: Message, state: FSMContext | None = None):
+        language = await language_of(state)
+        url = resolve_guide_url()
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="Согласен", callback_data=f"consent:{nonce}:yes"),
-            InlineKeyboardButton(text="Отказаться", callback_data=f"consent:{nonce}:no"),
+            InlineKeyboardButton(text=i18n.text(language, "guide.button"), url=url),
         ]])
         await message.answer(
-            "Чек-ин: три оценки от 1 до 5. Нужно ваше согласие.\n"
-            "Черновик хранится в памяти до 5 минут и удаляется при завершении или /stop. "
-            + (
-                "После завершения три оценки уходят на сервер; Telegram ID нужен, "
-                "чтобы проверить участие. Организатор получает общую сводку, когда ответов "
-                "достаточно. /stop не удаляет уже переданные данные."
-                if checkin_transport is not None else
-                "Ответы остаются в личном сценарии и не отправляются в командный кабинет."
+            i18n.help_text(
+                language,
+                voice_available=voice_transcription is not None,
+                notifications_available=notification_transport is not None,
             ),
             reply_markup=keyboard,
         )
 
+    @dispatcher.message(Command("guide"))
+    async def guide_command(message: Message, state: FSMContext | None = None):
+        language = await language_of(state)
+        url = resolve_guide_url()
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=i18n.text(language, "guide.button"), url=url),
+        ]])
+        await message.answer(
+            i18n.text(language, "guide.text", url=url),
+            reply_markup=keyboard,
+        )
+
+    @dispatcher.message(Command("privacy"))
+    async def privacy(message: Message, state: FSMContext | None = None):
+        language = await language_of(state)
+        await message.answer(i18n.privacy_text(language, checkin_transport is not None))
+
+    @dispatcher.message(Command("lang"))
+    async def language_command(message: Message, state: FSMContext | None = None):
+        if message.chat.type != "private" or message.from_user is None or message.from_user.is_bot:
+            return
+        parts = (message.text or "").split(maxsplit=1)
+        requested = parts[1].strip() if len(parts) > 1 else ""
+        if not requested:
+            language = await language_of(state)
+            await message.answer(
+                i18n.text(language, "lang.current", name=i18n.language_name(language))
+                + "\n" + i18n.text(language, "lang.usage"),
+                reply_markup=language_keyboard(language),
+            )
+            return
+        language = i18n.normalize_language(requested)
+        if language is None:
+            current = await language_of(state)
+            await message.answer(
+                i18n.text(current, "lang.invalid"),
+                reply_markup=language_keyboard(current),
+            )
+            return
+        await remember_language(state, language)
+        await message.answer(
+            i18n.text(language, "lang.saved"),
+            reply_markup=language_keyboard(language),
+        )
+
+    @dispatcher.callback_query(F.data.startswith("lang:"))
+    async def language_callback(event: CallbackQuery, state: FSMContext | None = None):
+        current = await language_of(state)
+        language = i18n.normalize_language(event.data.split(":", 1)[1])
+        if language is None:
+            await event.answer(i18n.text(current, "lang.invalid"), show_alert=True)
+            return
+        await remember_language(state, language)
+        await event.answer()
+        message = event.message
+        if message is not None and callable(getattr(message, "answer", None)):
+            await message.answer(
+                i18n.text(language, "lang.saved"),
+                reply_markup=language_keyboard(language),
+            )
+
+    @dispatcher.message(Command("style"))
+    async def style_command(message: Message, state: FSMContext | None = None):
+        language = await language_of(state)
+        if message.chat.type != "private" or message.from_user is None or message.from_user.is_bot:
+            await message.answer(i18n.text(language, "style.private_only"))
+            return
+        current = await style_of(state)
+        parts = (message.text or "").split(maxsplit=1)
+        requested = parts[1].strip() if len(parts) > 1 else ""
+        if not requested:
+            await message.answer(
+                i18n.text(language, "style.current", name=i18n.style_name(language, current))
+                + "\n" + i18n.text(language, "style.usage"),
+                reply_markup=style_keyboard(language, current),
+            )
+            return
+        style = styles.normalize_style(requested)
+        if style is None:
+            await message.answer(
+                i18n.text(language, "style.invalid"),
+                reply_markup=style_keyboard(language, current),
+            )
+            return
+        await remember_style(state, style)
+        await message.answer(
+            i18n.styled_text(
+                language, style, "style.saved", name=i18n.style_name(language, style),
+            ),
+            reply_markup=style_keyboard(language, style),
+        )
+
+    @dispatcher.callback_query(F.data.startswith("style:"))
+    async def style_callback(event: CallbackQuery, state: FSMContext | None = None):
+        language = await language_of(state)
+        message = event.message
+        if (message is None or getattr(getattr(message, "chat", None), "type", None) != "private"
+                or event.from_user.is_bot or not callable(getattr(message, "answer", None))):
+            await event.answer(i18n.text(language, "style.private_only"), show_alert=True)
+            return
+        style = styles.normalize_style(event.data.split(":", 1)[1])
+        if style is None:
+            await event.answer(i18n.text(language, "style.invalid"), show_alert=True)
+            return
+        await remember_style(state, style)
+        await event.answer()
+        await message.answer(
+            i18n.styled_text(
+                language, style, "style.saved", name=i18n.style_name(language, style),
+            ),
+            reply_markup=style_keyboard(language, style),
+        )
+
+    @dispatcher.callback_query(F.data.startswith("retry:"))
+    async def retry_callback(event: CallbackQuery, state: FSMContext | None = None):
+        language = await language_of(state)
+        message = event.message
+        if (message is None or getattr(getattr(message, "chat", None), "type", None) != "private"
+                or event.from_user.is_bot or not callable(getattr(message, "answer", None))):
+            await event.answer(i18n.text(language, "alert.checkin_private"), show_alert=True)
+            return
+        style = chat_style(await style_of(state), message)
+        parts = event.data.split(":")
+        if len(parts) == 2 and parts[1] == "subscribe":
+            await event.answer()
+            await deliver_subscription(message, event.from_user.id, language, style)
+            return
+        if len(parts) == 2 and parts[1] == "stats":
+            await event.answer()
+            await deliver_stats(message, event.from_user.id, language, style)
+            return
+        if len(parts) == 3 and parts[1] == "checkin":
+            scores = take_pending_checkin(parts[2], event.from_user.id)
+            if scores is None:
+                await event.answer(i18n.text(language, "retry.expired"), show_alert=True)
+                return
+            await event.answer()
+            await submit_checkin(message, event.from_user.id, scores, parts[2], language, style)
+            return
+        await event.answer(i18n.text(language, "error.generic"), show_alert=True)
+
+    @dispatcher.callback_query(F.data == "menu:checkin")
+    async def select_checkin(event: CallbackQuery, state: FSMContext | None = None):
+        language = await language_of(state)
+        message = event.message
+        if (message is None or getattr(getattr(message, "chat", None), "type", None) != "private"
+                or event.from_user.is_bot or not callable(getattr(message, "answer", None))):
+            await event.answer(i18n.text(language, "alert.checkin_private_only"), show_alert=True)
+            return
+        user_id = event.from_user.id
+        flow.expire()
+        if user_id in flow.drafts:
+            await event.answer(i18n.text(language, "alert.checkin_open"), show_alert=True)
+            return
+        nonce = flow.begin(user_id)
+        await event.answer()
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=i18n.text(language, "consent.yes"), callback_data=f"consent:{nonce}:yes"),
+            InlineKeyboardButton(text=i18n.text(language, "consent.no"), callback_data=f"consent:{nonce}:no"),
+        ]])
+        await message.answer(
+            i18n.consent_text(language, checkin_transport is not None),
+            reply_markup=keyboard,
+        )
+
     @dispatcher.message(Command("stop"))
-    async def stop(message: Message):
+    async def stop(message: Message, state: FSMContext | None = None):
         if message.chat.type != "private" or message.from_user is None:
             return
+        language = await language_of(state)
+        style = chat_style(await style_of(state), message)
         flow.cancel(message.from_user.id)
         if voice_transcription is not None:
             voice_transcription.cancel(message.from_user.id)
-        await message.answer(
-            "Текущий сценарий отменён. Черновик и разрешение на расшифровку очищены; "
-            "обработка остановлена. "
-            + (
-                "Уже переданные на сервер ответы не удаляются; для сообщений в Telegram есть /clean."
-                if checkin_transport is not None else
-                "Сообщения в Telegram бот не удаляет; для них есть /clean."
-            )
-        )
+        await message.answer(i18n.styled_text(
+            language, style,
+            "stop.with_transport" if checkin_transport is not None else "stop.without_transport",
+        ))
 
     @dispatcher.message(Command("clean"))
-    async def clean_command(message: Message):
+    async def clean_command(message: Message, state: FSMContext | None = None):
+        language = await language_of(state)
         if message.chat.type != "private":
-            await message.answer("Очистка истории доступна только в личном диалоге с ботом.")
+            await message.answer(i18n.text(language, "clean.private_only"))
             return
         if message.from_user is None or message.from_user.is_bot:
             return
@@ -226,35 +561,31 @@ def create_dispatcher(
             voice_transcription.cancel(message.from_user.id)
         deleted, complete = await delete_recent_messages(message.bot, journal, message.chat.id)
         if not complete:
-            await message.answer(CLEAN_PARTIAL)
+            await message.answer(i18n.text(language, "clean.partial"))
         elif deleted:
-            await message.answer(CLEAN_DONE)
+            await message.answer(i18n.text(language, "clean.done"))
         else:
-            await message.answer(CLEAN_EMPTY)
+            await message.answer(i18n.text(language, "clean.empty"))
 
     @dispatcher.message(Command("subscribe"))
-    async def subscribe(message: Message):
+    async def subscribe(message: Message, state: FSMContext | None = None):
         if (message.chat.type != "private" or message.from_user is None
                 or message.from_user.is_bot or message.chat.id != message.from_user.id):
             return
-        if notification_transport is None:
-            await message.answer("Уведомления не настроены в этом запуске; подписка недоступна.")
+        language = await language_of(state)
+        style = chat_style(await style_of(state), message)
+        await deliver_subscription(message, message.from_user.id, language, style)
+
+    @dispatcher.message(Command("stats"))
+    async def stats_command(message: Message, state: FSMContext | None = None):
+        language = await language_of(state)
+        style = chat_style(await style_of(state), message)
+        if message.chat.type != "private":
+            await message.answer(i18n.text(language, "stats.private_only"))
             return
-        try:
-            result = await notification_transport.subscribe_notifications(message.from_user.id)
-        except OrganizerRequiredError:
-            await message.answer("Подписаться может только организатор, чей Telegram-аккаунт связан с этой командой.")
+        if message.from_user is None or message.from_user.is_bot:
             return
-        except TransportError:
-            await message.answer("Не удалось включить уведомления. Проверьте подключение бота и настройки сервера.")
-            return
-        if result.get("notificationsEnabled") is True:
-            await message.answer("Подписка включена. Уведомления о закрытых опубликованных периодах будут приходить сюда.")
-        else:
-            await message.answer(
-                "Подписка сохранена, но серверная отправка уведомлений выключена. "
-                "Администратору нужно настроить доставку на сервере."
-            )
+        await deliver_stats(message, message.from_user.id, language, style)
 
     async def submit_intake_text(message: Message, text: str) -> None:
         if intake is None or message.chat.type == "private" or message.from_user is None:
@@ -326,68 +657,41 @@ def create_dispatcher(
             await intake.reconcile_pause()
 
     @dispatcher.callback_query(F.data.startswith("consent:") | F.data.startswith("score:"))
-    async def callback(event: CallbackQuery):
+    async def callback(event: CallbackQuery, state: FSMContext | None = None):
+        language = await language_of(state)
         message = event.message
         if (message is None or getattr(getattr(message, "chat", None), "type", None) != "private"
                 or event.from_user.is_bot or not callable(getattr(message, "answer", None))):
-            await event.answer("Чек-ин доступен в личном диалоге")
+            await event.answer(i18n.text(language, "alert.checkin_private"))
             return
         try:
+            style = chat_style(await style_of(state), message)
             parts = event.data.split(":")
             if parts[0] == "consent" and len(parts) == 3:
                 if parts[2] not in ("yes", "no"):
                     raise ValueError("Неверный выбор")
                 accepted = flow.consent(event.from_user.id, parts[1], parts[2] == "yes")
                 await event.answer()
+                await clear_buttons(message)
                 if accepted:
-                    await question(message, parts[1], 0)
+                    await question(message, parts[1], 0, language, style)
                 else:
-                    await message.answer("Отказ принят. Черновик удалён. Меню — /start.")
+                    await message.answer(i18n.styled_text(language, style, "consent.declined"))
             elif parts[0] == "score" and len(parts) == 4:
                 step = int(parts[2])
                 result = flow.answer(event.from_user.id, parts[1], step, int(parts[3]))
                 await event.answer()
+                await clear_buttons(message)
                 if result is not None:
-                    if checkin_transport is not None:
-                        try:
-                            await checkin_transport.submit_personal_checkin(
-                                event.from_user.id, result, parts[1],
-                            )
-                            await message.answer(
-                                "Спасибо, чек-ин завершён. Три оценки переданы на сервер; "
-                                "организатор увидит общую сводку, когда ответов достаточно. Меню — /start."
-                            )
-                        except PausedError:
-                            await message.answer(
-                                "Чек-ин завершён, но сервер отклонил передачу. "
-                                "Проверьте, что вы участник команды, или обратитесь к организатору. Меню — /start."
-                            )
-                        except TransportError:
-                            await message.answer(
-                                "Чек-ин завершён, но подтвердить передачу на сервер не удалось. "
-                                "Ответы могли не сохраниться; попробуйте позже или обратитесь к организатору. "
-                                "Меню — /start."
-                            )
-                    else:
-                        await message.answer(
-                            "Спасибо, личный демо-чек-ин завершён. Черновик очищен из памяти; "
-                            "ответы не отправлялись на сервер или в командный кабинет. Меню — /start."
-                        )
+                    await submit_checkin(
+                        message, event.from_user.id, result, parts[1], language, style,
+                    )
                 else:
-                    await question(message, parts[1], step + 1)
+                    await question(message, parts[1], step + 1, language, style)
             else:
                 raise ValueError("Неверная кнопка")
         except ValueError as error:
-            public_errors = {
-                "Этот чек-ин истёк. Начните заново: /start": "Этот чек-ин истёк. Откройте /start и начните заново.",
-                "Выбор уже обработан": "Этот выбор уже обработан. Откройте /start для нового сценария.",
-                "Эта кнопка устарела. Ответьте на текущий вопрос.": "Кнопка устарела. Откройте /start и начните заново.",
-                "Выберите целую оценку от 1 до 5": "Выберите целую оценку от 1 до 5.",
-                "Неверный выбор": "Выберите один из вариантов кнопками.",
-            }
-            public_message = public_errors.get(
-                str(error), "Не удалось обработать выбор. Откройте /start и попробуйте снова."
-            )
+            public_message = i18n.text(language, ERROR_KEYS.get(str(error), "error.generic"))
             await event.answer(public_message, show_alert=True)
 
     return dispatcher, flow
@@ -418,8 +722,11 @@ async def main():
         except ValueError as error:
             raise SystemExit(str(error)) from None
     data_dir = Path(os.environ.get("VIBEBOT_DATA_DIR", ".data"))
-    journal_name = "bot-clean-" + sha256((binding_id or "default").encode()).hexdigest() + ".json"
+    suffix = sha256((binding_id or "default").encode()).hexdigest()
+    journal_name = "bot-clean-" + suffix + ".json"
     message_log = SentMessageJournal(data_dir / journal_name)
+    question_image_cache = QuestionImageCache(data_dir / ("bot-question-images-" + suffix + ".json"))
+    checkin_history = CheckinHistoryJournal(data_dir / ("bot-checkin-history-" + suffix + ".json"))
 
     if api_token and binding_id and chat_id_raw:
         try:
@@ -452,7 +759,16 @@ async def main():
             company_accepted=True,
         ), transport, PauseState(pause_path))
         await intake.reconcile_pause()
-    dispatcher, flow = create_dispatcher(intake, voice_transcription, transport, transport, message_log)
+    dispatcher, flow = create_dispatcher(
+        intake=intake,
+        voice=voice_transcription,
+        notification_transport=transport,
+        checkin_transport=transport,
+        stats_transport=transport,
+        message_log=message_log,
+        question_images=question_image_cache,
+        checkin_history=checkin_history,
+    )
 
     async def cleanup():
         while True:
@@ -466,6 +782,8 @@ async def main():
     task = asyncio.create_task(cleanup())
     try:
         async with JournalBot(token=token, journal=message_log) as bot:
+            reminder_scheduler = CheckinReminderScheduler(bot=bot, journal=checkin_history)
+            reminder_task = asyncio.create_task(reminder_scheduler.start_loop())
             print("Vibee: запускаю подключение к Telegram. Для проверки отправьте /start.", flush=True)
             try:
                 await bot.set_my_commands(BOT_COMMANDS)
@@ -475,8 +793,11 @@ async def main():
             await dispatcher.start_polling(bot, allowed_updates=dispatcher.resolve_used_update_types(), handle_signals=True)
     finally:
         task.cancel()
+        reminder_task.cancel()
         with suppress(asyncio.CancelledError):
             await task
+        with suppress(asyncio.CancelledError):
+            await reminder_task
         flow.drafts.clear()
         if voice_transcription is not None:
             await voice_transcription.close()

@@ -3,10 +3,12 @@
 import asyncio
 from collections import deque
 from datetime import datetime, timezone
+import logging
 from math import isfinite
+import os
 from time import monotonic
 from typing import Callable
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from uuid import uuid4
 
 import httpx
@@ -14,12 +16,34 @@ import httpx
 from .intake import BindingStatus
 
 
+logger = logging.getLogger(__name__)
+
 # Сколько хранить отправленные eventId, чтобы не отправить событие дважды.
 DEDUP_TTL_SECONDS = 24 * 60 * 60
 
 
 class TransportError(Exception):
     """Сетевая ошибка или непредвиденный ответ сервера без данных события."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        kind: str = "transport",
+        request_id: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.kind = kind
+        self.request_id = request_id
+
+
+def http_error_kind(error: BaseException) -> str:
+    """Короткий тип сетевой ошибки для логов и сообщений."""
+    if isinstance(error, httpx.TimeoutException):
+        return "timeout"
+    if isinstance(error, httpx.RequestError):
+        return "network"
+    return "transport"
 
 
 class StaleRevisionError(TransportError):
@@ -84,13 +108,15 @@ class HttpTransport:
         if self._is_duplicate(event_id):
             # Событие уже подтверждено сервером: повтор не нужен даже без сети.
             return {"eventId": event_id, "result": "duplicate"}
-        headers = self._post_headers()
+        headers, request_id = self._post_headers()
+        last_error: BaseException | None = None
         for attempt in range(3):
             if (self._now() - sent_at).total_seconds() > 60:
                 break
             try:
                 response = await self._client.post(url, headers=headers, json=payload)
-            except (httpx.TimeoutException, httpx.RequestError):
+            except (httpx.TimeoutException, httpx.RequestError) as error:
+                last_error = error
                 response = None
             if response is not None:
                 if response.status_code not in {429} and response.status_code < 500:
@@ -118,7 +144,13 @@ class HttpTransport:
                 if delay < 0 or (self._now() - sent_at).total_seconds() + delay > 60:
                     break
                 await self._sleep(delay)
-        raise DeliveryUncertainError("Vibee event delivery could not be confirmed")
+        kind = http_error_kind(last_error) if last_error is not None else "server"
+        logger.warning("Vibee event delivery failed kind=%s request_id=%s", kind, request_id)
+        raise DeliveryUncertainError(
+            "Vibee event delivery could not be confirmed",
+            kind=kind,
+            request_id=request_id,
+        )
 
     async def pause_transport_gap(self, expected_revision: int) -> BindingStatus:
         return await self._pause(expected_revision, "transport_gap", str(uuid4()))
@@ -128,12 +160,17 @@ class HttpTransport:
 
     async def _pause(self, expected_revision: int, reason: str, request_id: str) -> BindingStatus:
         url = f"{self._base_url}/api/bot/v1/bindings/{self._binding_id}/pause"
+        headers, http_request_id = self._post_headers()
         try:
-            response = await self._client.post(url, headers=self._post_headers(), json={
+            response = await self._client.post(url, headers=headers, json={
                 "requestId": request_id, "expectedRevision": expected_revision, "reason": reason,
             })
         except (httpx.TimeoutException, httpx.RequestError) as error:
-            raise TransportError("Vibee pause request failed") from error
+            kind = http_error_kind(error)
+            logger.warning("Vibee pause request failed kind=%s request_id=%s", kind, http_request_id)
+            raise TransportError(
+                "Vibee pause request failed", kind=kind, request_id=http_request_id,
+            ) from error
         body = self._response_body(response)
         if response.status_code == 409 and self._error_code(body) == "STALE_REVISION":
             raise StaleRevisionError("Binding revision is stale")
@@ -162,23 +199,50 @@ class HttpTransport:
         except (KeyError, TypeError):
             raise TransportError("Vibee API returned an invalid binding status") from None
 
-    async def get_summary(self, binding_id: str | None = None) -> dict[str, object]:
-        """Сводка для бота появится после отдельного авторизованного маршрута."""
+    async def get_summary(
+        self,
+        binding_id: str | None = None,
+        telegram_user_id: int | None = None,
+    ) -> dict[str, object]:
+        """Сводка команды для связанного организатора."""
         self._check_binding_id(binding_id)
-        raise TransportError("Telegram summary delivery is not implemented")
+        if type(telegram_user_id) is not int or telegram_user_id < 1:
+            raise TransportError("Invalid Telegram user")
+        url = (
+            f"{self._base_url}/api/bot/v1/bindings/{self._binding_id}/summary?"
+            + urlencode({"telegramUserId": str(telegram_user_id)})
+        )
+        response = await self._get(url)
+        body = self._response_body(response)
+        if response.status_code == 200 and isinstance(body.get("status"), str):
+            return body
+        if response.status_code == 403 and self._error_code(body) == "ORGANIZER_REQUIRED":
+            raise OrganizerRequiredError("Only a linked organizer can read the team summary")
+        raise TransportError("Vibee rejected the team summary request")
+
+    @property
+    def web_url(self) -> str:
+        """Адрес веб-кабинета: VIBEE_WEB_URL или тот же сервер."""
+        configured = os.environ.get("VIBEE_WEB_URL", "").strip()
+        return (configured or self._base_url).rstrip("/")
 
     async def subscribe_notifications(self, telegram_user_id: int) -> dict[str, object]:
         """Subscribes a linked organizer's private Telegram chat to period updates."""
         if type(telegram_user_id) is not int or telegram_user_id < 1:
             raise TransportError("Invalid Telegram user")
         url = f"{self._base_url}/api/bot/v1/bindings/{self._binding_id}/notifications/subscribe"
+        headers, request_id = self._post_headers()
         try:
-            response = await self._client.post(url, headers=self._post_headers(), json={
+            response = await self._client.post(url, headers=headers, json={
                 "telegramUserId": str(telegram_user_id),
                 "chatId": str(telegram_user_id),
             })
         except (httpx.TimeoutException, httpx.RequestError) as error:
-            raise TransportError("Vibee notification subscription request failed") from error
+            kind = http_error_kind(error)
+            logger.warning("Vibee notification subscription failed kind=%s request_id=%s", kind, request_id)
+            raise TransportError(
+                "Vibee notification subscription request failed", kind=kind, request_id=request_id,
+            ) from error
         body = self._response_body(response)
         if response.status_code == 200 and body.get("subscribed") is True:
             return body
@@ -212,10 +276,15 @@ class HttpTransport:
             "scores": dict(scores),
             "submittedAt": submitted_at,
         }
+        headers, request_id = self._post_headers()
         try:
-            response = await self._client.post(url, headers=self._post_headers(), json=payload)
+            response = await self._client.post(url, headers=headers, json=payload)
         except (httpx.TimeoutException, httpx.RequestError) as error:
-            raise TransportError("Vibee check-in submission failed") from error
+            kind = http_error_kind(error)
+            logger.warning("Vibee check-in submission failed kind=%s request_id=%s", kind, request_id)
+            raise TransportError(
+                "Vibee check-in submission failed", kind=kind, request_id=request_id,
+            ) from error
         body = self._response_body(response)
         if response.status_code == 200 and body.get("accepted") is True:
             return body
@@ -233,12 +302,21 @@ class HttpTransport:
             raise TransportError("Transport cannot be used for another binding")
 
     async def _get(self, url: str) -> httpx.Response:
+        request_id = str(uuid4())
         try:
-            return await self._client.get(url, headers=self._headers())
+            return await self._client.get(url, headers={
+                **self._headers(), "X-Request-Id": request_id,
+            })
         except httpx.TimeoutException as error:
-            raise TransportError("Vibee API request timed out") from error
+            logger.warning("Vibee API request failed kind=timeout request_id=%s", request_id)
+            raise TransportError(
+                "Vibee API request timed out", kind="timeout", request_id=request_id,
+            ) from error
         except httpx.RequestError as error:
-            raise TransportError("Vibee API request failed") from error
+            logger.warning("Vibee API request failed kind=network request_id=%s", request_id)
+            raise TransportError(
+                "Vibee API request failed", kind="network", request_id=request_id,
+            ) from error
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -246,9 +324,14 @@ class HttpTransport:
             "Content-Type": "application/json",
         }
 
-    def _post_headers(self) -> dict[str, str]:
-        """Заголовки POST: уникальный X-Request-Id для журналов сервера."""
-        return {**self._headers(), "X-Request-Id": str(uuid4())}
+    def _post_headers(self) -> tuple[dict[str, str], str]:
+        """Заголовки POST: уникальный X-Request-Id для журналов сервера.
+
+        Возвращает заголовки и сам id — он остаётся тем же при повторах
+        одного события и попадает в лог при сетевой ошибке.
+        """
+        request_id = str(uuid4())
+        return {**self._headers(), "X-Request-Id": request_id}, request_id
 
     def _is_duplicate(self, event_id: str) -> bool:
         """Проверяет, подтверждал ли сервер этот eventId за последние 24 часа."""

@@ -705,6 +705,22 @@ test('HTTP/SQLite: four authors or 19 messages yield insufficient without number
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM telegram_period_authors').get().n, 0)
 })
 
+test('HTTP/SQLite: bot summary is limited to a linked organizer of its binding', async t => {
+  const f = await fixture(t)
+  await publishForRecommendation(f)
+  const expected = (await f.summary()).body
+  assert.equal(expected.status, 'published')
+
+  assert.deepEqual(await f.bot('summary?telegramUserId=100000001'), { status: 200, body: expected })
+  error(await f.bot('summary?telegramUserId=100000002'), 403, 'ORGANIZER_REQUIRED')
+  error(await f.bot('summary?telegramUserId=999999999'), 403, 'ORGANIZER_REQUIRED')
+  error(await f.bot('summary?telegramUserId=100000001', undefined, f.id, bootstrapCredential),
+    401, 'BOT_AUTH_REQUIRED')
+  error(await f.bot('summary'), 400, 'INVALID_INPUT')
+  error(await f.bot('summary?telegramUserId=100000001', undefined, f.otherBindingId, credential),
+    404, 'NOT_FOUND')
+})
+
 test('HTTP/SQLite: three synthetic closed dates publish only aggregate metrics and expire after seven days', async t => {
   const f = await fixture(t)
   const active = await f.activate()

@@ -3,7 +3,25 @@ import type { CommunicationHistory, CommunicationView } from '../../core/telegra
 import { api, ApiError } from '../../core/client'
 import { RequestError } from '../../core/RequestError'
 import { InsightsWidget } from './InsightsWidget'
+import type { InsightsMetrics } from './InsightsWidget'
+import { CuteBeeMagnifier } from '../../core/CuteBeeMagnifier'
+import { ShareCardButton } from './ShareCardButton'
+import { formatSharePeriod } from './shareCard'
+import type { ShareCardData } from './shareCard'
 import './TeamPulse.css'
+
+/** Только опубликованные агрегаты попадают в шеринговую карточку. */
+function shareData(source: { period: { start: string; end: string }; metrics: InsightsMetrics }, demo?: boolean): ShareCardData {
+  return {
+    periodLabel: formatSharePeriod(source.period.start, source.period.end),
+    metrics: {
+      outsideHoursPercent: source.metrics.outsideHoursPercent,
+      participationEvenness: source.metrics.participationEvenness,
+      recognitionPercent: source.metrics.recognitionPercent,
+    },
+    demo: Boolean(demo),
+  }
+}
 
 export function pulsePeriodLabel(view: { period: { start: string; end: string } }) {
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
@@ -17,9 +35,9 @@ const explanations = {
   disconnected: 'История пока не собирается: нет активной привязки Telegram-чата.',
   paused: 'Сбор приостановлен. Показатели скрыты до возобновления с согласиями участников.',
   awaiting_consents: 'История пока не собирается: ожидается согласие всех участников.',
-  calibrating: 'Показатели пока недоступны: настройка и калибровка не завершены.',
-  open: 'Текущий период ещё собирается. Показатели появятся после его завершения, если данных будет достаточно.',
-  insufficient: 'Недостаточно данных участников для публикации показателей. Отсутствие данных не означает ноль.',
+  calibrating: 'Мы собираем данные... Мы анализируем первые сообщения, чтобы понять стиль и ритм вашей команды.',
+  open: 'Текущий период ещё собирается. Пригласите коллег поделиться чек-ином, и показатели появятся!',
+  insufficient: 'Пока нет данных для анализа. Пригласите коллег в чат, и мы начнём!',
   error: 'Анализ чата временно недоступен. Показатели скрыты.',
 }
 
@@ -35,6 +53,7 @@ export function PulseHistory({ history }: { history: CommunicationHistory }) {
             Вне графика: {period.metrics.outsideHoursPercent}% · Участие: {period.metrics.participationEvenness}% · Благодарности: {period.metrics.recognitionPercent}%
           </span></summary>
           <InsightsWidget state="published" metrics={period.metrics} periodLabel={pulsePeriodLabel(period)} demo={history.demo}/>
+          <div className="team-pulse__share-row team-pulse__share-row--end"><ShareCardButton data={shareData(period, history.demo)}/></div>
         </details> : <>
           <h3>{pulsePeriodLabel(period)}</h3>
           <p>{explanations[period.status]}</p>
@@ -103,9 +122,18 @@ export function TeamPulse({ bindingId = null, view, loading, error, onRetry, ret
         setResult(null); setAttempt(value => value + 1)
       }}/> : !history ? <p role="status">Загружаем историю…</p> : <PulseHistory history={history}/>}
     </> : view?.status === 'published' ? <>
-      <p>Данные доступны за опубликованный период. Это текущая сводка, а не итог за неделю или месяц.</p>
+      <div className="team-pulse__share-row">
+        <p>Данные доступны за опубликованный период. Это текущая сводка, а не итог за неделю или месяц.</p>
+        <ShareCardButton data={shareData(view, view.demo)}/>
+      </div>
       {view.demo && <p className="team-pulse__demo">Демо: вымышленные данные, не реальные сообщения команды.</p>}
       <InsightsWidget state="published" metrics={view.metrics} periodLabel={pulsePeriodLabel(view)} demo={view.demo}/>
-    </> : view && <p role="status">{explanations[view.status]}</p>}
+    </> : view?.status === 'calibrating' ? (
+      <div className="team-pulse__calibrating">
+        <CuteBeeMagnifier size={80} />
+        <h3 className="team-pulse__calibrating-title">Мы собираем данные...</h3>
+        <p role="status" className="team-pulse__hint">{explanations.calibrating}</p>
+      </div>
+    ) : view && <p role="status">{explanations[view.status]}</p>}
   </section>
 }
