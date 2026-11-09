@@ -7,6 +7,17 @@
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-11-09
+
+### Added
+
+- 📊 Команда `/stats` с прогресс-барами в боте
+- 💬 Три режима общения в боте (Классик, Ми-ми-ми, Правдарубка)
+- 🎨 Липкая шапка сайта с эффектом матового стекла
+- 📈 Крупные KPI-карточки в дашборде
+- 🐝 Пчелка с лупой для состояния калибровки
+- 📱 Мобильная адаптация до 360px
+
 ## [1.1.2] - 2026-11-09
 
 ### Added
@@ -41,7 +52,8 @@
 
 - Первый стабильный релиз Vibee.
 
-[Unreleased]: https://github.com/augustteske/vibebot/compare/v1.1.2...HEAD
+[Unreleased]: https://github.com/augustteske/vibebot/compare/v1.1.4...HEAD
+[1.1.4]: https://github.com/augustteske/vibebot/compare/v1.1.2...v1.1.4
 [1.1.2]: https://github.com/augustteske/vibebot/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/augustteske/vibebot/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/augustteske/vibebot/compare/v1.0.0...v1.1.0
