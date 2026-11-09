@@ -1,7 +1,7 @@
 {
   "name": "vibee",
   "private": true,
-  "version": "1.1.2",
+  "version": "1.1.3",
   "type": "module",
   "scripts": {
     "dev": "node --env-file-if-exists=.env scripts/dev.mjs",
