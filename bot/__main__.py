@@ -35,6 +35,7 @@ from .voice import LocalWhisperProvider, VoiceError, VoiceTranscription, install
 # Меню общее для всех чатов, поэтому подписи русские; сами ответы — на выбранном языке.
 BOT_COMMANDS = [
     BotCommand(command="start", description="Открыть меню сценариев"),
+    BotCommand(command="menu", description="Быстрое меню действий"),
     BotCommand(command="help", description="Доступные команды и сценарии"),
     BotCommand(command="guide", description="Инструкция по подключению Vibee"),
     BotCommand(command="privacy", description="Как бот обрабатывает данные"),
@@ -138,7 +139,16 @@ def create_dispatcher(
                 text=i18n.text(language, "menu.checkin"), callback_data="menu:checkin",
             )],
             [InlineKeyboardButton(
+                text=i18n.text(language, "menu.stats"), callback_data="menu:stats",
+            )],
+            [InlineKeyboardButton(
                 text=i18n.text(language, "menu.leader_message"), callback_data="menu:leader_message",
+            )],
+            [InlineKeyboardButton(
+                text=i18n.text(language, "menu.guide"), callback_data="menu:guide",
+            )],
+            [InlineKeyboardButton(
+                text=i18n.text(language, "menu.settings"), callback_data="menu:settings",
             )],
         ]
         if voice_transcription is not None:
@@ -452,6 +462,10 @@ def create_dispatcher(
             reply_markup=menu_keyboard(language),
         )
 
+    @dispatcher.message(Command("menu"))
+    async def menu_command(message: Message, state: FSMContext | None = None):
+        await start(message, state)
+
     def resolve_guide_url() -> str:
         base = (
             os.environ.get("VIBEE_WEB_URL")
@@ -703,6 +717,56 @@ def create_dispatcher(
         await message.answer(
             i18n.consent_text(language, checkin_transport is not None),
             reply_markup=keyboard,
+        )
+
+    @dispatcher.callback_query(F.data == "menu:stats")
+    async def select_stats(event: CallbackQuery, state: FSMContext | None = None):
+        language = await language_of(state)
+        message = event.message
+        if (message is None or getattr(getattr(message, "chat", None), "type", None) != "private"
+                or event.from_user.is_bot or not callable(getattr(message, "answer", None))):
+            await event.answer(i18n.text(language, "alert.checkin_private_only"), show_alert=True)
+            return
+        style = chat_style(await style_of(state), message)
+        await event.answer()
+        await deliver_stats(message, event.from_user.id, language, style)
+
+    @dispatcher.callback_query(F.data == "menu:guide")
+    async def select_guide(event: CallbackQuery, state: FSMContext | None = None):
+        language = await language_of(state)
+        message = event.message
+        if message is None or not callable(getattr(message, "answer", None)):
+            await event.answer()
+            return
+        await event.answer()
+        url = resolve_guide_url()
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=i18n.text(language, "guide.button"), url=url),
+        ]])
+        await message.answer(
+            i18n.text(language, "guide.text", url=url),
+            reply_markup=keyboard,
+        )
+
+    @dispatcher.callback_query(F.data == "menu:settings")
+    async def select_settings(event: CallbackQuery, state: FSMContext | None = None):
+        language = await language_of(state)
+        message = event.message
+        if (message is None or getattr(getattr(message, "chat", None), "type", None) != "private"
+                or event.from_user.is_bot or not callable(getattr(message, "answer", None))):
+            await event.answer(i18n.text(language, "alert.checkin_private_only"), show_alert=True)
+            return
+        current_style = await style_of(state)
+        await event.answer()
+        lang_kb = language_keyboard(language)
+        style_kb = style_keyboard(language, current_style)
+        combined_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            *lang_kb.inline_keyboard,
+            *style_kb.inline_keyboard,
+        ])
+        await message.answer(
+            i18n.text(language, "menu.settings_prompt"),
+            reply_markup=combined_keyboard,
         )
 
     @dispatcher.callback_query(F.data == "menu:leader_message")

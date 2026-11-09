@@ -38,7 +38,11 @@ _TEXTS: dict[str, dict[str, str]] = {
             "Личные сценарии доступны в личном диалоге."
         ),
         "menu.checkin": "Пройти личный чек-ин",
+        "menu.stats": "📊 Мой статус",
         "menu.leader_message": "✉️ Обратиться к тимлиду",
+        "menu.guide": "📖 Как подключить?",
+        "menu.settings": "⚙️ Настройки",
+        "menu.settings_prompt": "⚙️ Настройки бота:\nВыберите язык интерфейса или стиль общения.",
         "menu.voice": "Расшифровать голосовое",
         "leader_msg.prompt": "Напишите текст вашего обращения к тимлиду:\n(Для отмены отправьте /stop)",
         "leader_msg.choose_type": "Текст получен! Как вы хотите отправить это обращение?",
@@ -388,7 +392,11 @@ _TEXTS: dict[str, dict[str, str]] = {
             "the final status. Personal scenarios are available in a private chat."
         ),
         "menu.checkin": "Take a personal check-in",
+        "menu.stats": "📊 My status",
         "menu.leader_message": "✉️ Message Team Lead",
+        "menu.guide": "📖 How to connect?",
+        "menu.settings": "⚙️ Settings",
+        "menu.settings_prompt": "⚙️ Bot settings:\nChoose interface language or communication style.",
         "menu.voice": "Transcribe a voice message",
         "leader_msg.prompt": "Write your message for the team lead:\n(Send /stop to cancel)",
         "leader_msg.choose_type": "Message received! How would you like to send it?",
