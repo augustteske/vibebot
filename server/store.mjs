@@ -35,6 +35,24 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
     CREATE TABLE IF NOT EXISTS checkins(round_id TEXT NOT NULL REFERENCES rounds(id), voter_key TEXT NOT NULL, energy INTEGER NOT NULL, clarity INTEGER NOT NULL, support INTEGER NOT NULL, PRIMARY KEY(round_id,voter_key));
     CREATE TABLE IF NOT EXISTS actions(id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), round_id TEXT NOT NULL REFERENCES rounds(id), kind TEXT NOT NULL, title TEXT NOT NULL, goal TEXT NOT NULL, created_at TEXT NOT NULL, feedback_closed_at TEXT, feedback_summary TEXT, UNIQUE(round_id,kind));
     CREATE TABLE IF NOT EXISTS feedback(action_id TEXT NOT NULL REFERENCES actions(id), voter_key TEXT NOT NULL, helpful INTEGER NOT NULL CHECK(helpful IN (0,1)), PRIMARY KEY(action_id,voter_key));
+    CREATE TABLE IF NOT EXISTS users(
+      id TEXT PRIMARY KEY,
+      google_id TEXT NOT NULL UNIQUE,
+      email TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      avatar_url TEXT,
+      access_token TEXT,
+      refresh_token TEXT,
+      token_expires_at INTEGER,
+      member_id TEXT REFERENCES members(id),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS oauth_states(
+      state TEXT PRIMARY KEY,
+      return_to TEXT,
+      expires INTEGER NOT NULL
+    );
   `)
   const one = (sql, ...args) => db.prepare(sql).get(...args)
   const all = (sql, ...args) => db.prepare(sql).all(...args)
@@ -62,8 +80,15 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
 
   const telegram = createTelegramStore({ db, secret, bootstrapCredential: telegramBootstrapCredential, fail,
     enabled: telegramSynthetic, now, recommendationProvider, recommendationTimeoutMs })
+  const cleanup = () => tx(() => {
+    const time = now ? now() : Date.now()
+    run('DELETE FROM oauth_states WHERE expires<=?', time)
+  })
+  cleanup()
+
   return {
     telegram,
+    cleanup,
     close: () => db.close(),
     authenticate(token) {
       if (!token || !/^[a-f0-9]{64}$/.test(token)) return null
@@ -115,6 +140,7 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
     snapshot(member) {
       const workspace = one('SELECT id,name FROM workspaces WHERE id=?', member.workspace_id)
       const round = roundFor(member)
+      const user = one('SELECT id,email,name,avatar_url FROM users WHERE member_id=?', member.id)
       const actions = all('SELECT * FROM actions WHERE workspace_id=? ORDER BY rowid DESC LIMIT 12', member.workspace_id).map(action => ({
         id: action.id, title: action.title, goal: action.goal, createdAt: action.created_at,
         feedback: action.feedback_closed_at ? JSON.parse(action.feedback_summary) : { status: 'open' },
@@ -123,12 +149,93 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
       const acceptedKinds = all('SELECT kind FROM actions WHERE round_id=?', round.id).map(row => row.kind)
       return {
         workspace, member: { name: member.name, role: member.role },
+        ...(user ? { user: { id: user.id, email: user.email, name: user.name, avatarUrl: user.avatar_url } } : {}),
         round: { id: round.id, createdAt: round.created_at, closedAt: round.closed_at,
           summary: round.closed_at ? JSON.parse(round.summary) : { status: 'open' },
           mySubmitted: !round.closed_at && !!one('SELECT 1 FROM checkins WHERE round_id=? AND voter_key=?', round.id, key('checkin:' + round.id, member)) },
         suggestions: suggestions(round).filter(item => !acceptedKinds.includes(item.id)), actions,
         mode: 'templates',
       }
+    },
+    saveOAuthState(state, returnTo = '/?mode=team', ttlMs = 600000) {
+      if (!state || typeof state !== 'string' || !state.trim()) fail(400, 'INVALID_INPUT', 'Некорректный state')
+      run('INSERT INTO oauth_states(state,return_to,expires) VALUES(?,?,?)', state.trim(), returnTo, now() + ttlMs)
+    },
+    consumeOAuthState(state) {
+      if (!state || typeof state !== 'string' || !state.trim()) return null
+      return tx(() => {
+        const row = one('SELECT state,return_to,expires FROM oauth_states WHERE state=? AND expires>?', state.trim(), now())
+        if (row) run('DELETE FROM oauth_states WHERE state=?', state.trim())
+        return row ?? null
+      })
+    },
+    loginWithGoogle({ googleId, email, name, avatarUrl, accessToken, refreshToken, expiresIn, existingMemberId }) {
+      if (!googleId || typeof googleId !== 'string' || !googleId.trim()) fail(400, 'INVALID_INPUT', 'Отсутствует google_id')
+      if (!email || typeof email !== 'string' || !email.trim()) fail(400, 'INVALID_INPUT', 'Отсутствует email')
+      const cleanGoogleId = googleId.trim()
+      const cleanEmail = email.trim().toLowerCase().slice(0, 120)
+      const safeName = (typeof name === 'string' && name.trim()) ? name.trim().slice(0, 100) : cleanEmail.split('@')[0]
+      const tokenExpiresAt = Number.isInteger(expiresIn) ? now() + expiresIn * 1000 : null
+      const currentTime = new Date(now()).toISOString()
+
+      return tx(() => {
+        let user = one('SELECT * FROM users WHERE google_id=?', cleanGoogleId)
+        if (!user) user = one('SELECT * FROM users WHERE email=?', cleanEmail)
+
+        let memberId = existingMemberId || user?.member_id
+        if (memberId && !one('SELECT id FROM members WHERE id=?', memberId)) {
+          memberId = null
+        }
+
+        if (!memberId) {
+          const workspaceId = randomUUID()
+          memberId = randomUUID()
+          const workspaceName = `Команда ${safeName}`.slice(0, 80)
+          run('INSERT INTO workspaces VALUES(?,?)', workspaceId, workspaceName)
+          run('INSERT INTO members VALUES(?,?,?,?)', memberId, workspaceId, safeName, 'organizer')
+          createRound(workspaceId)
+        }
+
+        if (user) {
+          run(`UPDATE users SET
+            google_id=?, email=?, name=?, avatar_url=?,
+            access_token=?,
+            refresh_token=COALESCE(?, refresh_token),
+            token_expires_at=?, member_id=?, updated_at=?
+            WHERE id=?`,
+            cleanGoogleId, cleanEmail, safeName, avatarUrl ?? null,
+            accessToken ?? null, refreshToken ?? null,
+            tokenExpiresAt, memberId, currentTime, user.id
+          )
+          user = one('SELECT * FROM users WHERE id=?', user.id)
+        } else {
+          const userId = randomUUID()
+          run(`INSERT INTO users(id, google_id, email, name, avatar_url, access_token, refresh_token, token_expires_at, member_id, created_at, updated_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+            userId, cleanGoogleId, cleanEmail, safeName, avatarUrl ?? null,
+            accessToken ?? null, refreshToken ?? null, tokenExpiresAt,
+            memberId, currentTime, currentTime
+          )
+          user = one('SELECT * FROM users WHERE id=?', userId)
+        }
+
+        const sessionToken = session(memberId)
+        return { sessionToken, user, memberId }
+      })
+    },
+    getUserByMemberId(memberId) {
+      if (!memberId) return null
+      return one('SELECT id, google_id, email, name, avatar_url, token_expires_at, created_at, updated_at FROM users WHERE member_id=?', memberId) ?? null
+    },
+    getGoogleTokensForMember(memberId) {
+      if (!memberId) return null
+      return one('SELECT id, google_id, email, access_token, refresh_token, token_expires_at FROM users WHERE member_id=?', memberId) ?? null
+    },
+    updateGoogleTokens(userId, { accessToken, expiresIn }) {
+      if (!userId || !accessToken) return
+      const tokenExpiresAt = Number.isInteger(expiresIn) ? now() + expiresIn * 1000 : null
+      run('UPDATE users SET access_token=?, token_expires_at=?, updated_at=? WHERE id=?',
+        accessToken, tokenExpiresAt, new Date(now()).toISOString(), userId)
     },
     summary(member) {
       const round = roundFor(member)

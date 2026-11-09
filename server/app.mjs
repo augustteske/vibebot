@@ -1,6 +1,7 @@
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
+import { randomBytes } from 'node:crypto'
 import { AppError, createStore } from './store.mjs'
 
 export function resolveSecureCookies(env = process.env) {
@@ -8,7 +9,15 @@ export function resolveSecureCookies(env = process.env) {
   return cookieSecure === 'true' || (env.NODE_ENV === 'production' && cookieSecure !== 'false')
 }
 
-export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookies = false, allowedOrigins = [], telegramBootstrapCredential, telegramBotToken, telegramFetch = globalThis.fetch, telegramSynthetic = false, now = Date.now, recommendationProvider, recommendationTimeoutMs }) {
+export function createApp({
+  dbPath = ':memory:', secret, staticDir, secureCookies = false, allowedOrigins = [],
+  telegramBootstrapCredential, telegramBotToken, telegramFetch = globalThis.fetch,
+  telegramSynthetic = false, now = Date.now, recommendationProvider, recommendationTimeoutMs,
+  googleClientId = process.env.GOOGLE_CLIENT_ID,
+  googleClientSecret = process.env.GOOGLE_CLIENT_SECRET,
+  googleRedirectUri = process.env.GOOGLE_REDIRECT_URI,
+  oauthFetch = globalThis.fetch,
+}) {
   const store = createStore({ path: dbPath, secret, telegramBootstrapCredential, telegramSynthetic, now,
     recommendationProvider, recommendationTimeoutMs })
   const cleanupTimer = setInterval(() => {
@@ -211,6 +220,107 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
           : operation === 'media-observations' ? store.telegram.acceptMedia(actor, route[2], await body(req, 'INVALID_INPUT'))
           : store.telegram.mutate(actor, route[2], operation, await body(req, 'INVALID_INPUT'))
         return json(res, 200, result)
+      }
+      if (req.method === 'GET' && url.pathname === '/api/auth/google') {
+        if (!googleClientId || !googleClientSecret) {
+          throw new AppError(503, 'UNAVAILABLE', 'Вход через Google не настроен')
+        }
+        const state = randomBytes(32).toString('hex')
+        const returnTo = url.searchParams.get('returnTo') || '/?mode=team'
+        store.saveOAuthState(state, returnTo)
+        const host = req.headers.host || 'localhost:8787'
+        const proto = secureCookies ? 'https' : (req.headers['x-forwarded-proto'] || 'http')
+        const redirectUri = googleRedirectUri || `${proto}://${host}/api/auth/google/callback`
+        const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth')
+        authUrl.searchParams.set('client_id', googleClientId)
+        authUrl.searchParams.set('redirect_uri', redirectUri)
+        authUrl.searchParams.set('response_type', 'code')
+        authUrl.searchParams.set('scope', 'openid email profile https://www.googleapis.com/auth/calendar.events')
+        authUrl.searchParams.set('access_type', 'offline')
+        authUrl.searchParams.set('prompt', 'consent')
+        authUrl.searchParams.set('state', state)
+        res.writeHead(302, { Location: authUrl.toString() })
+        return res.end()
+      }
+      if (req.method === 'GET' && url.pathname === '/api/auth/google/callback') {
+        if (!googleClientId || !googleClientSecret) {
+          throw new AppError(503, 'UNAVAILABLE', 'Вход через Google не настроен')
+        }
+        const oauthError = url.searchParams.get('error')
+        if (oauthError) {
+          throw new AppError(400, 'OAUTH_ERROR', 'Ошибка авторизации Google: ' + oauthError)
+        }
+        const code = url.searchParams.get('code')
+        const state = url.searchParams.get('state')
+        if (!code || !state) {
+          throw new AppError(400, 'INVALID_INPUT', 'Отсутствует код подтверждения или state')
+        }
+        const stateRow = store.consumeOAuthState(state)
+        if (!stateRow) {
+          throw new AppError(400, 'INVALID_STATE', 'Недействительный или устаревший параметр state')
+        }
+        const host = req.headers.host || 'localhost:8787'
+        const proto = secureCookies ? 'https' : (req.headers['x-forwarded-proto'] || 'http')
+        const redirectUri = googleRedirectUri || `${proto}://${host}/api/auth/google/callback`
+        let tokenData
+        try {
+          const tokenRes = await oauthFetch('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+              code,
+              client_id: googleClientId,
+              client_secret: googleClientSecret,
+              redirect_uri: redirectUri,
+              grant_type: 'authorization_code',
+            }),
+          })
+          if (!tokenRes.ok) {
+            throw new AppError(502, 'OAUTH_TOKEN_ERROR', 'Не удалось получить токен от Google')
+          }
+          tokenData = await tokenRes.json()
+        } catch (err) {
+          if (err instanceof AppError) throw err
+          throw new AppError(502, 'OAUTH_TOKEN_ERROR', 'Ошибка при обращении к серверу авторизации Google')
+        }
+
+        let profile
+        try {
+          const userRes = await oauthFetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+            headers: { Authorization: `Bearer ${tokenData.access_token}` },
+          })
+          if (!userRes.ok) {
+            throw new AppError(502, 'OAUTH_USERINFO_ERROR', 'Не удалось получить профиль пользователя от Google')
+          }
+          profile = await userRes.json()
+        } catch (err) {
+          if (err instanceof AppError) throw err
+          throw new AppError(502, 'OAUTH_USERINFO_ERROR', 'Ошибка при получении профиля пользователя от Google')
+        }
+
+        if (!profile.sub || !profile.email) {
+          throw new AppError(502, 'OAUTH_PROFILE_INVALID', 'Неполные данные профиля от Google')
+        }
+
+        const currentMember = store.authenticate(tokenFrom(req))
+        const { sessionToken, user } = store.loginWithGoogle({
+          googleId: profile.sub,
+          email: profile.email,
+          name: profile.name || profile.email,
+          avatarUrl: profile.picture,
+          accessToken: tokenData.access_token,
+          refreshToken: tokenData.refresh_token,
+          expiresIn: tokenData.expires_in,
+          existingMemberId: currentMember?.id,
+        })
+
+        res.setHeader('Set-Cookie', cookie(sessionToken))
+        const isJson = (req.headers.accept || '').includes('application/json')
+        if (isJson) {
+          return json(res, 200, { ok: true, user: { id: user.id, email: user.email, name: user.name } })
+        }
+        res.writeHead(302, { Location: stateRow.return_to || '/?mode=team' })
+        return res.end()
       }
       if (req.method === 'POST') checkBrowser(req)
       const input = req.method === 'POST' ? await body(req) : null

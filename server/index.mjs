@@ -37,6 +37,9 @@ const app = createApp({
   telegramBootstrapCredential,
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
   recommendationProvider,
+  googleClientId: process.env.GOOGLE_CLIENT_ID,
+  googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  googleRedirectUri: process.env.GOOGLE_REDIRECT_URI,
 })
 const host = process.env.HOST ?? '127.0.0.1'
 const port = Number(process.env.PORT ?? 8787)
