@@ -87,14 +87,18 @@ async def send_question_image(
     key: str,
     cache: QuestionImageCache | None,
     image_dir: Path = DEFAULT_IMAGE_DIR,
-) -> str | None:
-    """Отправляет картинку вопроса перед текстом.
+    *,
+    caption: str,
+    reply_markup: object = None,
+) -> bool:
+    """Отправляет вопрос одним сообщением: картинка, текст и кнопки.
 
-    Картинка — украшение: любая ошибка Telegram не должна ломать чек-ин,
-    поэтому здесь нет исключений, только ``None``.
+    Так чат не копит по два сообщения на каждый вопрос. Картинка — украшение:
+    любая ошибка Telegram не должна ломать чек-ин, поэтому здесь нет исключений.
+    Возвращает ``True``, если вопрос ушёл с картинкой; ``False`` — отправьте текст сами.
     """
     if cache is None:
-        return None
+        return False
     path = image_dir / f"{key}.png"
     cached = cache.get(key)
     sources: list[object] = []
@@ -104,7 +108,9 @@ async def send_question_image(
         sources.append(FSInputFile(path))
     for source in sources:
         try:
-            sent = await message.answer_photo(source)
+            sent = await message.answer_photo(
+                source, caption=caption, reply_markup=reply_markup,
+            )
         except Exception as error:  # noqa: BLE001 — картинка не должна ронять сценарий
             logger.warning("Не удалось отправить картинку вопроса %s: %s", key, error)
             if source is cached:
@@ -113,5 +119,5 @@ async def send_question_image(
         file_id = _file_id_of(sent)
         if file_id is not None:
             cache.remember(key, file_id)
-        return file_id
-    return None
+        return True
+    return False

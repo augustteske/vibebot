@@ -39,6 +39,7 @@ class FakeMessage:
         self.answer_photo = AsyncMock(return_value=SimpleNamespace(
             photo=[SimpleNamespace(file_id=photo_file_id)],
         ))
+        self.edit_reply_markup = AsyncMock()
         self.bot = FakeBot()
 
 
@@ -222,7 +223,7 @@ class QuestionImageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(message.answer_photo.await_count, 2)
             self.assertIsInstance(message.answer_photo.await_args_list[1].args[0], FSInputFile)
             self.assertEqual(cache.get("energy"), "fresh-file-id")
-            self.assertTrue(message.answer.await_args.args[0].startswith("1/3"))
+            self.assertTrue(message.answer_photo.await_args.kwargs["caption"].startswith("1/3"))
 
     async def test_failed_photo_does_not_break_the_question(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -262,6 +263,42 @@ class QuestionImageTests(unittest.IsolatedAsyncioTestCase):
 
         message.answer_photo.assert_not_awaited()
         self.assertTrue(message.answer.await_args.args[0].startswith("1/3"))
+
+    async def test_question_arrives_as_one_message_and_old_buttons_disappear(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = QuestionImageCache(Path(directory) / "images.json")
+            dispatcher, flow = create_dispatcher(question_images=cache)
+            message = FakeMessage(photo_file_id="telegram-file-id")
+
+            await handler(dispatcher.message, "start")(message)
+            await handler(dispatcher.callback_query, "select_checkin")(SimpleNamespace(
+                message=message, from_user=message.from_user,
+                data="menu:checkin", answer=AsyncMock(),
+            ))
+            nonce = message.answer.await_args.kwargs["reply_markup"].inline_keyboard[0][0].callback_data.split(":")[1]
+            await handler(dispatcher.callback_query, "callback")(SimpleNamespace(
+                message=message, from_user=message.from_user,
+                data=f"consent:{nonce}:yes", answer=AsyncMock(),
+            ))
+
+            # Вопрос — одно сообщение: картинка, текст и кнопки вместе.
+            self.assertEqual(message.answer_photo.await_count, 1)
+            caption = message.answer_photo.await_args.kwargs["caption"]
+            keyboard = message.answer_photo.await_args.kwargs["reply_markup"]
+            self.assertTrue(caption.startswith("1/3"))
+            self.assertEqual(keyboard.inline_keyboard[0][0].callback_data, f"score:{nonce}:0:1")
+            self.assertEqual(message.answer.await_count, 2)  # только приветствие и согласие
+
+            # Ответили — кнопки прошлого шага убираются, чтобы не путали.
+            self.assertIsNone(message.edit_reply_markup.await_args.kwargs["reply_markup"])
+            await handler(dispatcher.callback_query, "callback")(SimpleNamespace(
+                message=message, from_user=message.from_user,
+                data=f"score:{nonce}:0:4", answer=AsyncMock(),
+            ))
+            self.assertIsNone(message.edit_reply_markup.await_args.kwargs["reply_markup"])
+            self.assertTrue(
+                message.answer_photo.await_args.kwargs["caption"].startswith("2/3"),
+            )
 
 
 if __name__ == "__main__":

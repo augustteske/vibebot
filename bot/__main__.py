@@ -192,24 +192,35 @@ def create_dispatcher(
         else:
             await message.answer(i18n.text(language, "subscribe.disabled"))
 
-    async def question(message, nonce, step, language):
+    async def clear_buttons(message) -> None:
+        """Убирает кнопки у уже отвеченного шага, чтобы чат не копил старые."""
+        edit = getattr(message, "edit_reply_markup", None)
+        if not callable(edit):
+            return
+        try:
+            await edit(reply_markup=None)
+        except Exception as error:  # noqa: BLE001 — кнопки не должны ронять сценарий
+            logging.getLogger(__name__).debug("Не удалось убрать кнопки шага: %s", error)
+
+    async def question(message, nonce, step, language) -> None:
+        """Задаёт вопрос одним сообщением: картинка, текст и оценки."""
         key = QUESTION_KEYS[step]
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text=str(n), callback_data=f"score:{nonce}:{step}:{n}")
             for n in range(1, 6)
         ]])
-        await send_question_image(
+        text = i18n.text(
+            language, "question.ask",
+            index=step + 1, total=len(QUESTION_KEYS),
+            question=i18n.question(language, key),
+        )
+        sent_with_photo = await send_question_image(
             message, key, question_images,
             question_images_dir or DEFAULT_IMAGE_DIR,
+            caption=text, reply_markup=keyboard,
         )
-        await message.answer(
-            i18n.text(
-                language, "question.ask",
-                index=step + 1, total=len(QUESTION_KEYS),
-                question=i18n.question(language, key),
-            ),
-            reply_markup=keyboard,
-        )
+        if not sent_with_photo:
+            await message.answer(text, reply_markup=keyboard)
 
     @dispatcher.message(CommandStart())
     async def start(message: Message, state: FSMContext | None = None):
@@ -485,6 +496,7 @@ def create_dispatcher(
                     raise ValueError("Неверный выбор")
                 accepted = flow.consent(event.from_user.id, parts[1], parts[2] == "yes")
                 await event.answer()
+                await clear_buttons(message)
                 if accepted:
                     await question(message, parts[1], 0, language)
                 else:
@@ -493,6 +505,7 @@ def create_dispatcher(
                 step = int(parts[2])
                 result = flow.answer(event.from_user.id, parts[1], step, int(parts[3]))
                 await event.answer()
+                await clear_buttons(message)
                 if result is not None:
                     await submit_checkin(message, event.from_user.id, result, parts[1], language)
                 else:
