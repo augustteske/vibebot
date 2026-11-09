@@ -314,8 +314,16 @@
   flex-shrink: 0;
 }
 
+/* Угол светящейся точки на обводке кнопки «Попробовать за 60 секунд». */
+@property --landing-rim-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
 /* Landing Page Magic CTA Button */
 .landing-cta-magic {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -342,6 +350,54 @@
   box-shadow:
     0 12px 30px -4px rgba(234, 88, 12, 0.55),
     0 0 0 1px rgba(255, 255, 255, 0.35) inset;
+}
+
+/* Обводка: точка с хвостом плавно, без остановок обегает ореол кнопки за 2 секунды и начинает путь заново. */
+.landing-cta-magic::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  padding: 3px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--landing-rim-angle),
+    rgba(255, 255, 255, 0) 0deg,
+    rgba(255, 255, 255, 0) 286deg,
+    rgba(255, 247, 216, 0.22) 318deg,
+    rgba(255, 250, 232, 0.6) 342deg,
+    rgba(255, 255, 255, 0.96) 354deg,
+    #ffffff 358deg,
+    rgba(255, 255, 255, 0) 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  filter: drop-shadow(0 0 5px rgba(255, 226, 148, 0.9));
+  pointer-events: none;
+  animation: landingRimSweep 2s linear infinite;
+}
+
+@keyframes landingRimSweep {
+  0% {
+    --landing-rim-angle: 0deg;
+  }
+  100% {
+    --landing-rim-angle: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-cta-magic::before {
+    animation: none;
+    background: conic-gradient(
+      from 0deg,
+      rgba(255, 255, 255, 0.2) 0deg,
+      rgba(255, 249, 226, 0.85) 60deg,
+      rgba(255, 255, 255, 0.2) 150deg,
+      rgba(255, 255, 255, 0.2) 360deg
+    );
+  }
 }
 
 @keyframes magicPulse {
