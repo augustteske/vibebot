@@ -2,7 +2,7 @@ services:
   web:
     build: .
     ports:
-      - "8787:8787"
+      - "0.0.0.0:8787:8787"
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
@@ -40,7 +40,7 @@ services:
     depends_on:
       web:
         condition: service_healthy
-    restart: "no"
+    restart: unless-stopped
 volumes:
   vibebot_data:
   vibebot_bot_data:

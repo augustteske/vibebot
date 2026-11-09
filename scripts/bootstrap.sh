@@ -100,8 +100,13 @@ if [[ ! -f .env ]]; then
   if [[ -f .env.example ]]; then
     cp .env.example .env
     chmod 600 .env || true
-    printf '%s\n' "Заполните .env (токен бота, домен) и запустите снова"
-    exit 1
+    server_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+    if [[ -n "${server_ip:-}" ]]; then
+      sed -i "s|APP_ORIGIN=http://127.0.0.1:5173|APP_ORIGIN=http://${server_ip}:8787|g" .env || true
+    else
+      sed -i "s|APP_ORIGIN=http://127.0.0.1:5173|APP_ORIGIN=http://127.0.0.1:8787|g" .env || true
+    fi
+    printf '%s\n' "Создан файл .env на основе .env.example."
   else
     printf '%s\n' "Не найден .env.example — невозможно подготовить .env." >&2
     exit 1
@@ -118,11 +123,19 @@ if ! docker info >/dev/null 2>&1 && [[ "$(id -u)" -ne 0 ]]; then
   fi
 fi
 
+printf '%s\n' "Запускаю сборку и старт контейнеров Vibee..."
 "${docker_cmd[@]}" compose up -d --build
 
 server_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+printf '\n%s\n' "======================================================"
+printf '%s\n' "   Vibee успешно запущен!"
+printf '%s\n' "======================================================"
+printf '%s\n' "Проверка здоровья: curl http://127.0.0.1:8787/api/health"
 if [[ -n "${server_ip:-}" ]]; then
-  printf 'Vibee успешно запущен! Проверьте http://%s:8787 (http://IP:8787)\n' "$server_ip"
+  printf 'Веб-кабинет: http://%s:8787\n' "$server_ip"
 else
-  printf '%s\n' "Vibee успешно запущен! Проверьте http://IP:8787"
+  printf '%s\n' "Веб-кабинет: http://<IP-сервера>:8787"
 fi
+printf '%s\n' "Для подключения Telegram-бота задайте TELEGRAM_BOT_TOKEN в файле .env"
+printf '%s\n' "и перезапустите: docker compose up -d --build"
+printf '%s\n' "======================================================"
