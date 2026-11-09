@@ -2,8 +2,11 @@
 
 Русские строки — исходные, английские лежат рядом в том же словаре. Ключи
 плоские: ``"start.private"``. Подстановки — через ``{имя}`` и ``text(...)``.
+Режимы общения добавляют ключи с префиксом: ``"cute.start.private"``.
 """
 from __future__ import annotations
+
+from . import styles
 
 RU = "ru"
 EN = "en"
@@ -112,6 +115,7 @@ _TEXTS: dict[str, dict[str, str]] = {
         "help.stop": "/stop — отменить текущий чек-ин или расшифровку",
         "help.clean": "/clean — удалить сообщения бота в этом чате (до 48 часов)",
         "help.lang": "/lang ru | en — язык ответов бота",
+        "help.style": "/style — режим общения: классик, ми-ми-ми или правдарубка",
         "help.transcribe": "/transcribe — запросить расшифровку одной личной голосовой",
         "help.voice_unavailable": (
             "Расшифровка голосовых сейчас недоступна: локальная модель не настроена."
@@ -176,6 +180,85 @@ _TEXTS: dict[str, dict[str, str]] = {
         "lang.current": "Текущий язык: {name}.",
         "lang.usage": "Сменить: /lang ru или /lang en.",
         "lang.invalid": "Не понял язык. Доступно: /lang ru или /lang en.",
+        "style.current": (
+            "Сейчас режим: «{name}». Выберите новый — он сохранится до перезапуска бота."
+        ),
+        "style.usage": "Сменить: /style classic, /style cute или /style straight.",
+        "style.saved": "Готово: теперь общаемся в режиме «{name}».",
+        "style.invalid": "Не знаю такого режима. Доступны: classic, cute, straight.",
+        "style.private_only": "Режим общения можно менять только в личном чате с ботом.",
+        "style.name.classic": "Классик",
+        "style.name.cute": "Ми-ми-ми",
+        "style.name.straight": "Правдарубка",
+        "cute.start.private": "Приветик! Я Vibee 🐝💛 Выбери, чем займёмся. О данных — /privacy.",
+        "cute.question.ask": (
+            "{index}/{total} · {question}\n"
+            "Поставь от 1 до 5, как чувствуешь 🌸 Передумал — /stop."
+        ),
+        "cute.consent.declined": "Хорошо, отказ принят 💛 Черновик удалён. Меню — /start.",
+        "cute.checkin.done.server": (
+            "Спасибо, что поделился! 💛 Чек-ин готов: три оценки улетели на сервер. "
+            "Организатор увидит только общую сводку. Меню — /start."
+        ),
+        "cute.checkin.done.paused": (
+            "Чек-ин готов, но сервер его не принял 😔 Проверь, что ты участник команды, "
+            "или напиши организатору. Меню — /start."
+        ),
+        "cute.checkin.done.unknown": (
+            "Чек-ин готов, но подтвердить отправку не получилось 😔 "
+            "Ответы могли не сохраниться — попробуй позже. Меню — /start."
+        ),
+        "cute.checkin.done.demo": (
+            "Спасибо, что поделился! 💛 Демо-чек-ин готов, ответы остались только у нас "
+            "и никуда не ушли. Меню — /start."
+        ),
+        "cute.stop.with_transport": (
+            "Остановила сценарий 💛 Черновик и разрешение на расшифровку очищены. "
+            "Уже переданные на сервер ответы не удаляются; для сообщений есть /clean."
+        ),
+        "cute.stop.without_transport": (
+            "Остановила сценарий 💛 Черновик и разрешение на расшифровку очищены. "
+            "Сообщения в Telegram остаются — для них есть /clean."
+        ),
+        "cute.subscribe.enabled": (
+            "Подписка включена 💛 Уведомления о закрытых опубликованных периодах будут приходить сюда."
+        ),
+        "cute.style.saved": "Готово: теперь общаемся в режиме «{name}» 💛",
+        "straight.start.private": (
+            "Привет. Vibee на связи. Выбирай сценарий, без лишней болтовни — "
+            "она нахер не сдалась. Данные — /privacy."
+        ),
+        "straight.question.ask": (
+            "{index}/{total} · {question}\nСтавь от 1 до 5. Надоело — /stop."
+        ),
+        "straight.consent.declined": "Ладно, отказ принят. Черновик удалён. Меню — /start.",
+        "straight.checkin.done.server": (
+            "Готово. Оценки ушли на сервер. Организатор увидит только общую сводку. "
+            "Меню — /start."
+        ),
+        "straight.checkin.done.paused": (
+            "Чек-ин готов, но сервер отклонил отправку — херня какая-то. "
+            "Проверь, что ты в команде, или напиши организатору. Меню — /start."
+        ),
+        "straight.checkin.done.unknown": (
+            "Чек-ин готов, но отправку не подтвердили. Ответы могли не сохраниться — "
+            "попробуй позже. Меню — /start."
+        ),
+        "straight.checkin.done.demo": (
+            "Готово. Демо-чек-ин закрыт, никуда ничего не ушло. Меню — /start."
+        ),
+        "straight.stop.with_transport": (
+            "Стоп. Черновик и разрешение на расшифровку очищены. "
+            "Уже отправленные ответы не удаляются; для сообщений есть /clean."
+        ),
+        "straight.stop.without_transport": (
+            "Стоп. Черновик и разрешение на расшифровку очищены. "
+            "Сообщения в Telegram остаются — для них есть /clean."
+        ),
+        "straight.subscribe.enabled": (
+            "Подписка включена. Уведомления о закрытых периодах придут сюда."
+        ),
+        "straight.style.saved": "Принято. Режим — «{name}».",
     },
     EN: {
         "start.private": "Hi! I'm Vibee 🐝\nPick a scenario. About data — /privacy.",
@@ -278,6 +361,7 @@ _TEXTS: dict[str, dict[str, str]] = {
         "help.stop": "/stop — cancel the current check-in or transcription",
         "help.clean": "/clean — delete the bot's messages in this chat (up to 48 hours)",
         "help.lang": "/lang ru | en — bot reply language",
+        "help.style": "/style — communication mode: classic, cute or straight",
         "help.transcribe": "/transcribe — request transcription of one personal voice message",
         "help.voice_unavailable": (
             "Voice transcription is unavailable right now: the local model is not configured."
@@ -341,6 +425,85 @@ _TEXTS: dict[str, dict[str, str]] = {
         "lang.current": "Current language: {name}.",
         "lang.usage": "Switch: /lang ru or /lang en.",
         "lang.invalid": "Unknown language. Available: /lang ru or /lang en.",
+        "style.current": (
+            "Current mode: “{name}”. Pick a new one — it lasts until the bot restarts."
+        ),
+        "style.usage": "Switch: /style classic, /style cute or /style straight.",
+        "style.saved": "Done: we now talk in “{name}” mode.",
+        "style.invalid": "Unknown mode. Available: classic, cute, straight.",
+        "style.private_only": "The communication mode can only be changed in a private chat with the bot.",
+        "style.name.classic": "Classic",
+        "style.name.cute": "Cute",
+        "style.name.straight": "Straight talk",
+        "cute.start.private": "Hi there! I'm Vibee 🐝💛 Pick what we're doing. About data — /privacy.",
+        "cute.question.ask": (
+            "{index}/{total} · {question}\n"
+            "Rate it 1 to 5, however you feel 🌸 Changed your mind — /stop."
+        ),
+        "cute.consent.declined": "Okay, declined 💛 The draft is deleted. Menu — /start.",
+        "cute.checkin.done.server": (
+            "Thank you for sharing! 💛 The check-in is done: the three ratings flew to the server. "
+            "The organizer will see only the aggregate summary. Menu — /start."
+        ),
+        "cute.checkin.done.paused": (
+            "The check-in is done, but the server didn't accept it 😔 "
+            "Check that you're a team member or message the organizer. Menu — /start."
+        ),
+        "cute.checkin.done.unknown": (
+            "The check-in is done, but delivery couldn't be confirmed 😔 "
+            "The answers may not have been saved — try again later. Menu — /start."
+        ),
+        "cute.checkin.done.demo": (
+            "Thank you for sharing! 💛 The demo check-in is done and the answers stayed with us "
+            "only. Menu — /start."
+        ),
+        "cute.stop.with_transport": (
+            "Stopped the scenario 💛 The draft and transcription permission are cleared. "
+            "Answers already sent are not deleted; use /clean for messages."
+        ),
+        "cute.stop.without_transport": (
+            "Stopped the scenario 💛 The draft and transcription permission are cleared. "
+            "Telegram messages stay — use /clean for them."
+        ),
+        "cute.subscribe.enabled": (
+            "Subscription enabled 💛 Notifications about closed published periods will arrive here."
+        ),
+        "cute.style.saved": "Done: we now talk in “{name}” mode 💛",
+        "straight.start.private": (
+            "Hi. Vibee here. Pick a scenario — no small talk, it's damn useless. "
+            "Data — /privacy."
+        ),
+        "straight.question.ask": (
+            "{index}/{total} · {question}\nRate 1 to 5. Done with it — /stop."
+        ),
+        "straight.consent.declined": "Fine, declined. The draft is deleted. Menu — /start.",
+        "straight.checkin.done.server": (
+            "Done. The ratings went to the server. The organizer sees only the aggregate "
+            "summary. Menu — /start."
+        ),
+        "straight.checkin.done.paused": (
+            "The check-in is done, but the server rejected it — what a mess. "
+            "Check that you're on the team or message the organizer. Menu — /start."
+        ),
+        "straight.checkin.done.unknown": (
+            "The check-in is done, but delivery wasn't confirmed. The answers may be lost — "
+            "try again later. Menu — /start."
+        ),
+        "straight.checkin.done.demo": (
+            "Done. The demo check-in is closed and nothing left the bot. Menu — /start."
+        ),
+        "straight.stop.with_transport": (
+            "Stopped. The draft and transcription permission are cleared. "
+            "Answers already sent are not deleted; use /clean for messages."
+        ),
+        "straight.stop.without_transport": (
+            "Stopped. The draft and transcription permission are cleared. "
+            "Telegram messages stay — use /clean for them."
+        ),
+        "straight.subscribe.enabled": (
+            "Subscription on. Notifications about closed periods will arrive here."
+        ),
+        "straight.style.saved": "Done. Mode: “{name}”.",
     },
 }
 
@@ -367,6 +530,25 @@ def text(language: object, key: str, **values: object) -> str:
     return template.format(**values) if values else template
 
 
+def style_name(language: object, style: object) -> str:
+    """Название режима общения на выбранном языке."""
+    code = styles.normalize_style(style) or styles.DEFAULT_STYLE
+    return text(language, f"style.name.{code}")
+
+
+def styled_text(language: object, style: object, key: str, **values: object) -> str:
+    """Текст с учётом режима общения; у классика своих строк нет."""
+    code = styles.normalize_style(style) or styles.DEFAULT_STYLE
+    if code == styles.CLASSIC:
+        return text(language, key, **values)
+    styled_key = f"{code}.{key}"
+    lang = normalize_language(language) or DEFAULT_LANGUAGE
+    template = _TEXTS[lang].get(styled_key) or _TEXTS[DEFAULT_LANGUAGE].get(styled_key)
+    if template is None:
+        return text(language, key, **values)
+    return template.format(**values) if values else template
+
+
 def question(language: object, key: str) -> str:
     """Формулировка вопроса чек-ина по его ключу."""
     return text(language, f"question.{key}")
@@ -383,6 +565,7 @@ def help_text(language: object, voice_available: bool, notifications_available: 
         text(language, "help.stop"),
         text(language, "help.clean"),
         text(language, "help.lang"),
+        text(language, "help.style"),
     ]
     if voice_available:
         lines.append(text(language, "help.transcribe"))

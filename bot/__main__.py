@@ -16,7 +16,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.methods import SendMessage, SendPhoto
 from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from . import i18n
+from . import i18n, styles
 from .cleanup import SentMessageJournal, delete_recent_messages
 from .flow import CheckinFlow, QUESTION_KEYS
 from .http_transport import HttpTransport, OrganizerRequiredError, PausedError, TransportError
@@ -37,6 +37,7 @@ BOT_COMMANDS = [
     BotCommand(command="stop", description="Отменить сценарий и очистить черновик"),
     BotCommand(command="clean", description="Удалить сообщения бота в этом чате"),
     BotCommand(command="lang", description="Язык / Language: ru, en"),
+    BotCommand(command="style", description="Режим общения: классик, ми-ми-ми, правдарубка"),
     BotCommand(command="transcribe", description="Согласие на одну голосовую (нужна локальная модель)"),
     BotCommand(command="subscribe", description="Уведомления организатора (если настроены)"),
 ]
@@ -102,6 +103,20 @@ def create_dispatcher(
         if state is not None:
             await state.update_data(lang=language)
 
+    async def style_of(state: FSMContext | None) -> str:
+        if state is None:
+            return styles.DEFAULT_STYLE
+        data = await state.get_data()
+        return styles.normalize_style(data.get("style")) or styles.DEFAULT_STYLE
+
+    async def remember_style(state: FSMContext | None, style: str) -> None:
+        if state is not None:
+            await state.update_data(style=style)
+
+    def chat_style(style: str, message) -> str:
+        """Режим для конкретного чата: в группах всегда классик."""
+        return styles.for_chat(style, getattr(getattr(message, "chat", None), "type", None))
+
     def menu_keyboard(language: str):
         rows = [[InlineKeyboardButton(
             text=i18n.text(language, "menu.checkin"), callback_data="menu:checkin",
@@ -119,6 +134,16 @@ def create_dispatcher(
         return InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text=label(i18n.RU, "Русский"), callback_data=f"lang:{i18n.RU}"),
             InlineKeyboardButton(text=label(i18n.EN, "English"), callback_data=f"lang:{i18n.EN}"),
+        ]])
+
+    def style_keyboard(language: str, current: str):
+        def label(code: str) -> str:
+            name = i18n.style_name(language, code)
+            return f"{name} ✓" if current == code else name
+
+        return InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=label(code), callback_data=f"style:{code}")
+            for code in styles.STYLES
         ]])
 
     # Завершённые чек-ины, доставку которых не удалось подтвердить:
@@ -147,31 +172,33 @@ def create_dispatcher(
             text=i18n.text(language, "button.retry"), callback_data=f"retry:{action}",
         )]])
 
-    async def submit_checkin(message, user_id: int, scores: dict[str, int], nonce: str, language: str) -> None:
+    async def submit_checkin(
+        message, user_id: int, scores: dict[str, int], nonce: str, language: str, style: str,
+    ) -> None:
         """Отправляет оценки на сервер; при сетевой ошибке даёт кнопку «Повторить»."""
         if checkin_history is not None:
             checkin_history.record_checkin(user_id)
         if checkin_transport is None:
-            await message.answer(i18n.text(language, "checkin.done.demo"))
+            await message.answer(i18n.styled_text(language, style, "checkin.done.demo"))
             return
         try:
             await checkin_transport.submit_personal_checkin(user_id, scores, nonce)
         except PausedError:
             pending_checkins.pop(nonce, None)
-            await message.answer(i18n.text(language, "checkin.done.paused"))
+            await message.answer(i18n.styled_text(language, style, "checkin.done.paused"))
             return
         except TransportError:
             remember_pending_checkin(nonce, user_id, scores)
             await message.answer(
-                i18n.text(language, "checkin.done.unknown")
+                i18n.styled_text(language, style, "checkin.done.unknown")
                 + "\n\n" + i18n.text(language, "error.network"),
                 reply_markup=retry_keyboard(language, f"checkin:{nonce}"),
             )
             return
         pending_checkins.pop(nonce, None)
-        await message.answer(i18n.text(language, "checkin.done.server"))
+        await message.answer(i18n.styled_text(language, style, "checkin.done.server"))
 
-    async def deliver_subscription(message, user_id: int, language: str) -> None:
+    async def deliver_subscription(message, user_id: int, language: str, style: str) -> None:
         """Включает уведомления; при сетевой ошибке даёт кнопку «Повторить»."""
         if notification_transport is None:
             await message.answer(i18n.text(language, "subscribe.no_config"))
@@ -188,7 +215,7 @@ def create_dispatcher(
             )
             return
         if result.get("notificationsEnabled") is True:
-            await message.answer(i18n.text(language, "subscribe.enabled"))
+            await message.answer(i18n.styled_text(language, style, "subscribe.enabled"))
         else:
             await message.answer(i18n.text(language, "subscribe.disabled"))
 
@@ -202,15 +229,15 @@ def create_dispatcher(
         except Exception as error:  # noqa: BLE001 — кнопки не должны ронять сценарий
             logging.getLogger(__name__).debug("Не удалось убрать кнопки шага: %s", error)
 
-    async def question(message, nonce, step, language) -> None:
+    async def question(message, nonce, step, language, style) -> None:
         """Задаёт вопрос одним сообщением: картинка, текст и оценки."""
         key = QUESTION_KEYS[step]
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text=str(n), callback_data=f"score:{nonce}:{step}:{n}")
             for n in range(1, 6)
         ]])
-        text = i18n.text(
-            language, "question.ask",
+        text = i18n.styled_text(
+            language, style, "question.ask",
             index=step + 1, total=len(QUESTION_KEYS),
             question=i18n.question(language, key),
         )
@@ -225,6 +252,7 @@ def create_dispatcher(
     @dispatcher.message(CommandStart())
     async def start(message: Message, state: FSMContext | None = None):
         language = await language_of(state)
+        style = chat_style(await style_of(state), message)
         if message.chat.type != "private":
             await message.answer(i18n.text(
                 language, "start.group.intake" if intake is not None else "start.group.no_intake",
@@ -236,7 +264,7 @@ def create_dispatcher(
             checkin_history.register_user(message.from_user.id)
         flow.cancel(message.from_user.id)
         await message.answer(
-            i18n.text(language, "start.private"),
+            i18n.styled_text(language, style, "start.private"),
             reply_markup=menu_keyboard(language),
         )
 
@@ -326,6 +354,58 @@ def create_dispatcher(
                 reply_markup=language_keyboard(language),
             )
 
+    @dispatcher.message(Command("style"))
+    async def style_command(message: Message, state: FSMContext | None = None):
+        language = await language_of(state)
+        if message.chat.type != "private" or message.from_user is None or message.from_user.is_bot:
+            await message.answer(i18n.text(language, "style.private_only"))
+            return
+        current = await style_of(state)
+        parts = (message.text or "").split(maxsplit=1)
+        requested = parts[1].strip() if len(parts) > 1 else ""
+        if not requested:
+            await message.answer(
+                i18n.text(language, "style.current", name=i18n.style_name(language, current))
+                + "\n" + i18n.text(language, "style.usage"),
+                reply_markup=style_keyboard(language, current),
+            )
+            return
+        style = styles.normalize_style(requested)
+        if style is None:
+            await message.answer(
+                i18n.text(language, "style.invalid"),
+                reply_markup=style_keyboard(language, current),
+            )
+            return
+        await remember_style(state, style)
+        await message.answer(
+            i18n.styled_text(
+                language, style, "style.saved", name=i18n.style_name(language, style),
+            ),
+            reply_markup=style_keyboard(language, style),
+        )
+
+    @dispatcher.callback_query(F.data.startswith("style:"))
+    async def style_callback(event: CallbackQuery, state: FSMContext | None = None):
+        language = await language_of(state)
+        message = event.message
+        if (message is None or getattr(getattr(message, "chat", None), "type", None) != "private"
+                or event.from_user.is_bot or not callable(getattr(message, "answer", None))):
+            await event.answer(i18n.text(language, "style.private_only"), show_alert=True)
+            return
+        style = styles.normalize_style(event.data.split(":", 1)[1])
+        if style is None:
+            await event.answer(i18n.text(language, "style.invalid"), show_alert=True)
+            return
+        await remember_style(state, style)
+        await event.answer()
+        await message.answer(
+            i18n.styled_text(
+                language, style, "style.saved", name=i18n.style_name(language, style),
+            ),
+            reply_markup=style_keyboard(language, style),
+        )
+
     @dispatcher.callback_query(F.data.startswith("retry:"))
     async def retry_callback(event: CallbackQuery, state: FSMContext | None = None):
         language = await language_of(state)
@@ -334,10 +414,11 @@ def create_dispatcher(
                 or event.from_user.is_bot or not callable(getattr(message, "answer", None))):
             await event.answer(i18n.text(language, "alert.checkin_private"), show_alert=True)
             return
+        style = chat_style(await style_of(state), message)
         parts = event.data.split(":")
         if len(parts) == 2 and parts[1] == "subscribe":
             await event.answer()
-            await deliver_subscription(message, event.from_user.id, language)
+            await deliver_subscription(message, event.from_user.id, language, style)
             return
         if len(parts) == 3 and parts[1] == "checkin":
             scores = take_pending_checkin(parts[2], event.from_user.id)
@@ -345,7 +426,7 @@ def create_dispatcher(
                 await event.answer(i18n.text(language, "retry.expired"), show_alert=True)
                 return
             await event.answer()
-            await submit_checkin(message, event.from_user.id, scores, parts[2], language)
+            await submit_checkin(message, event.from_user.id, scores, parts[2], language, style)
             return
         await event.answer(i18n.text(language, "error.generic"), show_alert=True)
 
@@ -378,11 +459,13 @@ def create_dispatcher(
         if message.chat.type != "private" or message.from_user is None:
             return
         language = await language_of(state)
+        style = chat_style(await style_of(state), message)
         flow.cancel(message.from_user.id)
         if voice_transcription is not None:
             voice_transcription.cancel(message.from_user.id)
-        await message.answer(i18n.text(
-            language, "stop.with_transport" if checkin_transport is not None else "stop.without_transport",
+        await message.answer(i18n.styled_text(
+            language, style,
+            "stop.with_transport" if checkin_transport is not None else "stop.without_transport",
         ))
 
     @dispatcher.message(Command("clean"))
@@ -410,7 +493,8 @@ def create_dispatcher(
                 or message.from_user.is_bot or message.chat.id != message.from_user.id):
             return
         language = await language_of(state)
-        await deliver_subscription(message, message.from_user.id, language)
+        style = chat_style(await style_of(state), message)
+        await deliver_subscription(message, message.from_user.id, language, style)
 
     async def submit_intake_text(message: Message, text: str) -> None:
         if intake is None or message.chat.type == "private" or message.from_user is None:
@@ -490,6 +574,7 @@ def create_dispatcher(
             await event.answer(i18n.text(language, "alert.checkin_private"))
             return
         try:
+            style = chat_style(await style_of(state), message)
             parts = event.data.split(":")
             if parts[0] == "consent" and len(parts) == 3:
                 if parts[2] not in ("yes", "no"):
@@ -498,18 +583,20 @@ def create_dispatcher(
                 await event.answer()
                 await clear_buttons(message)
                 if accepted:
-                    await question(message, parts[1], 0, language)
+                    await question(message, parts[1], 0, language, style)
                 else:
-                    await message.answer(i18n.text(language, "consent.declined"))
+                    await message.answer(i18n.styled_text(language, style, "consent.declined"))
             elif parts[0] == "score" and len(parts) == 4:
                 step = int(parts[2])
                 result = flow.answer(event.from_user.id, parts[1], step, int(parts[3]))
                 await event.answer()
                 await clear_buttons(message)
                 if result is not None:
-                    await submit_checkin(message, event.from_user.id, result, parts[1], language)
+                    await submit_checkin(
+                        message, event.from_user.id, result, parts[1], language, style,
+                    )
                 else:
-                    await question(message, parts[1], step + 1, language)
+                    await question(message, parts[1], step + 1, language, style)
             else:
                 raise ValueError("Неверная кнопка")
         except ValueError as error:
