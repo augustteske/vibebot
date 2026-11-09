@@ -12,6 +12,7 @@ import {
   recordActivity,
   calculateComparisonTrends,
   calculateTeamHealthScore,
+  generateActionPlan,
 } from '../server/analytics.mjs'
 
 test('analytics: isQuestionMessage accurately identifies questions', () => {
@@ -266,4 +267,62 @@ test('analytics: calculateTeamHealthScore correctly handles normal, edge, and ex
   }
   // Base 50 - min(20, (15 - 5) * 2) = 50 - 20 = 30
   assert.equal(calculateTeamHealthScore(highIntensityTeam), 30)
+})
+
+test('analytics: generateActionPlan generates targeted action items based on metrics and priority trends', () => {
+  // Test 1: Team with bad outside hours, bad unanswered questions, and low positivity
+  const troubledTeam = {
+    outsideHoursPercent: 35,
+    unansweredQuestionsPercent: 25,
+    positivityIndex: 6,
+    participationEvenness: 48,
+    intensityIndex: 6,
+  }
+  const plan1 = generateActionPlan(troubledTeam)
+  assert.ok(plan1.length >= 3 && plan1.length <= 5, 'Plan should contain 3-5 items')
+
+  const ids1 = plan1.map(item => item.id)
+  assert.ok(ids1.includes('action-outside-hours'), 'Should include outside hours action')
+  assert.ok(ids1.includes('action-unanswered-questions'), 'Should include unanswered questions action')
+  assert.ok(ids1.includes('action-positivity'), 'Should include positivity action')
+  assert.ok(ids1.includes('action-participation'), 'Should include participation action')
+
+  // Check required item properties
+  for (const item of plan1) {
+    assert.ok(typeof item.id === 'string' && item.id.length > 0)
+    assert.ok(typeof item.title === 'string' && item.title.length > 0)
+    assert.ok(typeof item.description === 'string' && item.description.length > 0)
+    assert.ok(['easy', 'medium', 'hard'].includes(item.difficulty))
+    assert.ok(typeof item.estimatedTime === 'string' && item.estimatedTime.length > 0)
+  }
+
+  // Test 2: Deteriorating trend triggers priority marker
+  const deterioratingTrends = {
+    outsideHoursPercentDiff: 6.2,
+    unansweredQuestionsPercentDiff: 4.5,
+  }
+  const plan2 = generateActionPlan({ outsideHoursPercent: 32 }, deterioratingTrends)
+  const outsideAction = plan2.find(item => item.id === 'action-outside-hours')
+  assert.ok(outsideAction, 'Outside hours action must exist')
+  assert.equal(outsideAction.isPriority, true, 'Action must be marked as priority')
+  assert.ok(outsideAction.title.includes('⚠️ Приоритет'), 'Title must contain priority emoji')
+
+  // Priority items should be sorted first
+  assert.equal(plan2[0].isPriority, true)
+
+  // Test 3: Healthy team gets productive proactive fallback steps (3-5 items)
+  const healthyTeam = {
+    outsideHoursPercent: 12,
+    unansweredQuestionsPercent: 4,
+    positivityIndex: 25,
+    participationEvenness: 88,
+    intensityIndex: 1,
+  }
+  const plan3 = generateActionPlan(healthyTeam)
+  assert.ok(plan3.length >= 3 && plan3.length <= 5, 'Healthy team must also receive 3-5 items')
+  assert.ok(plan3.every(item => item.id && item.title && item.description && item.difficulty && item.estimatedTime))
+
+  // Test 4: Null/empty metrics still safely returns 3-5 fallback steps
+  const planEmpty = generateActionPlan(null)
+  assert.ok(planEmpty.length >= 3 && planEmpty.length <= 5)
 })

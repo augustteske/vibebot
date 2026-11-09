@@ -2,6 +2,7 @@ import { lazy, Suspense, useId, useState } from 'react'
 import { CuteBeeMagnifier } from '../../core/CuteBeeMagnifier'
 import type { ExtendedAnalyticsMetrics, MetricComparisonTrends } from '../../core/telegram'
 import { TeamHealthVessel } from './TeamHealthVessel'
+import { ActionPlanPanel } from '../actions/ActionPlanPanel'
 import './InsightsWidget.css'
 
 const InsightsCharts = lazy(() => import('./InsightsCharts').then(module => ({ default: module.InsightsCharts })))
@@ -246,6 +247,14 @@ export function InsightsWidget({
 
       {/* Центральная карточка-колба: Общая температура команды */}
       <TeamHealthVessel metrics={metrics} extendedMetrics={extendedMetrics} />
+
+      {/* Интерактивный план действий команды */}
+      <ActionPlanPanel
+        metrics={metrics}
+        extendedMetrics={extendedMetrics}
+        trends={currentTrends}
+        periodId={periodLabel}
+      />
 
       <div className="iw-grid">
         {/* Карточка 1: Общение вне рабочих часов */}
