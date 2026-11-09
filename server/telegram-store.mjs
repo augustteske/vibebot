@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual, randomUUID } from 'node:crypto'
 import { canProcessChat, initialConsentState, transitionConsent } from '../src/core/telegram.ts'
+import { formatSharePeriod } from '../src/features/insights/shareCard.ts'
 import { templateRecommendationProvider, recommendationProviderContent } from './recommendation-provider.mjs'
 
 const DAY = 86400000
@@ -355,6 +356,20 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
     if (!collection.counts) return { status: 'insufficient' }
     const counts = JSON.parse(collection.counts)
     return { status: 'published', demo: true, kind, total: Object.values(counts).reduce((a, b) => a + b, 0), counts }
+  }
+  // Бот читает сводку и карточку только для организатора, чей Telegram связан с привязкой.
+  const linkedOrganizer = (actor, id, telegramUserId) => {
+    if (!telegramId(telegramUserId)) invalid()
+    bindingFor(actor, id)
+    if (actor.kind !== 'bot') fail(403, 'FORBIDDEN', 'Нужен scoped credential бота')
+    const member = one(`SELECT m.id,m.role FROM telegram_links l
+      JOIN members m ON m.workspace_id=l.workspace_id AND m.id=l.member_id
+      WHERE l.binding_id=? AND l.workspace_id=? AND l.telegram_user_id=?`,
+      id, actor.workspace_id, telegramUserId)
+    if (!member || member.role !== 'organizer') {
+      fail(403, 'ORGANIZER_REQUIRED', 'Доступно только связанному организатору')
+    }
+    return member
   }
   const expireBinding = binding => {
     if (binding.evidence_expires === null || binding.evidence_expires > now()) return binding
@@ -994,17 +1009,25 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
     },
     summaryForOrganizer(actor, id, telegramUserId) {
       unavailable()
-      if (!telegramId(telegramUserId)) invalid()
-      bindingFor(actor, id)
-      if (actor.kind !== 'bot') fail(403, 'FORBIDDEN', 'Нужен scoped credential бота')
-      const member = one(`SELECT m.id,m.role FROM telegram_links l
-        JOIN members m ON m.workspace_id=l.workspace_id AND m.id=l.member_id
-        WHERE l.binding_id=? AND l.workspace_id=? AND l.telegram_user_id=?`,
-        id, actor.workspace_id, telegramUserId)
-      if (!member || member.role !== 'organizer') {
-        fail(403, 'ORGANIZER_REQUIRED', 'Статистика доступна только связанному организатору')
-      }
+      linkedOrganizer(actor, id, telegramUserId)
       return this.summary(actor, id)
+    },
+    shareCard(actor, id, telegramUserId) {
+      unavailable()
+      linkedOrganizer(actor, id, telegramUserId)
+      const view = this.summary(actor, id)
+      if (view.status !== 'published') {
+        fail(409, 'PERIOD_NOT_PUBLISHED', 'Период ещё не опубликован')
+      }
+      const workspace = one('SELECT name FROM workspaces WHERE id=?', actor.workspace_id)
+      const profile = profileFor(actor.workspace_id)
+      return {
+        teamName: workspace?.name ?? null,
+        demo: view.demo === true,
+        periodLabel: formatSharePeriod(view.period.start, view.period.end, profile.timeZone || 'UTC'),
+        period: view.period,
+        metrics: view.metrics,
+      }
     },
     currentSummary(actor) {
       unavailable()

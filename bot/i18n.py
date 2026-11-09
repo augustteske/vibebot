@@ -117,6 +117,7 @@ _TEXTS: dict[str, dict[str, str]] = {
         "help.lang": "/lang ru | en — язык ответов бота",
         "help.style": "/style — режим общения: классик, ми-ми-ми или правдарубка",
         "help.stats": "/stats — статистика команды; только для связанного организатора",
+        "help.share": "/share — карточка «Пульс команды» для организатора",
         "help.transcribe": "/transcribe — запросить расшифровку одной личной голосовой",
         "help.voice_unavailable": (
             "Расшифровка голосовых сейчас недоступна: локальная модель не настроена."
@@ -206,6 +207,25 @@ _TEXTS: dict[str, dict[str, str]] = {
         "stats.recognition": "🙏 Благодарности: {value}%",
         "stats.report": "Открыть полный отчет",
         "stats.error": "Не удалось разобрать статистику. Попробуйте позже.",
+        "share.private_only": "Карточка «Пульс команды» доступна только в личном диалоге с ботом.",
+        "share.organizer_only": (
+            "Карточку может собрать только организатор, чей Telegram-аккаунт связан с этой командой."
+        ),
+        "share.no_connection": "Карточка пока недоступна: бот не подключён к серверу.",
+        "share.no_period": (
+            "Пока нет опубликованного периода. Карточка появится, когда период закроется "
+            "и в нём будет достаточно ответов."
+        ),
+        "share.unavailable": (
+            "Карточка пока недоступна: период ещё не опубликован. Попробуйте позже."
+        ),
+        "share.period_fallback": "этот период",
+        "share.caption": (
+            "📊 Пульс команды {team} за {period}. Попробуйте Vibee для своей команды: {url}"
+        ),
+        "share.caption_no_name": (
+            "📊 Пульс команды за {period}. Попробуйте Vibee для своей команды: {url}"
+        ),
         "cute.start.private": "Приветик! Я Vibee 🐝💛 Выбери, чем займёмся. О данных — /privacy.",
         "cute.question.ask": (
             "{index}/{total} · {question}\n"
@@ -396,6 +416,7 @@ _TEXTS: dict[str, dict[str, str]] = {
         "help.lang": "/lang ru | en — bot reply language",
         "help.style": "/style — communication mode: classic, cute or straight",
         "help.stats": "/stats — team metrics; linked organizer only",
+        "help.share": "/share — “Team pulse” card for the organizer",
         "help.transcribe": "/transcribe — request transcription of one personal voice message",
         "help.voice_unavailable": (
             "Voice transcription is unavailable right now: the local model is not configured."
@@ -485,6 +506,21 @@ _TEXTS: dict[str, dict[str, str]] = {
         "stats.recognition": "🙏 Thanks: {value}%",
         "stats.report": "Open the full report",
         "stats.error": "Could not read the team metrics. Try again later.",
+        "share.private_only": "The “Team pulse” card is available only in a private chat with the bot.",
+        "share.organizer_only": (
+            "Only an organizer whose Telegram account is linked to this team can build the card."
+        ),
+        "share.no_connection": "The card is unavailable: the bot is not connected to the server.",
+        "share.no_period": (
+            "There is no published period yet. The card appears once a period closes "
+            "and has enough answers."
+        ),
+        "share.unavailable": "The card is not available yet: the period is not published. Try again later.",
+        "share.period_fallback": "this period",
+        "share.caption": (
+            "📊 Team pulse of {team} for {period}. Try Vibee for your team: {url}"
+        ),
+        "share.caption_no_name": "📊 Team pulse for {period}. Try Vibee for your team: {url}",
         "cute.start.private": "Hi there! I'm Vibee 🐝💛 Pick what we're doing. About data — /privacy.",
         "cute.question.ask": (
             "{index}/{total} · {question}\n"
@@ -634,6 +670,7 @@ def help_text(language: object, voice_available: bool, notifications_available: 
         text(language, "help.lang"),
         text(language, "help.style"),
         text(language, "help.stats"),
+        text(language, "help.share"),
     ]
     if voice_available:
         lines.append(text(language, "help.transcribe"))

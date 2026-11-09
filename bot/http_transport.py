@@ -2,13 +2,14 @@
 
 import asyncio
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
 from math import isfinite
 import os
 from time import monotonic
 from typing import Callable
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, unquote, urlencode
 from uuid import uuid4
 
 import httpx
@@ -60,6 +61,15 @@ class DeliveryUncertainError(TransportError):
 
 class OrganizerRequiredError(TransportError):
     """The Telegram identity is not linked to an organizer in this workspace."""
+
+
+@dataclass(frozen=True)
+class ShareCard:
+    """Карточка «Пульс команды»: PNG и подписи из заголовков ответа."""
+
+    image: bytes
+    team_name: str | None = None
+    period_label: str | None = None
 
 
 class HttpTransport:
@@ -220,6 +230,28 @@ class HttpTransport:
             raise OrganizerRequiredError("Only a linked organizer can read the team summary")
         raise TransportError("Vibee rejected the team summary request")
 
+    async def get_share_card(self, telegram_user_id: int) -> ShareCard:
+        """PNG-карточка «Пульс команды» для связанного организатора."""
+        if type(telegram_user_id) is not int or telegram_user_id < 1:
+            raise TransportError("Invalid Telegram user")
+        url = (
+            f"{self._base_url}/api/bot/v1/bindings/{self._binding_id}/share-card?"
+            + urlencode({"telegramUserId": str(telegram_user_id)})
+        )
+        response = await self._get(url)
+        if response.status_code == 200 and response.headers.get("Content-Type", "").startswith("image/png"):
+            if not response.content:
+                raise TransportError("Vibee returned an empty share card")
+            return ShareCard(
+                image=response.content,
+                team_name=self._encoded_header(response, "X-Vibee-Team-Name"),
+                period_label=self._encoded_header(response, "X-Vibee-Period-Label"),
+            )
+        body = self._response_body(response)
+        if response.status_code == 403 and self._error_code(body) == "ORGANIZER_REQUIRED":
+            raise OrganizerRequiredError("Only a linked organizer can build a share card")
+        raise TransportError("Vibee rejected the share card request")
+
     @property
     def web_url(self) -> str:
         """Адрес веб-кабинета: VIBEE_WEB_URL или тот же сервер."""
@@ -361,6 +393,15 @@ class HttpTransport:
         if not isinstance(body, dict):
             raise TransportError("Vibee API returned invalid JSON")
         return body
+
+    @staticmethod
+    def _encoded_header(response: httpx.Response, name: str) -> str | None:
+        """Текст из заголовка: сервер шлёт его в percent-encoding."""
+        value = response.headers.get(name)
+        if not value:
+            return None
+        decoded = unquote(value).strip()
+        return decoded or None
 
     @staticmethod
     def _error_code(body: dict[str, object]) -> object:

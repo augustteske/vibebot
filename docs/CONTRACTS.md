@@ -128,6 +128,7 @@ workspaceId — существующая команда; bindingId — серв�
 | GET telegram/summary | веб-организатор с сессией | CommunicationView текущей привязки; без привязки — disconnected |
 | GET telegram/system-health | веб-организатор с сессией | {status, botOnline, processed24h, lastEventAt, lastError, checkedAt} текущей привязки |
 | GET bot/v1/bindings/:id/summary?telegramUserId=:id | бот, связанный организатор | CommunicationView этой привязки; остальным — ORGANIZER_REQUIRED |
+| GET bot/v1/bindings/:id/share-card?telegramUserId=:id | бот, связанный организатор | PNG 1200×630 (image/png); заголовки X-Vibee-Team-Name и X-Vibee-Period-Label в percent-encoding; без опубликованного периода — 409 PERIOD_NOT_PUBLISHED |
 | GET telegram/recommendation?periodId=:id | веб-организатор с сессией | CommunicationRecommendation последнего опубликованного периода текущей привязки |
 | GET telegram/bindings/:id/periods/:periodId/recommendation | веб-организатор | Только карточка последнего опубликованного периода |
 | POST telegram/bindings/:id/periods/:periodId/action | веб-организатор | {requestId, expectedRevision, periodId, recommendationId, action}; подтверждённый шаг |

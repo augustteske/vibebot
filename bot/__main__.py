@@ -15,7 +15,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.methods import SendMessage, SendPhoto
-from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import BotCommand, BufferedInputFile, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from . import i18n, styles
 from .cleanup import SentMessageJournal, delete_recent_messages
@@ -40,6 +40,7 @@ BOT_COMMANDS = [
     BotCommand(command="lang", description="Язык / Language: ru, en"),
     BotCommand(command="style", description="Режим общения: классик, ми-ми-ми, правдарубка"),
     BotCommand(command="stats", description="Статистика команды (для организатора)"),
+    BotCommand(command="share", description="Карточка «Пульс команды» (для организатора)"),
     BotCommand(command="transcribe", description="Согласие на одну голосовую (нужна локальная модель)"),
     BotCommand(command="subscribe", description="Уведомления организатора (если настроены)"),
 ]
@@ -60,6 +61,7 @@ ERROR_KEYS = {
 # Сколько держать завершённый чек-ин в памяти для кнопки «Повторить».
 RETRY_TTL_SECONDS = 300
 STATS_BAR_CELLS = 10
+SHARE_CARD_FILE_NAME = "vibee-team-pulse.png"
 
 
 class JournalBot(Bot):
@@ -86,6 +88,7 @@ def create_dispatcher(
     notification_transport: HttpTransport | None = None,
     checkin_transport: HttpTransport | None = None,
     stats_transport: HttpTransport | None = None,
+    share_transport: HttpTransport | None = None,
     message_log: SentMessageJournal | None = None,
     question_images: QuestionImageCache | None = None,
     question_images_dir: Path | None = None,
@@ -247,6 +250,52 @@ def create_dispatcher(
                 text=i18n.text(language, "stats.report"), url=report_url,
             )]])
         await message.answer(text, reply_markup=keyboard)
+
+    def share_caption(language: str, card, url: str) -> str:
+        """Подпись к карточке: название команды, период и ссылка на Vibee."""
+        period = card.period_label or i18n.text(language, "share.period_fallback")
+        if card.team_name:
+            return i18n.text(language, "share.caption", team=card.team_name, period=period, url=url)
+        return i18n.text(language, "share.caption_no_name", period=period, url=url)
+
+    async def deliver_share(message, user_id: int, language: str) -> None:
+        """Отправляет карточку «Пульс команды» связанному организатору."""
+        if share_transport is None:
+            await message.answer(i18n.text(language, "share.no_connection"))
+            return
+        try:
+            view = await share_transport.get_summary(telegram_user_id=user_id)
+        except OrganizerRequiredError:
+            await message.answer(i18n.text(language, "share.organizer_only"))
+            return
+        except TransportError:
+            await message.answer(
+                i18n.text(language, "error.network"),
+                reply_markup=retry_keyboard(language, "share"),
+            )
+            return
+        status = view.get("status")
+        if status in ("calibrating", "insufficient", "open"):
+            await message.answer(i18n.text(language, "share.no_period"))
+            return
+        if status != "published":
+            await message.answer(i18n.text(language, "share.unavailable"))
+            return
+        try:
+            card = await share_transport.get_share_card(user_id)
+        except OrganizerRequiredError:
+            await message.answer(i18n.text(language, "share.organizer_only"))
+            return
+        except TransportError:
+            await message.answer(
+                i18n.text(language, "error.network"),
+                reply_markup=retry_keyboard(language, "share"),
+            )
+            return
+        await message.answer_photo(
+            BufferedInputFile(card.image, filename=SHARE_CARD_FILE_NAME),
+            caption=share_caption(language, card, share_transport.web_url),
+        )
 
     async def submit_checkin(
         message, user_id: int, scores: dict[str, int], nonce: str, language: str, style: str,
@@ -500,6 +549,10 @@ def create_dispatcher(
             await event.answer()
             await deliver_stats(message, event.from_user.id, language, style)
             return
+        if len(parts) == 2 and parts[1] == "share":
+            await event.answer()
+            await deliver_share(message, event.from_user.id, language)
+            return
         if len(parts) == 3 and parts[1] == "checkin":
             scores = take_pending_checkin(parts[2], event.from_user.id)
             if scores is None:
@@ -586,6 +639,16 @@ def create_dispatcher(
         if message.from_user is None or message.from_user.is_bot:
             return
         await deliver_stats(message, message.from_user.id, language, style)
+
+    @dispatcher.message(Command("share"))
+    async def share_command(message: Message, state: FSMContext | None = None):
+        language = await language_of(state)
+        if message.chat.type != "private":
+            await message.answer(i18n.text(language, "share.private_only"))
+            return
+        if message.from_user is None or message.from_user.is_bot:
+            return
+        await deliver_share(message, message.from_user.id, language)
 
     async def submit_intake_text(message: Message, text: str) -> None:
         if intake is None or message.chat.type == "private" or message.from_user is None:
@@ -765,6 +828,7 @@ async def main():
         notification_transport=transport,
         checkin_transport=transport,
         stats_transport=transport,
+        share_transport=transport,
         message_log=message_log,
         question_images=question_image_cache,
         checkin_history=checkin_history,

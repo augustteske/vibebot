@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
 import { AppError, createStore } from './store.mjs'
+import { renderShareCardPng } from './share-card.mjs'
 
 function formatSafeError(error, context = {}) {
   const errorName = error instanceof Error && error.name ? error.name : 'UnknownError'
@@ -172,6 +173,25 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         if (!actor) throw new AppError(401, 'BOT_AUTH_REQUIRED', 'Нужна авторизация бота')
         return json(res, 200, store.telegram.summaryForOrganizer(
           actor, botSummaryRoute[1], url.searchParams.get('telegramUserId')))
+      }
+      const botShareCardRoute = url.pathname.match(/^\/api\/bot\/v1\/bindings\/([a-f0-9-]+)\/share-card$/)
+      if (botShareCardRoute) {
+        if (req.method !== 'GET') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
+        if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
+        const actor = store.telegram.authenticate(req.headers.authorization)
+        if (!actor) throw new AppError(401, 'BOT_AUTH_REQUIRED', 'Нужна авторизация бота')
+        const card = store.telegram.shareCard(
+          actor, botShareCardRoute[1], url.searchParams.get('telegramUserId'))
+        const png = renderShareCardPng(card)
+        // Заголовки — только ASCII: название и период уходят в percent-encoding.
+        res.writeHead(200, {
+          'Content-Type': 'image/png',
+          'Content-Length': png.length,
+          'Cache-Control': 'no-store',
+          'X-Vibee-Team-Name': encodeURIComponent(card.teamName ?? ''),
+          'X-Vibee-Period-Label': encodeURIComponent(card.periodLabel ?? ''),
+        })
+        return res.end(png)
       }
       const transcriptionJobRoute = url.pathname.match(/^\/api\/bot\/v1\/bindings\/([a-f0-9-]+)\/transcription-jobs$/)
       if (transcriptionJobRoute) {

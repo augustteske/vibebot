@@ -136,6 +136,11 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
     })
     return { status: response.status, body: await response.json() }
   }
+  const requestRaw = async (path, headers = {}) => {
+    const response = await fetch(base + path, { headers: { Connection: 'close', ...headers } })
+    return { status: response.status, headers: response.headers,
+      body: Buffer.from(await response.arrayBuffer()) }
+  }
   const web = (operation, input, token = ownerToken, bindingId = id, extra = {}) => request(
     '/telegram/bindings/' + bindingId + '/' + operation, input,
     { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1', ...extra })
@@ -205,7 +210,7 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
     assert.equal(result.body.phase, 'active')
     return result.body
   }
-  return { db, id, otherBindingId, owner, people, tokens, foreignToken, foreignOwner, foreignPeople, request, web, bot, linkToken, link, bindingToken, bind, subscribeNotifications, closePeriod, summary, currentSummary, currentRecommendation, recommendation, confirmAction, chatFeedback, closeChatFeedback, profile, setProfile, systemHealth, command, status,
+  return { db, id, otherBindingId, owner, people, tokens, foreignToken, foreignOwner, foreignPeople, request, requestRaw, web, bot, linkToken, link, bindingToken, bind, subscribeNotifications, closePeriod, summary, currentSummary, currentRecommendation, recommendation, confirmAction, chatFeedback, closeChatFeedback, profile, setProfile, systemHealth, command, status,
     mutate, decision, prepare, activate, time: () => clock, advance: ms => { clock += ms }, setTime: ms => { clock = ms },
     restart: async () => { await app.close(); await launch() } }
 }
@@ -721,6 +726,41 @@ test('HTTP/SQLite: bot summary is limited to a linked organizer of its binding',
   error(await f.bot('summary'), 400, 'INVALID_INPUT')
   error(await f.bot('summary?telegramUserId=100000001', undefined, f.otherBindingId, credential),
     404, 'NOT_FOUND')
+})
+
+test('HTTP/SQLite: bot share card is a PNG for the linked organizer of a published period', async t => {
+  const f = await fixture(t)
+  await publishForRecommendation(f)
+  const summary = (await f.summary()).body
+  assert.equal(summary.status, 'published')
+
+  const card = await f.requestRaw(
+    '/bot/v1/bindings/' + f.id + '/share-card?telegramUserId=100000001',
+    { Authorization: 'Bearer ' + credential })
+  assert.equal(card.status, 200)
+  assert.match(card.headers.get('content-type'), /^image\/png/)
+  assert.equal(card.headers.get('cache-control'), 'no-store')
+  assert.deepEqual(card.body.subarray(0, 8),
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  assert.equal(card.body.readUInt32BE(16), 1200)
+  assert.equal(card.body.readUInt32BE(20), 630)
+  assert.equal(decodeURIComponent(card.headers.get('x-vibee-team-name')), 'Synthetic A')
+  assert.equal(decodeURIComponent(card.headers.get('x-vibee-period-label')), '4 ноября')
+  assert.equal(card.body.includes(Buffer.from('100000001')), false)
+
+  error(await f.bot('share-card?telegramUserId=100000002'), 403, 'ORGANIZER_REQUIRED')
+  error(await f.bot('share-card?telegramUserId=999999999'), 403, 'ORGANIZER_REQUIRED')
+  error(await f.bot('share-card?telegramUserId=100000001', undefined, f.id, bootstrapCredential),
+    401, 'BOT_AUTH_REQUIRED')
+  error(await f.bot('share-card'), 400, 'INVALID_INPUT')
+  error(await f.bot('share-card?telegramUserId=100000001', undefined, f.otherBindingId, credential),
+    404, 'NOT_FOUND')
+})
+
+test('HTTP/SQLite: bot share card waits for a published period', async t => {
+  const f = await fixture(t)
+  await f.activate()
+  error(await f.bot('share-card?telegramUserId=100000001'), 409, 'PERIOD_NOT_PUBLISHED')
 })
 
 test('HTTP/SQLite: three synthetic closed dates publish only aggregate metrics and expire after seven days', async t => {
