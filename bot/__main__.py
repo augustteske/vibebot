@@ -7,6 +7,7 @@ import logging
 from hashlib import sha256
 from datetime import timezone
 from pathlib import Path
+from math import isfinite
 from time import monotonic
 
 from aiogram import Bot, Dispatcher, F
@@ -38,6 +39,7 @@ BOT_COMMANDS = [
     BotCommand(command="clean", description="Удалить сообщения бота в этом чате"),
     BotCommand(command="lang", description="Язык / Language: ru, en"),
     BotCommand(command="style", description="Режим общения: классик, ми-ми-ми, правдарубка"),
+    BotCommand(command="stats", description="Статистика команды (для организатора)"),
     BotCommand(command="transcribe", description="Согласие на одну голосовую (нужна локальная модель)"),
     BotCommand(command="subscribe", description="Уведомления организатора (если настроены)"),
 ]
@@ -57,6 +59,7 @@ ERROR_KEYS = {
 
 # Сколько держать завершённый чек-ин в памяти для кнопки «Повторить».
 RETRY_TTL_SECONDS = 300
+STATS_BAR_CELLS = 10
 
 
 class JournalBot(Bot):
@@ -82,6 +85,7 @@ def create_dispatcher(
     voice: VoiceTranscription | None = None,
     notification_transport: HttpTransport | None = None,
     checkin_transport: HttpTransport | None = None,
+    stats_transport: HttpTransport | None = None,
     message_log: SentMessageJournal | None = None,
     question_images: QuestionImageCache | None = None,
     question_images_dir: Path | None = None,
@@ -171,6 +175,78 @@ def create_dispatcher(
         return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
             text=i18n.text(language, "button.retry"), callback_data=f"retry:{action}",
         )]])
+
+    def percent_of(value: object) -> float | None:
+        """Процент из ответа сервера; всё вне 0–100 и нечисло — ``None``."""
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        number = float(value)
+        if not isfinite(number):
+            return None
+        return min(100.0, max(0.0, number))
+
+    def percent_text(value: float) -> str:
+        """Процент без лишнего нуля: 25.0 → «25», 89.8 → «89.8»."""
+        rounded = round(value, 1)
+        return str(int(rounded)) if rounded == int(rounded) else f"{rounded:.1f}"
+
+    def progress_bar(value: float) -> str:
+        filled = int(value / 100 * STATS_BAR_CELLS + 0.5)
+        return "█" * filled + "░" * (STATS_BAR_CELLS - filled)
+
+    def stats_message(language: str, style: str, view: dict[str, object]) -> str | None:
+        """Красивая сводка трёх метрик; ``None`` — сервер прислал неполные данные."""
+        metrics = view.get("metrics")
+        if not isinstance(metrics, dict):
+            return None
+        values = [
+            percent_of(metrics.get("outsideHoursPercent")),
+            percent_of(metrics.get("participationEvenness")),
+            percent_of(metrics.get("recognitionPercent")),
+        ]
+        if any(value is None for value in values):
+            return None
+        keys = ("stats.outside_hours", "stats.participation", "stats.recognition")
+        lines = [i18n.styled_text(language, style, "stats.header"), ""]
+        for key, value in zip(keys, values):
+            lines.append(i18n.text(language, key, value=percent_text(value)))
+            lines.append(progress_bar(value))
+        return "\n".join(lines)
+
+    async def deliver_stats(message, user_id: int, language: str, style: str) -> None:
+        """Показывает статистику команды; при сетевой ошибке даёт кнопку «Повторить»."""
+        if stats_transport is None:
+            await message.answer(i18n.text(language, "stats.no_connection"))
+            return
+        try:
+            view = await stats_transport.get_summary(telegram_user_id=user_id)
+        except OrganizerRequiredError:
+            await message.answer(i18n.styled_text(language, style, "stats.organizer_only"))
+            return
+        except TransportError:
+            await message.answer(
+                i18n.text(language, "error.network"),
+                reply_markup=retry_keyboard(language, "stats"),
+            )
+            return
+        status = view.get("status")
+        if status in ("calibrating", "insufficient"):
+            await message.answer(i18n.styled_text(language, style, "stats.insufficient"))
+            return
+        if status != "published":
+            await message.answer(i18n.styled_text(language, style, "stats.unavailable"))
+            return
+        text = stats_message(language, style, view)
+        if text is None:
+            await message.answer(i18n.text(language, "stats.error"))
+            return
+        report_url = getattr(stats_transport, "web_url", "")
+        keyboard = None
+        if isinstance(report_url, str) and report_url:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+                text=i18n.text(language, "stats.report"), url=report_url,
+            )]])
+        await message.answer(text, reply_markup=keyboard)
 
     async def submit_checkin(
         message, user_id: int, scores: dict[str, int], nonce: str, language: str, style: str,
@@ -420,6 +496,10 @@ def create_dispatcher(
             await event.answer()
             await deliver_subscription(message, event.from_user.id, language, style)
             return
+        if len(parts) == 2 and parts[1] == "stats":
+            await event.answer()
+            await deliver_stats(message, event.from_user.id, language, style)
+            return
         if len(parts) == 3 and parts[1] == "checkin":
             scores = take_pending_checkin(parts[2], event.from_user.id)
             if scores is None:
@@ -495,6 +575,17 @@ def create_dispatcher(
         language = await language_of(state)
         style = chat_style(await style_of(state), message)
         await deliver_subscription(message, message.from_user.id, language, style)
+
+    @dispatcher.message(Command("stats"))
+    async def stats_command(message: Message, state: FSMContext | None = None):
+        language = await language_of(state)
+        style = chat_style(await style_of(state), message)
+        if message.chat.type != "private":
+            await message.answer(i18n.text(language, "stats.private_only"))
+            return
+        if message.from_user is None or message.from_user.is_bot:
+            return
+        await deliver_stats(message, message.from_user.id, language, style)
 
     async def submit_intake_text(message: Message, text: str) -> None:
         if intake is None or message.chat.type == "private" or message.from_user is None:
@@ -673,6 +764,7 @@ async def main():
         voice=voice_transcription,
         notification_transport=transport,
         checkin_transport=transport,
+        stats_transport=transport,
         message_log=message_log,
         question_images=question_image_cache,
         checkin_history=checkin_history,

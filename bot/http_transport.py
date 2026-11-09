@@ -5,9 +5,10 @@ from collections import deque
 from datetime import datetime, timezone
 import logging
 from math import isfinite
+import os
 from time import monotonic
 from typing import Callable
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from uuid import uuid4
 
 import httpx
@@ -198,10 +199,32 @@ class HttpTransport:
         except (KeyError, TypeError):
             raise TransportError("Vibee API returned an invalid binding status") from None
 
-    async def get_summary(self, binding_id: str | None = None) -> dict[str, object]:
-        """Сводка для бота появится после отдельного авторизованного маршрута."""
+    async def get_summary(
+        self,
+        binding_id: str | None = None,
+        telegram_user_id: int | None = None,
+    ) -> dict[str, object]:
+        """Сводка команды для связанного организатора."""
         self._check_binding_id(binding_id)
-        raise TransportError("Telegram summary delivery is not implemented")
+        if type(telegram_user_id) is not int or telegram_user_id < 1:
+            raise TransportError("Invalid Telegram user")
+        url = (
+            f"{self._base_url}/api/bot/v1/bindings/{self._binding_id}/summary?"
+            + urlencode({"telegramUserId": str(telegram_user_id)})
+        )
+        response = await self._get(url)
+        body = self._response_body(response)
+        if response.status_code == 200 and isinstance(body.get("status"), str):
+            return body
+        if response.status_code == 403 and self._error_code(body) == "ORGANIZER_REQUIRED":
+            raise OrganizerRequiredError("Only a linked organizer can read the team summary")
+        raise TransportError("Vibee rejected the team summary request")
+
+    @property
+    def web_url(self) -> str:
+        """Адрес веб-кабинета: VIBEE_WEB_URL или тот же сервер."""
+        configured = os.environ.get("VIBEE_WEB_URL", "").strip()
+        return (configured or self._base_url).rstrip("/")
 
     async def subscribe_notifications(self, telegram_user_id: int) -> dict[str, object]:
         """Subscribes a linked organizer's private Telegram chat to period updates."""

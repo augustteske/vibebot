@@ -116,6 +116,7 @@ _TEXTS: dict[str, dict[str, str]] = {
         "help.clean": "/clean — удалить сообщения бота в этом чате (до 48 часов)",
         "help.lang": "/lang ru | en — язык ответов бота",
         "help.style": "/style — режим общения: классик, ми-ми-ми или правдарубка",
+        "help.stats": "/stats — статистика команды; только для связанного организатора",
         "help.transcribe": "/transcribe — запросить расшифровку одной личной голосовой",
         "help.voice_unavailable": (
             "Расшифровка голосовых сейчас недоступна: локальная модель не настроена."
@@ -190,6 +191,21 @@ _TEXTS: dict[str, dict[str, str]] = {
         "style.name.classic": "Классик",
         "style.name.cute": "Ми-ми-ми",
         "style.name.straight": "Правдарубка",
+        "stats.private_only": "Статистика доступна только в личном диалоге с ботом.",
+        "stats.organizer_only": (
+            "Статистика доступна только организатору, чей Telegram-аккаунт связан с этой командой."
+        ),
+        "stats.no_connection": "Статистика пока недоступна: бот не подключён к серверу.",
+        "stats.insufficient": "Пока недостаточно данных для статистики. Пригласите коллег в чат!",
+        "stats.unavailable": (
+            "Статистика пока недоступна: сбор ещё не дал данных. Попробуйте позже."
+        ),
+        "stats.header": "📊 Статистика команды",
+        "stats.outside_hours": "⏱ Вне работы: {value}%",
+        "stats.participation": "🤝 Участие: {value}%",
+        "stats.recognition": "🙏 Благодарности: {value}%",
+        "stats.report": "Открыть полный отчет",
+        "stats.error": "Не удалось разобрать статистику. Попробуйте позже.",
         "cute.start.private": "Приветик! Я Vibee 🐝💛 Выбери, чем займёмся. О данных — /privacy.",
         "cute.question.ask": (
             "{index}/{total} · {question}\n"
@@ -224,6 +240,13 @@ _TEXTS: dict[str, dict[str, str]] = {
             "Подписка включена 💛 Уведомления о закрытых опубликованных периодах будут приходить сюда."
         ),
         "cute.style.saved": "Готово: теперь общаемся в режиме «{name}» 💛",
+        "cute.stats.header": "📊 Статистика команды 💛",
+        "cute.stats.insufficient": (
+            "Пока маловато данных для статистики 🌱 Пригласите коллег в чат — и всё получится!"
+        ),
+        "cute.stats.unavailable": (
+            "Статистика ещё собирается 🌸 Загляните чуть позже — я всё покажу."
+        ),
         "straight.start.private": (
             "Привет. Vibee на связи. Выбирай сценарий, без лишней болтовни — "
             "она нахер не сдалась. Данные — /privacy."
@@ -259,6 +282,16 @@ _TEXTS: dict[str, dict[str, str]] = {
             "Подписка включена. Уведомления о закрытых периодах придут сюда."
         ),
         "straight.style.saved": "Принято. Режим — «{name}».",
+        "straight.stats.header": "📊 Статистика команды. Без соплей.",
+        "straight.stats.insufficient": (
+            "Данных мало. Пригласи коллег в чат — без них статистики не будет."
+        ),
+        "straight.stats.unavailable": (
+            "Статистики пока нет: собирать ещё нечего. Зайди позже."
+        ),
+        "straight.stats.organizer_only": (
+            "Статистика только для организатора. Остальным тут смотреть нечего."
+        ),
     },
     EN: {
         "start.private": "Hi! I'm Vibee 🐝\nPick a scenario. About data — /privacy.",
@@ -362,6 +395,7 @@ _TEXTS: dict[str, dict[str, str]] = {
         "help.clean": "/clean — delete the bot's messages in this chat (up to 48 hours)",
         "help.lang": "/lang ru | en — bot reply language",
         "help.style": "/style — communication mode: classic, cute or straight",
+        "help.stats": "/stats — team metrics; linked organizer only",
         "help.transcribe": "/transcribe — request transcription of one personal voice message",
         "help.voice_unavailable": (
             "Voice transcription is unavailable right now: the local model is not configured."
@@ -435,6 +469,22 @@ _TEXTS: dict[str, dict[str, str]] = {
         "style.name.classic": "Classic",
         "style.name.cute": "Cute",
         "style.name.straight": "Straight talk",
+        "stats.private_only": "Team metrics are available only in a private chat with the bot.",
+        "stats.organizer_only": (
+            "Team metrics are available only to the organizer whose Telegram account "
+            "is linked to this team."
+        ),
+        "stats.no_connection": "Team metrics are unavailable: the bot is not connected to the server.",
+        "stats.insufficient": "Not enough data for statistics yet. Invite your colleagues to the chat!",
+        "stats.unavailable": (
+            "Team metrics are not available yet: collection has not produced data. Try again later."
+        ),
+        "stats.header": "📊 Team metrics",
+        "stats.outside_hours": "⏱ Outside work hours: {value}%",
+        "stats.participation": "🤝 Participation: {value}%",
+        "stats.recognition": "🙏 Thanks: {value}%",
+        "stats.report": "Open the full report",
+        "stats.error": "Could not read the team metrics. Try again later.",
         "cute.start.private": "Hi there! I'm Vibee 🐝💛 Pick what we're doing. About data — /privacy.",
         "cute.question.ask": (
             "{index}/{total} · {question}\n"
@@ -469,6 +519,13 @@ _TEXTS: dict[str, dict[str, str]] = {
             "Subscription enabled 💛 Notifications about closed published periods will arrive here."
         ),
         "cute.style.saved": "Done: we now talk in “{name}” mode 💛",
+        "cute.stats.header": "📊 Team metrics 💛",
+        "cute.stats.insufficient": (
+            "Not much data for statistics yet 🌱 Invite your colleagues to the chat and it will work!"
+        ),
+        "cute.stats.unavailable": (
+            "The statistics are still brewing 🌸 Check back a little later and I'll show you."
+        ),
         "straight.start.private": (
             "Hi. Vibee here. Pick a scenario — no small talk, it's damn useless. "
             "Data — /privacy."
@@ -504,6 +561,16 @@ _TEXTS: dict[str, dict[str, str]] = {
             "Subscription on. Notifications about closed periods will arrive here."
         ),
         "straight.style.saved": "Done. Mode: “{name}”.",
+        "straight.stats.header": "📊 Team metrics. No fluff.",
+        "straight.stats.insufficient": (
+            "Not enough data. Invite your colleagues to the chat — no people, no statistics."
+        ),
+        "straight.stats.unavailable": (
+            "No statistics yet: there is nothing to collect. Come back later."
+        ),
+        "straight.stats.organizer_only": (
+            "Statistics are for the organizer only. Nothing to see here for everyone else."
+        ),
     },
 }
 
@@ -566,6 +633,7 @@ def help_text(language: object, voice_available: bool, notifications_available: 
         text(language, "help.clean"),
         text(language, "help.lang"),
         text(language, "help.style"),
+        text(language, "help.stats"),
     ]
     if voice_available:
         lines.append(text(language, "help.transcribe"))
