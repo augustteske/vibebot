@@ -1,4 +1,5 @@
 import { ThemeToggle } from './ThemeToggle'
+import { LanguageToggle } from './LanguageToggle'
 import './GuidePage.css'
 
 export interface GuidePageProps {
@@ -33,6 +34,7 @@ export function GuidePage({ onBack, onEnter, onDemo }: GuidePageProps) {
           </button>
         </div>
         <div className="guide-header__right">
+          <LanguageToggle />
           <ThemeToggle />
           <button type="button" className="guide-cta-btn" onClick={onEnter}>
             Войти в кабинет <span aria-hidden="true">→</span>

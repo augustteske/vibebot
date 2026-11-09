@@ -10,6 +10,7 @@ import { DemoDashboard } from './core/DemoDashboard'
 import { GuidePage } from './core/GuidePage'
 import { NotFoundPage } from './core/NotFoundPage'
 import { ThemeToggle } from './core/ThemeToggle'
+import { LanguageToggle } from './core/LanguageToggle'
 import { FeedbackModal } from './core/FeedbackModal'
 import './App.css'
 
@@ -94,7 +95,7 @@ export default function App() {
     <header><a className="brand" href="/" onClick={event => {
       event.preventDefault()
       openHome()
-    }}><img src="/bee.svg" alt=""/>Vibee</a><div className="header-actions"><span className="badge">{team ? 'Пространство команды' : 'Демонстрация · вымышленные данные'}</span><ThemeToggle /></div></header>
+    }}><img src="/bee.svg" alt=""/>Vibee</a><div className="header-actions"><span className="badge">{team ? 'Пространство команды' : 'Демонстрация · вымышленные данные'}</span><LanguageToggle /><ThemeToggle /></div></header>
     <section className="intro"><span className="eyebrow">ПРОСТРАНСТВО КОМАНДЫ</span><h1>Почувствовать команду.<br/>Сделать следующий шаг.</h1><p>Ресурс, ясность и поддержка — повод договориться о том, что поможет сегодня. Утилита для рабочих чатов — в разработке.</p></section>
     <nav className="mode-switch" aria-label="Режим"><button className="button secondary" aria-pressed={!team} onClick={() => mode(false)}>Демонстрационный режим</button><button className="button secondary" aria-pressed={team} onClick={() => mode(true)}>Моя команда</button></nav>
     {team ? <TeamWorkspace onOpenGuide={openGuide}/> : <>

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { SyntheticEvent } from 'react'
 import { ThemeToggle } from './ThemeToggle'
+import { LanguageToggle } from './LanguageToggle'
+import { LanguageProvider, useLanguage } from './i18n'
 import { isNewYearSeason } from './theme'
 import { HoneycombBackground } from './HoneycombBackground'
 import { DemoStamp } from './DemoStamp'
@@ -25,57 +27,6 @@ interface LandingPageProps {
   onGuide?: () => void;
 }
 
-const features = [
-  {
-    number: '01',
-    title: 'Только общая картина',
-    description: 'Показатели помогают заметить динамику команды — без персональных рейтингов и оценки отдельных людей.',
-    icon: '↗',
-  },
-  {
-    number: '02',
-    title: 'Рекомендации — повод обсудить',
-    description: 'Шаблонная гипотеза предлагает небольшой следующий шаг. Решение всегда остаётся за командой.',
-    icon: '✳',
-  },
-  {
-    number: '03',
-    title: 'Обратная связь замыкает цикл',
-    description: 'Команда отмечает, помог ли выбранный шаг, и использует этот опыт для следующего обсуждения.',
-    icon: '✓',
-  },
-]
-
-const contrastPairs = [
-  {
-    id: 'focus',
-    beforeTitle: 'Размытые приоритеты в потоке чатов',
-    beforeText: 'Десятки параллельных обсуждений и срочных пингов: к середине дня непонятно, какая задача действительно главная.',
-    beforeDetail: 'Хаотичные переписки отнимают время команды. Люди переключаются между тредами и теряют контекст важных договорённостей.',
-    afterTitle: 'Понятный фокус на день',
-    afterText: 'Короткий чек-ин и сводка показывают уровень ясности приоритетов и помогают команде выбрать одну главную цель.',
-    afterDetail: 'Один вопрос утром задаёт единый фокус всей команде. В чате появляется прозрачность: каждый понимает приоритеты на сегодня.',
-  },
-  {
-    id: 'rhythm',
-    beforeTitle: 'Незаметная усталость и переработки',
-    beforeText: 'Ночные сообщения и неравномерная вовлечённость видны только постфактум, когда у людей уже закончился ресурс.',
-    beforeDetail: 'Поздние ответы создают негласное давление отвечать 24/7. Команда незаметно выгорает, а тимлид узнаёт об этом слишком поздно.',
-    afterTitle: 'Бережные командные метрики',
-    afterText: 'Агрегаты без личных рейтингов подсвечивают долю сообщений вне расписания, равномерность участия и уровень поддержки.',
-    afterDetail: 'Анонимная агрегация фиксирует баланс общения и мягко сигнализирует о перегрузке без слежки за конкретными людьми.',
-  },
-  {
-    id: 'action',
-    beforeTitle: 'Обсуждения без конкретного шага',
-    beforeText: 'Проблемы озвучиваются на созвонах, но теряются в переписке без понятной договорённости и проверки результата.',
-    beforeDetail: 'Ретроспективы превращаются в бесконечные разговоры: много жалоб, но никто не фиксирует одно простое действие на следующую неделю.',
-    afterTitle: 'Готовая рекомендация и обратная связь',
-    afterText: 'Vibee предлагает конкретный следующий шаг по самому заметному сигналу, а команда отмечает, принёс ли он пользу.',
-    afterDetail: 'Готовые шаблоны гипотез и голосование за 10 секунд: команда выбирает шаг и через неделю проверяет, стало ли лучше.',
-  },
-]
-
 const snowflakes = Array.from({ length: 18 }, (_, index) => ({
   id: index,
   left: `${(index * 17 + 5) % 96}%`,
@@ -84,28 +35,8 @@ const snowflakes = Array.from({ length: 18 }, (_, index) => ({
   size: `${6 + (index % 4) * 3}px`,
 }))
 
-const steps = [
-  {
-    number: '01',
-    label: 'СНАЧАЛА СОГЛАСИЕ',
-    title: 'Подключите чат',
-    description: 'Участие начинается только после согласия компании и каждого участника группы.',
-  },
-  {
-    number: '02',
-    label: 'ЗАТЕМ — ДАННЫЕ',
-    title: 'Дождитесь периода',
-    description: 'Система проверяет, достаточно ли сообщений для допустимых общих показателей.',
-  },
-  {
-    number: '03',
-    label: 'НАКОНЕЦ — ДИАЛОГ',
-    title: 'Выберите следующий шаг',
-    description: 'Обсудите шаблонную рекомендацию, подтвердите действие и поделитесь обратной связью.',
-  },
-]
-
-export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPageProps) {
+function LandingPageContent({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPageProps) {
+  const { t, features, contrastPairs, steps, isTransitioning } = useLanguage()
   const [roomKey, setRoomKey] = useState('')
   const [newYear] = useState(() => isNewYearSeason())
   const [activeContrastIndex, setActiveContrastIndex] = useState(0)
@@ -199,7 +130,7 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
   }, [])
 
   return (
-    <main className={'landing' + (newYear ? ' landing--new-year' : '')} id="top">
+    <main className={'landing' + (newYear ? ' landing--new-year' : '') + (isTransitioning ? ' is-lang-switching' : '')} id="top">
       {newYear && (
         <div className="landing-snow" aria-hidden="true">
           {snowflakes.map(flake => (
@@ -218,13 +149,13 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
         </div>
       )}
       <header className={`landing-header${isScrolled ? ' is-scrolled' : ''}`}>
-        <a className="landing-brand" href="#top" aria-label="Vibee — главная">
+        <a className="landing-brand" href="#top" aria-label={t.footer.brandAria}>
           <img src="/bee.svg" alt="" />
           <span>vibee</span>
         </a>
-        <nav className="landing-nav" aria-label="Навигация по странице">
-          <a href="#features">Преимущества</a>
-          <a href="#how-it-works">Как это работает</a>
+        <nav className="landing-nav" aria-label={t.nav.ariaLabel}>
+          <a href="#features">{t.nav.features}</a>
+          <a href="#how-it-works">{t.nav.howItWorks}</a>
           <a
             href="/guide"
             onClick={event => {
@@ -234,24 +165,24 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
               }
             }}
           >
-            Как подключить?
+            {t.nav.guide}
           </a>
+          <LanguageToggle />
           <ThemeToggle />
-          <button className="landing-nav-cta" onClick={onEnter}>Войти в кабинет</button>
+          <button className="landing-nav-cta" onClick={onEnter}>{t.nav.enter}</button>
         </nav>
       </header>
 
       <section className="landing-hero" aria-labelledby="landing-hero-title">
         <div className="landing-copy landing-reveal landing-reveal--hero">
-          <span className="landing-eyebrow"><span className="landing-eyebrow-dot" /> VIBEE · ДЛЯ КОМАНД</span>
-          <h1 id="landing-hero-title">Общайтесь.<br /><span>Замечайте главное.</span></h1>
+          <span className="landing-eyebrow"><span className="landing-eyebrow-dot" /> {t.hero.eyebrow}</span>
+          <h1 id="landing-hero-title">{t.hero.titleBefore}<br /><span>{t.hero.titleHighlight}</span></h1>
           <p>
-            Общие сигналы помогают команде обсуждать рабочий ритм, выбирать
-            бережные шаги и вместе проверять, что изменилось.
+            {t.hero.lead}
           </p>
           <div className="landing-actions">
             <button className="landing-cta" onClick={onEnter}>
-              Войти в кабинет <span aria-hidden="true">→</span>
+              {t.hero.enterCta} <span aria-hidden="true">→</span>
             </button>
             <button
               className="landing-guide-link"
@@ -261,19 +192,19 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
                 else window.location.href = '/guide'
               }}
             >
-              Как подключить? <span aria-hidden="true">↗</span>
+              {t.hero.guideLink} <span aria-hidden="true">↗</span>
             </button>
             <button className="landing-demo-link" type="button" onClick={onDemo}>
-              Посмотреть демо <span aria-hidden="true">↗</span>
+              {t.hero.demoLink} <span aria-hidden="true">↗</span>
             </button>
             <a className="landing-github" href="https://github.com/augustteske/vibebot" target="_blank" rel="noreferrer">
               GitHub <span aria-hidden="true">↗</span>
             </a>
-            <span className="landing-demo-note">Демонстрация на вымышленных данных</span>
+            <span className="landing-demo-note">{t.hero.demoNote}</span>
           </div>
           <form
             className="landing-room-key"
-            aria-label="У меня есть ключ комнаты"
+            aria-label={t.hero.roomKeyLabel}
             onSubmit={event => {
               event.preventDefault()
               const trimmed = roomKey.trim().toUpperCase()
@@ -287,7 +218,7 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
             }}
           >
             <label className="landing-room-key__label" htmlFor="landing-room-key-input">
-              У меня есть ключ комнаты
+              {t.hero.roomKeyLabel}
             </label>
             <div className="landing-room-key__controls">
               <input
@@ -297,11 +228,11 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
                 onChange={event => setRoomKey(event.target.value.toUpperCase())}
                 maxLength={16}
                 autoComplete="off"
-                placeholder="Код от тимлида (напр. A1B2C3D4)"
+                placeholder={t.hero.roomKeyPlaceholder}
                 required
               />
               <button className="landing-room-key__submit" type="submit">
-                Войти
+                {t.hero.roomKeySubmit}
               </button>
             </div>
           </form>
@@ -335,8 +266,8 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
             )}
             <img src="/bee-mascot.png" alt="" width="1280" height="1280" fetchPriority="high" onError={retryImageOnce} />
           </div>
-          <span className="landing-float-card landing-float-card--top">Решения — за командой</span>
-          <span className="landing-float-card landing-float-card--bottom">Только общие сигналы</span>
+          <span className="landing-float-card landing-float-card--top">{t.hero.floatTop}</span>
+          <span className="landing-float-card landing-float-card--bottom">{t.hero.floatBottom}</span>
         </div>
       </section>
 
@@ -344,11 +275,11 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
         <div className="landing-section-inner">
           <div className="landing-section-heading landing-reveal">
             <div>
-              <span className="landing-eyebrow">ПРОБЛЕМА → РЕШЕНИЕ</span>
-              <h2 id="landing-contrast-title">Было — хаос.<br /><span>Стало — ясность.</span></h2>
+              <span className="landing-eyebrow">{t.contrast.eyebrow}</span>
+              <h2 id="landing-contrast-title">{t.contrast.titleBefore}<br /><span>{t.contrast.titleHighlight}</span></h2>
             </div>
             <div className="landing-contrast-controls">
-              <p>Выберите любую ситуацию или переключите режим сравнения, чтобы увидеть, как меняется командный ритм.</p>
+              <p>{t.contrast.lead}</p>
               <div className="landing-contrast-tabs" role="group" aria-label="Режим сравнения">
                 <button
                   type="button"
@@ -356,7 +287,7 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
                   aria-pressed={contrastView === 'split'}
                   onClick={() => setContrastView('split')}
                 >
-                  Было / Стало
+                  {t.contrast.tabSplit}
                 </button>
                 <button
                   type="button"
@@ -364,7 +295,7 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
                   aria-pressed={contrastView === 'before'}
                   onClick={() => setContrastView('before')}
                 >
-                  Было: проблема
+                  {t.contrast.tabBefore}
                 </button>
                 <button
                   type="button"
@@ -372,7 +303,7 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
                   aria-pressed={contrastView === 'after'}
                   onClick={() => setContrastView('after')}
                 >
-                  Стало: решение
+                  {t.contrast.tabAfter}
                 </button>
               </div>
             </div>
@@ -382,8 +313,8 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
             {contrastView !== 'after' && (
               <article className="landing-contrast-card landing-contrast-card--before landing-reveal">
                 <div className="landing-contrast-card__header">
-                  <span className="landing-contrast-badge landing-contrast-badge--before">БЫЛО · ПРОБЛЕМА</span>
-                  <h3>Было: хаос в чатах, непонятные задачи</h3>
+                  <span className="landing-contrast-badge landing-contrast-badge--before">{t.contrast.beforeBadge}</span>
+                  <h3>{t.contrast.beforeHeader}</h3>
                 </div>
                 <ul className="landing-contrast-list">
                   {contrastPairs.map((pair, index) => {
@@ -402,7 +333,7 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
                           onClick={() => handleToggleContrast(cardKey, index)}
                           aria-expanded={isExpanded}
                           aria-pressed={isSelected}
-                          aria-label={`Было 0${index + 1}: ${pair.beforeTitle}`}
+                          aria-label={t.contrast.ariaBefore(index, pair.beforeTitle)}
                         >
                           <span className="landing-contrast-item__index">0{index + 1}</span>
                           <div className="landing-contrast-item__body">
@@ -411,15 +342,15 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
                             <div className="landing-contrast-item__expanded">
                               <div className="landing-contrast-item__expanded-inner">
                                 <p className="landing-contrast-item__detail">{pair.beforeDetail}</p>
-                                <div className="landing-contrast-video-box" aria-label="Видео подключения">
+                                <div className="landing-contrast-video-box" aria-label={t.contrast.videoPlaceholderTitle}>
                                   <div className="landing-contrast-video-placeholder">
                                     <div className="landing-contrast-video-play-btn" aria-hidden="true">
                                       <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                                         <path d="M8 5v14l11-7z" />
                                       </svg>
                                     </div>
-                                    <span className="landing-contrast-video-title">Видео подключения</span>
-                                    <span className="landing-contrast-video-badge">демо · без звука</span>
+                                    <span className="landing-contrast-video-title">{t.contrast.videoPlaceholderTitle}</span>
+                                    <span className="landing-contrast-video-badge">{t.contrast.videoPlaceholderBadge}</span>
                                   </div>
                                   {/* Временная заглушка: для подключения видео добавьте src="/demo/contrast-before.mp4" */}
                                   <video
@@ -452,8 +383,8 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
             {contrastView !== 'before' && (
               <article className="landing-contrast-card landing-contrast-card--after landing-reveal">
                 <div className="landing-contrast-card__header">
-                  <span className="landing-contrast-badge landing-contrast-badge--after">СТАЛО · РЕШЕНИЕ VIBEE</span>
-                  <h3>Стало: понятные метрики и рекомендации</h3>
+                  <span className="landing-contrast-badge landing-contrast-badge--after">{t.contrast.afterBadge}</span>
+                  <h3>{t.contrast.afterHeader}</h3>
                 </div>
                 <ul className="landing-contrast-list">
                   {contrastPairs.map((pair, index) => {
@@ -472,7 +403,7 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
                           onClick={() => handleToggleContrast(cardKey, index)}
                           aria-expanded={isExpanded}
                           aria-pressed={isSelected}
-                          aria-label={`Стало 0${index + 1}: ${pair.afterTitle}`}
+                          aria-label={t.contrast.ariaAfter(index, pair.afterTitle)}
                         >
                           <span className="landing-contrast-item__index">0{index + 1}</span>
                           <div className="landing-contrast-item__body">
@@ -481,15 +412,15 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
                             <div className="landing-contrast-item__expanded">
                               <div className="landing-contrast-item__expanded-inner">
                                 <p className="landing-contrast-item__detail">{pair.afterDetail}</p>
-                                <div className="landing-contrast-video-box" aria-label="Видео подключения">
+                                <div className="landing-contrast-video-box" aria-label={t.contrast.videoPlaceholderTitle}>
                                   <div className="landing-contrast-video-placeholder">
                                     <div className="landing-contrast-video-play-btn" aria-hidden="true">
                                       <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                                         <path d="M8 5v14l11-7z" />
                                       </svg>
                                     </div>
-                                    <span className="landing-contrast-video-title">Видео подключения</span>
-                                    <span className="landing-contrast-video-badge">демо · без звука</span>
+                                    <span className="landing-contrast-video-title">{t.contrast.videoPlaceholderTitle}</span>
+                                    <span className="landing-contrast-video-badge">{t.contrast.videoPlaceholderBadge}</span>
                                   </div>
                                   {/* Временная заглушка: для подключения видео добавьте src="/demo/contrast-after.mp4" */}
                                   <video
@@ -520,10 +451,10 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
         <div className="landing-section-inner">
           <div className="landing-section-heading landing-reveal">
             <div>
-              <span className="landing-eyebrow">ПРИНЦИПЫ VIBEE</span>
-              <h2 id="landing-features-title">Больше ясности.<br /><span>Меньше шума.</span></h2>
+              <span className="landing-eyebrow">{t.features.eyebrow}</span>
+              <h2 id="landing-features-title">{t.features.titleBefore}<br /><span>{t.features.titleHighlight}</span></h2>
             </div>
-            <p>Инструменты для общего разговора — не для наблюдения за отдельными людьми.</p>
+            <p>{t.features.lead}</p>
           </div>
           <div className="landing-feature-grid">
             {features.map(feature => (
@@ -544,10 +475,10 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
         <div className="landing-section-inner">
           <div className="landing-section-heading landing-reveal">
             <div>
-              <span className="landing-eyebrow">ПРОСТОЙ ПУТЬ</span>
-              <h2 id="landing-how-title">От согласия<br />к общему шагу.</h2>
+              <span className="landing-eyebrow">{t.howItWorks.eyebrow}</span>
+              <h2 id="landing-how-title">{t.howItWorks.titleBefore}<br /><span>{t.howItWorks.titleHighlight}</span></h2>
             </div>
-            <p>Каждый этап понятен участникам, а решение о следующем действии принимает сама команда.</p>
+            <p>{t.howItWorks.lead}</p>
           </div>
           <div className="landing-step-grid">
             {steps.map(step => (
@@ -579,12 +510,8 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
               type="button"
               className={`landing-lock${isPrivacyLocked ? ' is-locked' : ''}`}
               onClick={handleRetriggerLock}
-              aria-label={
-                isPrivacyLocked
-                  ? 'Замок надёжно заблокирован. Нажмите, чтобы открыть и зафиксировать заново'
-                  : 'Замок открыт'
-              }
-              title="Нажмите, чтобы проверить жест закрытия замка"
+              aria-label={isPrivacyLocked ? t.privacy.lockAriaLocked : t.privacy.lockAriaUnlocked}
+              title={t.privacy.lockTitle}
             >
               <div className="landing-lock__shimmer" aria-hidden="true" />
               <div className="landing-lock__spark" aria-hidden="true" />
@@ -612,57 +539,60 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
               </svg>
             </button>
             <span className="landing-lock-badge">
-              {isPrivacyLocked ? '🔒 Защищено' : '🔓 Нажмите'}
+              {isPrivacyLocked ? t.privacy.lockBadgeLocked : t.privacy.lockBadgeUnlocked}
             </span>
           </div>
           <div className="landing-privacy-copy">
-            <span className="landing-eyebrow">ПРИВАТНОСТЬ И БЕЗОПАСНОСТЬ</span>
+            <span className="landing-eyebrow">{t.privacy.eyebrow}</span>
             <h2 id="landing-privacy-title">
-              Нет согласия —<br />
-              <span>нет сбора.</span>
+              {t.privacy.titleBefore}<br />
+              <span>{t.privacy.titleHighlight}</span>
             </h2>
-            <p className="landing-privacy-lead">
-              Мы не читаем переписку без разрешения. Участие абсолютно добровольное: каждый участник
-              может отозвать согласие в любой момент — и мы сразу остановим анализ и удалим данные.
-            </p>
+            <p className="landing-privacy-lead">{t.privacy.lead}</p>
             <div className="landing-privacy-grid">
               <div className="landing-privacy-card">
                 <span className="landing-privacy-card__badge">01</span>
-                <strong>Только агрегаты</strong>
-                <p>Никаких персональных рейтингов и оценок — команда видит только допустимые сводные метрики.</p>
+                <strong>{t.privacy.card1Title}</strong>
+                <p>{t.privacy.card1Text}</p>
               </div>
               <div className="landing-privacy-card">
                 <span className="landing-privacy-card__badge">02</span>
-                <strong>Мгновенный отзыв</strong>
-                <p>Команда <code>/stop</code> в боте или кнопка в кабинете мгновенно стирает черновики и останавливает сбор.</p>
+                <strong>{t.privacy.card2Title}</strong>
+                <p>{t.privacy.card2Text}</p>
               </div>
               <div className="landing-privacy-card">
                 <span className="landing-privacy-card__badge">03</span>
-                <strong>Защитный порог</strong>
-                <p>При менее 5 участниках метрики скрываются, чтобы защитить приватность каждого голоса.</p>
+                <strong>{t.privacy.card3Title}</strong>
+                <p>{t.privacy.card3Text}</p>
               </div>
             </div>
-            <p className="landing-privacy-note">
-              Строгое соблюдение приватности: данные не передаются третьим сторонам и не используются для обучения внешних моделей.
-            </p>
+            <p className="landing-privacy-note">{t.privacy.note}</p>
           </div>
         </div>
       </section>
 
       <footer className="landing-footer">
         <div className="landing-footer-inner">
-          <a className="landing-footer-brand" href="#top" aria-label="Vibee — наверх">
+          <a className="landing-footer-brand" href="#top" aria-label={t.footer.brandAria}>
             <img src="/bee.svg" alt="" />
             <span>vibee</span>
           </a>
-          <span className="landing-footer-note">Общие сигналы. Решения — за командой.</span>
+          <span className="landing-footer-note">{t.footer.note}</span>
           <nav className="landing-footer-links" aria-label="Ссылки">
             <a href="https://github.com/augustteske/vibebot" target="_blank" rel="noreferrer">GitHub <span aria-hidden="true">↗</span></a>
-            <a href="/docs.html">Документация</a>
-            <a href="https://opensource.org/license/mit" target="_blank" rel="noreferrer">MIT License</a>
+            <a href="/docs.html">{t.footer.documentation}</a>
+            <a href="https://opensource.org/license/mit" target="_blank" rel="noreferrer">{t.footer.license}</a>
           </nav>
         </div>
       </footer>
     </main>
+  )
+}
+
+export function LandingPage(props: LandingPageProps) {
+  return (
+    <LanguageProvider>
+      <LandingPageContent {...props} />
+    </LanguageProvider>
   )
 }
