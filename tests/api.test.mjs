@@ -248,6 +248,17 @@ test('room key is generated on workspace creation and allows fast participant on
   assert.equal(badJoin.body.error.code, 'INVALID_ROOM_KEY')
 })
 
+test('60-second onboarding: workspace is created with only team name and returns room key', async t => {
+  const { client } = await start(t)
+  const owner = client()
+  const created = await owner('/workspaces', { name: 'Команда 60 секунд' })
+  assert.equal(created.status, 201)
+  assert.equal(created.body.workspace.name, 'Команда 60 секунд')
+  assert.equal(created.body.member.role, 'organizer')
+  assert.equal(created.body.member.name, 'Тимлид')
+  assert.match(created.body.workspace.roomKey, /^[A-F0-9]{8}$/)
+})
+
 test('session, JSON values, request origin and workspace boundaries are enforced', async t => {
   const { owner, client, roundId } = await team(t, 1)
   const outsider = client()

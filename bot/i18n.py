@@ -15,7 +15,17 @@ DEFAULT_LANGUAGE = RU
 
 _TEXTS: dict[str, dict[str, str]] = {
     RU: {
-        "start.private": "Привет! Я Vibee 🐝\nВыберите сценарий. О данных — /privacy.",
+        "start.private": (
+            "Привет! Я Vibee 🐝\n\n"
+            "Хочешь подключить свою команду? Просто отправь мне ключ комнаты (например, A1B2C3D4).\n\n"
+            "Или выберите сценарий ниже. О данных — /privacy."
+        ),
+        "onboarding.room_connected": (
+            "Отлично! Теперь ты в команде. Когда все коллеги подключатся, мы начнем собирать метрики."
+        ),
+        "onboarding.room_prompt": (
+            "Хочешь подключить свою команду? Просто отправь мне 8-значный ключ комнаты (например, A1B2C3D4)."
+        ),
         "start.group.no_intake": (
             "Сбор сообщений из групп в этом запуске не настроен, "
             "поэтому Vibee их не обрабатывает. "
@@ -242,7 +252,17 @@ _TEXTS: dict[str, dict[str, str]] = {
             "Бот не может писать в чат команды: проверьте его права или добавьте бота в чат."
         ),
         "share.group_failed": "Не получилось отправить карточку в чат. Попробуйте ещё раз.",
-        "cute.start.private": "Приветик! Я Vibee 🐝💛 Выбери, чем займёмся. О данных — /privacy.",
+        "cute.start.private": (
+            "Приветик! Я Vibee 🐝💛\n\n"
+            "Хочешь подключить свою команду? Просто отправь мне ключ комнаты (например, A1B2C3D4).\n\n"
+            "Или выбери, чем займёмся ниже 🌸 О данных — /privacy."
+        ),
+        "cute.onboarding.room_connected": (
+            "Отлично! Теперь ты в команде 🐝✨ Когда все коллеги подключатся, мы начнем собирать метрики 💛"
+        ),
+        "cute.onboarding.room_prompt": (
+            "Хочешь подключить команду? Отправь мне ключик комнаты (например, A1B2C3D4) 🌸"
+        ),
         "cute.question.ask": (
             "{index}/{total} · {question}\n"
             "Поставь от 1 до 5, как чувствуешь 🌸 Передумал — /stop."
@@ -284,8 +304,14 @@ _TEXTS: dict[str, dict[str, str]] = {
             "Статистика ещё собирается 🌸 Загляните чуть позже — я всё покажу."
         ),
         "straight.start.private": (
-            "Привет. Vibee на связи. Выбирай сценарий, без лишней болтовни — "
-            "она нахер не сдалась. Данные — /privacy."
+            "Привет. Vibee на связи. Хочешь подключить свою команду? Отправь ключ комнаты (например, A1B2C3D4).\n\n"
+            "Или выбирай сценарий, без лишней болтовни — она нахер не сдалась. Данные — /privacy."
+        ),
+        "straight.onboarding.room_connected": (
+            "Отлично. Теперь ты в команде. Когда все коллеги подключатся, начнем собирать метрики."
+        ),
+        "straight.onboarding.room_prompt": (
+            "Хочешь подключить команду? Кинь сюда 8-значный ключ комнаты (например, A1B2C3D4)."
         ),
         "straight.question.ask": (
             "{index}/{total} · {question}\nСтавь от 1 до 5. Надоело — /stop."
@@ -330,7 +356,17 @@ _TEXTS: dict[str, dict[str, str]] = {
         ),
     },
     EN: {
-        "start.private": "Hi! I'm Vibee 🐝\nPick a scenario. About data — /privacy.",
+        "start.private": (
+            "Hi! I'm Vibee 🐝\n\n"
+            "Want to connect your team? Just send me the room key (e.g. A1B2C3D4).\n\n"
+            "Or pick a scenario below. About data — /privacy."
+        ),
+        "onboarding.room_connected": (
+            "Great! You're in the team now. Once all colleagues join, we will start collecting metrics."
+        ),
+        "onboarding.room_prompt": (
+            "Want to connect your team? Just send me the 8-character room key (e.g. A1B2C3D4)."
+        ),
         "start.group.no_intake": (
             "Collecting messages from groups is not configured in this run, "
             "so Vibee does not process them. "
@@ -553,7 +589,17 @@ _TEXTS: dict[str, dict[str, str]] = {
             "The bot cannot post to the team chat: check its rights or add the bot to the chat."
         ),
         "share.group_failed": "Could not send the card to the chat. Please try again.",
-        "cute.start.private": "Hi there! I'm Vibee 🐝💛 Pick what we're doing. About data — /privacy.",
+        "cute.start.private": (
+            "Hi there! I'm Vibee 🐝💛\n\n"
+            "Want to connect your team? Just send me the room key (e.g. A1B2C3D4).\n\n"
+            "Or pick what we're doing below 🌸 About data — /privacy."
+        ),
+        "cute.onboarding.room_connected": (
+            "Great! You're in the team now 🐝✨ Once all colleagues join, we will start collecting metrics 💛"
+        ),
+        "cute.onboarding.room_prompt": (
+            "Want to connect your team? Send me the room key (e.g. A1B2C3D4) 🌸"
+        ),
         "cute.question.ask": (
             "{index}/{total} · {question}\n"
             "Rate it 1 to 5, however you feel 🌸 Changed your mind — /stop."
@@ -595,8 +641,14 @@ _TEXTS: dict[str, dict[str, str]] = {
             "The statistics are still brewing 🌸 Check back a little later and I'll show you."
         ),
         "straight.start.private": (
-            "Hi. Vibee here. Pick a scenario — no small talk, it's damn useless. "
-            "Data — /privacy."
+            "Hi. Vibee here. Want to connect your team? Send me the room key (e.g. A1B2C3D4).\n\n"
+            "Or pick a scenario — no small talk, it's damn useless. Data — /privacy."
+        ),
+        "straight.onboarding.room_connected": (
+            "Great. You're in the team now. Once all colleagues join, we will start collecting metrics."
+        ),
+        "straight.onboarding.room_prompt": (
+            "Want to connect your team? Throw the 8-character room key here (e.g. A1B2C3D4)."
         ),
         "straight.question.ask": (
             "{index}/{total} · {question}\nRate 1 to 5. Done with it — /stop."

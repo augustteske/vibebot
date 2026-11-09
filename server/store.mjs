@@ -104,8 +104,9 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
       return session(saved.member_id)
     },
     createWorkspace(input) {
-      const name = text(input.name, 80, 'Название команды')
-      const memberName = text(input.displayName, 60, 'Имя участника')
+      const name = text(input?.name, 80, 'Название команды')
+      const rawMemberName = typeof input?.displayName === 'string' && input.displayName.trim() ? input.displayName : 'Тимлид'
+      const memberName = text(rawMemberName, 60, 'Имя участника')
       return tx(() => {
         const workspaceId = randomUUID(), memberId = randomUUID(), roomKey = generateRoomKey()
         run('INSERT INTO workspaces(id,name,room_key) VALUES(?,?,?)', workspaceId, name, roomKey)

@@ -9,6 +9,7 @@ import { SystemHealthPanel } from './SystemHealthPanel'
 import { TelegramCheckinsPanel } from '../features/insights/TelegramCheckinsPanel'
 import { InviteColleagueButton } from './InviteModal'
 import { downloadUserData } from './dataExport'
+import { DemoPulsePreview } from './DemoPulsePreview'
 import './team.css'
 
 export type TeamMemberRole = 'lead' | 'developer' | 'designer' | 'manager' | 'other';
@@ -138,6 +139,13 @@ export function TeamWorkspace({ onOpenGuide }: TeamWorkspaceProps = {}) {
   const [summaryRefreshKey, setSummaryRefreshKey] = useState(0)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState('')
+  const [showOnboardingBanner, setShowOnboardingBanner] = useState(() => {
+    try {
+      return sessionStorage.getItem('vibee:onboarding-active') === 'true' || !!sessionStorage.getItem('vibee:onboarding-room')
+    } catch {
+      return false
+    }
+  })
   const requestVersion = useRef(0)
   const busyRef = useRef(false)
   const refreshingRef = useRef(false)
@@ -352,6 +360,55 @@ export function TeamWorkspace({ onOpenGuide }: TeamWorkspaceProps = {}) {
         <p><button className="button secondary" type="button" onClick={() => void handleExport()} disabled={exporting}>{exporting ? 'Подготовка файла…' : 'Скачать мои данные (JSON)'}</button></p>
         <a href="/docs.html#privacy">Подробнее об обработке данных</a>
       </details>}
+      {showOnboardingBanner && snapshot.member.role === 'organizer' && (
+        <section className="panel onboarding-banner" aria-label="Онбординг команды">
+          <div className="onboarding-banner__header">
+            <div className="onboarding-banner__step-info">
+              <span className="onboarding-progress__badge">Шаг 3 из 3</span>
+              <strong>Знакомство с кабинетом</strong>
+            </div>
+            <button
+              type="button"
+              className="text-button onboarding-banner__dismiss"
+              onClick={() => {
+                setShowOnboardingBanner(false)
+                try {
+                  sessionStorage.removeItem('vibee:onboarding-active')
+                  sessionStorage.removeItem('vibee:onboarding-room')
+                } catch {}
+              }}
+            >
+              Понятно ✓
+            </button>
+          </div>
+          <div className="onboarding-progress__track" style={{ margin: '10px 0 16px 0' }}>
+            <div className="onboarding-progress__bar" style={{ width: '100%' }} />
+          </div>
+          <div className="onboarding-banner__body">
+            <div className="onboarding-banner__key-col">
+              <span className="onboarding-banner__key-label">Ключ для коллег</span>
+              <div className="onboarding-banner__key-box">
+                <code>{snapshot.workspace.roomKey || '—'}</code>
+                <button
+                  type="button"
+                  className="button secondary"
+                  style={{ padding: '4px 10px', fontSize: '0.85rem' }}
+                  onClick={() => {
+                    void navigator.clipboard.writeText(snapshot.workspace.roomKey ?? '')
+                    setNotice('Ключ комнаты скопирован.')
+                  }}
+                >
+                  Скопировать
+                </button>
+              </div>
+            </div>
+            <p className="onboarding-banner__text">
+              Отправьте этот ключ коллегам. Они смогут войти в Vibee за 2 клика.
+            </p>
+          </div>
+        </section>
+      )}
+      {snapshot.member.role === 'organizer' && <DemoPulsePreview onConnectBot={onOpenGuide} />}
       {snapshot.member.role === 'organizer' && <SystemHealthPanel key={'health-' + activeWorkspaceId} onLogin={beginLogin}/>}
       {snapshot.member.role === 'organizer' && <SummaryPanels key={snapshot.workspace.id + ':' + snapshot.round.id + ':' + snapshot.round.summary.status} refreshKey={summaryRefreshKey} onLogin={beginLogin}/>}
       {snapshot.member.role === 'organizer' && <TelegramCheckinsPanel key={'checkins-' + activeWorkspaceId} onLogin={beginLogin}/>}

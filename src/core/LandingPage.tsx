@@ -6,6 +6,7 @@ import { LanguageProvider, useLanguage } from './i18n'
 import { isNewYearSeason } from './theme'
 import { HoneycombBackground } from './HoneycombBackground'
 import { DemoStamp } from './DemoStamp'
+import { QuickOnboardingModal } from './QuickOnboardingModal'
 import './LandingPage.css'
 
 export { DemoStamp }
@@ -38,6 +39,7 @@ const snowflakes = Array.from({ length: 18 }, (_, index) => ({
 function LandingPageContent({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPageProps) {
   const { t, features, contrastPairs, steps, isTransitioning } = useLanguage()
   const [roomKey, setRoomKey] = useState('')
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState(false)
   const [newYear] = useState(() => isNewYearSeason())
   const [activeContrastIndex, setActiveContrastIndex] = useState(0)
   const [expandedContrastCard, setExpandedContrastCard] = useState<string | null>(null)
@@ -181,6 +183,9 @@ function LandingPageContent({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
             {t.hero.lead}
           </p>
           <div className="landing-actions">
+            <button type="button" className="landing-cta-magic" onClick={() => setIsOnboardingOpen(true)}>
+              {t.hero.quickStartCta}
+            </button>
             <button className="landing-cta" onClick={onEnter}>
               {t.hero.enterCta} <span aria-hidden="true">→</span>
             </button>
@@ -585,6 +590,15 @@ function LandingPageContent({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
           </nav>
         </div>
       </footer>
+
+      <QuickOnboardingModal
+        isOpen={isOnboardingOpen}
+        onClose={() => setIsOnboardingOpen(false)}
+        onComplete={() => {
+          setIsOnboardingOpen(false)
+          onEnter()
+        }}
+      />
     </main>
   )
 }

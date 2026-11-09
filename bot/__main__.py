@@ -2,6 +2,7 @@
 import asyncio
 from contextlib import suppress
 import os
+import re
 import sys
 import logging
 from hashlib import sha256
@@ -776,8 +777,45 @@ def create_dispatcher(
             await intake.reconcile_pause()
             logging.getLogger(__name__).warning("Telegram intake paused after delivery failure; pause the binding on the server before resuming")
 
+    def parse_room_key(raw: str | None) -> str | None:
+        if not raw:
+            return None
+        text = raw.strip()
+        if re.fullmatch(r"[A-Fa-f0-9]{8}", text):
+            return text.upper()
+        match = re.search(r"(?:ключ|код|room|key)[:\s]+([A-Fa-f0-9]{8})\b", text, re.IGNORECASE)
+        if match:
+            return match.group(1).upper()
+        return None
+
+    @dispatcher.message(Command("room"))
+    @dispatcher.message(Command("join"))
+    async def room_command(message: Message, state: FSMContext | None = None) -> None:
+        if message.chat.type != "private":
+            return
+        language = await language_of(state)
+        style = chat_style(await style_of(state), message)
+        parts = (message.text or "").split(maxsplit=1)
+        arg = parts[1].strip() if len(parts) > 1 else ""
+        key = parse_room_key(arg)
+        if key:
+            if state is not None:
+                await state.update_data(room_key=key)
+            await message.answer(i18n.styled_text(language, style, "onboarding.room_connected"))
+        else:
+            await message.answer(i18n.styled_text(language, style, "onboarding.room_prompt"))
+
     @dispatcher.message(F.text)
-    async def intake_message(message: Message) -> None:
+    async def intake_message(message: Message, state: FSMContext | None = None) -> None:
+        if message.chat.type == "private" and message.text and not message.text.startswith("/"):
+            room_key = parse_room_key(message.text)
+            if room_key:
+                if state is not None:
+                    await state.update_data(room_key=room_key)
+                language = await language_of(state)
+                style = chat_style(await style_of(state), message)
+                await message.answer(i18n.styled_text(language, style, "onboarding.room_connected"))
+                return
         if message.text is not None:
             await submit_intake_text(message, message.text)
 
