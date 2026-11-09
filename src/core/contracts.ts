@@ -4,7 +4,14 @@ export type Suggestion = { id: string; title: string; body: string; reason: stri
 export type FeedbackSummary = { status: 'open' } | { status: 'insufficient' } | { status: 'published'; helpfulPercent: number }
 export type TeamAction = { id: string; title: string; goal: string; createdAt: string; feedback: FeedbackSummary; myFeedbackSubmitted: boolean }
 export type SessionSnapshot = {
-  workspace: { id: string; name: string; roomKey?: string }
+  workspace: {
+    id: string
+    name: string
+    roomKey?: string
+    roomKeyExpiresAt?: string | null
+    roomKeyUses?: number
+    roomKeyMaxUses?: number
+  }
   member: { name: string; role: 'organizer' | 'participant' }
   round: { id: string; createdAt: string; closedAt: string | null; summary: Summary; mySubmitted: boolean }
   suggestions: Suggestion[]

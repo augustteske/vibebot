@@ -12,15 +12,30 @@ function UserPlusIcon() {
 
 interface InviteModalProps {
   roomKey?: string | null;
+  roomKeyExpiresAt?: string | null;
+  roomKeyUses?: number;
+  roomKeyMaxUses?: number;
+  onRotateKey?: () => Promise<void>;
   onIssueInvite?: () => Promise<string | void>;
   inviteLink?: string;
   triggerClassName?: string;
 }
 
-export function InviteColleagueButton({ roomKey, onIssueInvite, inviteLink: externalInviteLink = '', triggerClassName }: InviteModalProps) {
+export function InviteColleagueButton({
+  roomKey,
+  roomKeyExpiresAt,
+  roomKeyUses,
+  roomKeyMaxUses,
+  onRotateKey,
+  onIssueInvite,
+  inviteLink: externalInviteLink = '',
+  triggerClassName,
+}: InviteModalProps) {
   const [open, setOpen] = useState(false)
   const [status, setStatus] = useState('')
   const [generating, setGenerating] = useState(false)
+  const [rotating, setRotating] = useState(false)
+  const [confirmingRotate, setConfirmingRotate] = useState(false)
   const [generatedLink, setGeneratedLink] = useState('')
   const triggerRef = useRef<HTMLButtonElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
@@ -57,6 +72,21 @@ export function InviteColleagueButton({ roomKey, onIssueInvite, inviteLink: exte
       setStatus('Не удалось создать ссылку-приглашение.')
     } finally {
       setGenerating(false)
+    }
+  }
+
+  async function handleRotate() {
+    if (!onRotateKey || rotating) return
+    setRotating(true)
+    setStatus('')
+    try {
+      await onRotateKey()
+      setStatus('Ключ комнаты успешно обновлён.')
+      setConfirmingRotate(false)
+    } catch {
+      setStatus('Не удалось обновить ключ комнаты.')
+    } finally {
+      setRotating(false)
     }
   }
 
@@ -108,6 +138,50 @@ export function InviteColleagueButton({ roomKey, onIssueInvite, inviteLink: exte
               </button>
             </div>
           </label>
+          <div className="invite-modal-key-meta" style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginTop: '6px', fontSize: '0.85rem' }}>
+            <span className="muted">
+              {roomKeyExpiresAt ? `Действует до ${new Date(roomKeyExpiresAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}
+              {roomKeyExpiresAt ? ' · ' : ''}
+              {`Использовано: ${roomKeyUses ?? 0}/${roomKeyMaxUses ?? 10}`}
+            </span>
+            {onRotateKey && !confirmingRotate && (
+              <button
+                type="button"
+                className="text-button"
+                style={{ padding: '0', fontSize: '0.85rem', textDecoration: 'underline', cursor: 'pointer' }}
+                onClick={() => setConfirmingRotate(true)}
+              >
+                Обновить ключ
+              </button>
+            )}
+          </div>
+          {confirmingRotate && (
+            <div className="invite-modal-confirm" style={{ marginTop: '10px', padding: '10px 12px', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '10px', fontSize: '0.85rem' }}>
+              <p style={{ margin: '0 0 8px 0', color: 'var(--vibee-ink)' }}>
+                Старый ключ перестанет работать. Коллеги, которые не успели войти, не смогут этого сделать.
+              </p>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="button"
+                  style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                  disabled={rotating}
+                  onClick={() => void handleRotate()}
+                >
+                  {rotating ? 'Обновляем…' : 'Подтвердить и обновить'}
+                </button>
+                <button
+                  type="button"
+                  className="button secondary"
+                  style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                  disabled={rotating}
+                  onClick={() => setConfirmingRotate(false)}
+                >
+                  Отмена
+                </button>
+              </div>
+            </div>
+          )}
         </div>}
 
         <div className="invite-modal-section">

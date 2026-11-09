@@ -54,6 +54,15 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
   if (!workspaceColumns.some(column => column.name === 'room_key')) {
     db.exec('ALTER TABLE workspaces ADD COLUMN room_key TEXT; CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_room_key ON workspaces(room_key);')
   }
+  if (!workspaceColumns.some(column => column.name === 'room_key_expires_at')) {
+    db.exec('ALTER TABLE workspaces ADD COLUMN room_key_expires_at INTEGER;')
+  }
+  if (!workspaceColumns.some(column => column.name === 'room_key_uses')) {
+    db.exec('ALTER TABLE workspaces ADD COLUMN room_key_uses INTEGER NOT NULL DEFAULT 0;')
+  }
+  if (!workspaceColumns.some(column => column.name === 'room_key_max_uses')) {
+    db.exec('ALTER TABLE workspaces ADD COLUMN room_key_max_uses INTEGER NOT NULL DEFAULT 10;')
+  }
   const one = (sql, ...args) => db.prepare(sql).get(...args)
   const all = (sql, ...args) => db.prepare(sql).all(...args)
   const run = (sql, ...args) => db.prepare(sql).run(...args)
@@ -122,10 +131,32 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
       const memberName = text(rawMemberName, 60, 'Имя участника')
       return tx(() => {
         const workspaceId = randomUUID(), memberId = randomUUID(), roomKey = generateRoomKey()
-        run('INSERT INTO workspaces(id,name,room_key) VALUES(?,?,?)', workspaceId, name, roomKey)
+        const expiresAt = now() + 7 * 86400000
+        run('INSERT INTO workspaces(id,name,room_key,room_key_expires_at,room_key_uses,room_key_max_uses) VALUES(?,?,?,?,0,10)', workspaceId, name, roomKey, expiresAt)
         run('INSERT INTO members VALUES(?,?,?,?)', memberId, workspaceId, memberName, 'organizer')
         createRound(workspaceId)
         return session(memberId)
+      })
+    },
+    rotateRoomKey(memberOrWorkspaceId, optionalMemberId) {
+      let member
+      if (typeof memberOrWorkspaceId === 'object' && memberOrWorkspaceId !== null) {
+        member = memberOrWorkspaceId
+      } else {
+        member = one('SELECT * FROM members WHERE id=? AND workspace_id=?', optionalMemberId, memberOrWorkspaceId)
+        if (!member) fail(404, 'NOT_FOUND', 'Участник не найден')
+      }
+      requireOrganizer(member)
+      return tx(() => {
+        const roomKey = generateRoomKey()
+        const expiresAt = now() + 7 * 86400000
+        run('UPDATE workspaces SET room_key=?, room_key_expires_at=?, room_key_uses=0, room_key_max_uses=10 WHERE id=?', roomKey, expiresAt, member.workspace_id)
+        return {
+          roomKey,
+          roomKeyExpiresAt: new Date(expiresAt).toISOString(),
+          roomKeyUses: 0,
+          roomKeyMaxUses: 10,
+        }
       })
     },
     invite(member) {
@@ -142,8 +173,15 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
       const rawName = typeof input?.displayName === 'string' && input.displayName.trim() ? input.displayName : 'Участник'
       const name = text(rawName, 60, 'Имя участника')
       return tx(() => {
-        const workspace = one('SELECT id FROM workspaces WHERE UPPER(room_key)=?', roomKey)
+        const workspace = one('SELECT id, room_key_expires_at, room_key_uses, room_key_max_uses FROM workspaces WHERE UPPER(room_key)=?', roomKey)
         if (!workspace) fail(400, 'INVALID_ROOM_KEY', 'Ключ комнаты не найден. Проверьте код у организатора и попробуйте снова.')
+        if (workspace.room_key_expires_at && workspace.room_key_expires_at <= now()) {
+          fail(400, 'EXPIRED_ROOM_KEY', 'Срок действия ключа комнаты истёк. Попросите тимлида сгенерировать новый.')
+        }
+        if (workspace.room_key_max_uses !== null && workspace.room_key_max_uses !== undefined && (workspace.room_key_uses ?? 0) >= workspace.room_key_max_uses) {
+          fail(400, 'ROOM_KEY_LIMIT_EXCEEDED', 'Лимит использований ключа исчерпан. Попросите тимлида сгенерировать новый.')
+        }
+        run('UPDATE workspaces SET room_key_uses=room_key_uses+1 WHERE id=?', workspace.id)
         const id = randomUUID()
         run('INSERT INTO members VALUES(?,?,?,?)', id, workspace.id, name, 'participant')
         return session(id)
@@ -163,16 +201,36 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
       })
     },
     snapshot(member) {
-      let workspaceRow = one('SELECT id,name,room_key FROM workspaces WHERE id=?', member.workspace_id)
-      if (workspaceRow && !workspaceRow.room_key) {
-        const roomKey = generateRoomKey()
-        run('UPDATE workspaces SET room_key=? WHERE id=?', roomKey, workspaceRow.id)
-        workspaceRow = { ...workspaceRow, room_key: roomKey }
+      let workspaceRow = one('SELECT id,name,room_key,room_key_expires_at,room_key_uses,room_key_max_uses FROM workspaces WHERE id=?', member.workspace_id)
+      if (workspaceRow) {
+        let updated = false
+        let roomKey = workspaceRow.room_key
+        let expiresAt = workspaceRow.room_key_expires_at
+        const uses = workspaceRow.room_key_uses ?? 0
+        const maxUses = workspaceRow.room_key_max_uses ?? 10
+        if (!roomKey) {
+          roomKey = generateRoomKey()
+          updated = true
+        }
+        if (!expiresAt) {
+          expiresAt = now() + 7 * 86400000
+          updated = true
+        }
+        if (updated) {
+          run('UPDATE workspaces SET room_key=?, room_key_expires_at=?, room_key_uses=?, room_key_max_uses=? WHERE id=?',
+            roomKey, expiresAt, uses, maxUses, workspaceRow.id)
+          workspaceRow = { ...workspaceRow, room_key: roomKey, room_key_expires_at: expiresAt, room_key_uses: uses, room_key_max_uses: maxUses }
+        }
       }
       const workspace = {
         id: workspaceRow.id,
         name: workspaceRow.name,
-        ...(member.role === 'organizer' && workspaceRow.room_key ? { roomKey: workspaceRow.room_key } : {}),
+        ...(member.role === 'organizer' && workspaceRow.room_key ? {
+          roomKey: workspaceRow.room_key,
+          roomKeyExpiresAt: workspaceRow.room_key_expires_at ? new Date(workspaceRow.room_key_expires_at).toISOString() : null,
+          roomKeyUses: workspaceRow.room_key_uses ?? 0,
+          roomKeyMaxUses: workspaceRow.room_key_max_uses ?? 10,
+        } : {}),
       }
       const round = roundFor(member)
       const actions = all('SELECT * FROM actions WHERE workspace_id=? ORDER BY rowid DESC LIMIT 12', member.workspace_id).map(action => ({
@@ -387,7 +445,12 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
     },
     getWorkspaceByRoomKey(roomKey) {
       if (typeof roomKey !== 'string' || !roomKey.trim()) return null
-      return one('SELECT id, name, room_key FROM workspaces WHERE UPPER(room_key)=?', roomKey.trim().toUpperCase()) ?? null
+      const ws = one('SELECT id, name, room_key, room_key_expires_at, room_key_uses, room_key_max_uses FROM workspaces WHERE UPPER(room_key)=?', roomKey.trim().toUpperCase())
+      if (!ws) return null
+      if (ws.room_key_expires_at && ws.room_key_expires_at <= now()) {
+        fail(400, 'EXPIRED_ROOM_KEY', 'Срок действия ключа комнаты истёк. Попросите тимлида сгенерировать новый.')
+      }
+      return ws
     },
     createLeaderMessage(input) {
       const wsId = text(input?.workspace_id, 36, 'Команда')
