@@ -2,12 +2,14 @@
  * Карточка «Пульс команды» для Telegram: PNG без внешних зависимостей.
  *
  * Сервер собирает картинку 1200×630 из трёх чисел периода тем же способом,
- * что и веб-версия: жёлтый фон, тёмные карточки метрик, пиксельный шрифт.
+ * что и веб-версия: жёлтый фон, тёмные карточки метрик, шрифт Inter.
  * Текст на картинке фиксированный (заголовок и подписи метрик), название
  * команды и период идут в подписи к фото в Telegram — их форматирует бот.
  */
 import { deflateSync } from 'node:zlib'
+import { fileURLToPath } from 'node:url'
 import { formatSharePercent } from '../src/features/insights/shareCard.ts'
+import { drawText, loadFontFile, measureText } from './truetype.mjs'
 
 export const SHARE_CARD_WIDTH = 1200
 export const SHARE_CARD_HEIGHT = 630
@@ -30,50 +32,14 @@ const CARD_HEIGHT = 250
 const CARD_TOP = 240
 const CARD_GAP = 26
 const CARD_LEFT = 64
-const GLYPH_WIDTH = 5
-const GLYPH_HEIGHT = 7
-const GLYPH_SPACING = 1
 
-// Пиксельный шрифт 5×7: только символы, которые встречаются на карточке.
-const GLYPHS = {
-  ' ': ['     ', '     ', '     ', '     ', '     ', '     ', '     '],
-  '0': ['.###.', '#...#', '#..##', '#.#.#', '##..#', '#...#', '.###.'],
-  '1': ['..#..', '.##..', '..#..', '..#..', '..#..', '..#..', '.###.'],
-  '2': ['.###.', '#...#', '....#', '...#.', '..#..', '.#...', '#####'],
-  '3': ['#####', '...#.', '..#..', '...#.', '....#', '#...#', '.###.'],
-  '4': ['...#.', '..##.', '.#.#.', '#..#.', '#####', '...#.', '...#.'],
-  '5': ['#####', '#....', '####.', '....#', '....#', '#...#', '.###.'],
-  '6': ['..##.', '.#...', '#....', '####.', '#...#', '#...#', '.###.'],
-  '7': ['#####', '....#', '...#.', '..#..', '.#...', '.#...', '.#...'],
-  '8': ['.###.', '#...#', '#...#', '.###.', '#...#', '#...#', '.###.'],
-  '9': ['.###.', '#...#', '#...#', '.####', '....#', '...#.', '.##..'],
-  '%': ['##..#', '##..#', '...#.', '..#..', '.#...', '#..##', '#..##'],
-  ',': ['.....', '.....', '.....', '.....', '.....', '..#..', '.#...'],
-  A: ['.###.', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'],
-  B: ['####.', '#...#', '#...#', '####.', '#...#', '#...#', '####.'],
-  E: ['#####', '#....', '#....', '####.', '#....', '#....', '#####'],
-  I: ['.###.', '..#..', '..#..', '..#..', '..#..', '..#..', '.###.'],
-  V: ['#...#', '#...#', '#...#', '#...#', '#...#', '.#.#.', '..#..'],
-  А: ['.###.', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'],
-  Б: ['#####', '#....', '#....', '####.', '#...#', '#...#', '####.'],
-  В: ['####.', '#...#', '#...#', '####.', '#...#', '#...#', '####.'],
-  Д: ['..###', '.#..#', '.#..#', '.#..#', '.#..#', '#####', '#...#'],
-  З: ['.###.', '#...#', '....#', '..##.', '....#', '#...#', '.###.'],
-  И: ['#...#', '#...#', '#..##', '#.#.#', '##..#', '#...#', '#...#'],
-  К: ['#...#', '#..#.', '#.#..', '##...', '#.#..', '#..#.', '#...#'],
-  Л: ['..###', '.#..#', '.#..#', '.#..#', '.#..#', '.#..#', '#...#'],
-  М: ['#...#', '##.##', '#.#.#', '#.#.#', '#...#', '#...#', '#...#'],
-  Н: ['#...#', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'],
-  О: ['.###.', '#...#', '#...#', '#...#', '#...#', '#...#', '.###.'],
-  П: ['#####', '#...#', '#...#', '#...#', '#...#', '#...#', '#...#'],
-  Р: ['####.', '#...#', '#...#', '####.', '#....', '#....', '#....'],
-  С: ['.###.', '#...#', '#....', '#....', '#....', '#...#', '.###.'],
-  Т: ['#####', '..#..', '..#..', '..#..', '..#..', '..#..', '..#..'],
-  У: ['#...#', '#...#', '#...#', '.####', '....#', '...#.', '.##..'],
-  Ч: ['#...#', '#...#', '#...#', '.####', '....#', '....#', '....#'],
-  Ы: ['#...#', '#...#', '#...#', '##..#', '#.#.#', '#.#.#', '##..#'],
-  Ь: ['#....', '#....', '#....', '####.', '#...#', '#...#', '####.'],
+function loadFont(file) {
+  return loadFontFile(fileURLToPath(new URL(file, import.meta.url)))
 }
+
+// Inter из дизайна: 600 — подписи, 800 — крупные надписи и числа.
+const FONT_LABEL = loadFont('./fonts/inter-semibold.ttf')
+const FONT_DISPLAY = loadFont('./fonts/inter-extrabold.ttf')
 
 function createImage(width, height) {
   const pixels = Buffer.alloc(width * height * 4)
@@ -90,7 +56,7 @@ function createImage(width, height) {
       }
     }
   }
-  return { width, height, pixels, set }
+  return { width, height, pixels, set, blend: (x, y, alpha, color) => set(x, y, color, alpha) }
 }
 
 function lerpColor(from, to, t) {
@@ -169,22 +135,16 @@ function paintDisc(image, centerX, centerY, radius, color, alpha = 1) {
   }
 }
 
-function textWidth(text, scale) {
-  return text.length * (GLYPH_WIDTH + GLYPH_SPACING) * scale - GLYPH_SPACING * scale
+function capSize(font, capHeight) {
+  return (capHeight * font.unitsPerEm) / font.capHeight
 }
 
-function paintText(image, text, left, top, scale, color) {
-  let cursor = left
-  for (const raw of text.toUpperCase()) {
-    const glyph = GLYPHS[raw] ?? GLYPHS[' ']
-    for (let row = 0; row < GLYPH_HEIGHT; row++) {
-      for (let column = 0; column < GLYPH_WIDTH; column++) {
-        if (glyph[row][column] !== '#') continue
-        paintRoundedRect(image, cursor + column * scale, top + row * scale, scale, scale, 0, color)
-      }
-    }
-    cursor += (GLYPH_WIDTH + GLYPH_SPACING) * scale
-  }
+function textWidth(font, text, capHeight) {
+  return measureText(font, text, capSize(font, capHeight))
+}
+
+function paintText(image, font, text, left, capTop, capHeight, color) {
+  drawText(image, font, text, { x: left, baseline: capTop + capHeight, size: capSize(font, capHeight), color })
 }
 
 function percentText(value) {
@@ -195,24 +155,28 @@ function percentText(value) {
 
 function paintBrand(image) {
   paintRoundedRect(image, 64, 52, 52, 52, 16, INK)
-  paintText(image, 'V', 82, 67, 3, YELLOW)
-  paintText(image, 'VIBEE', 140, 60, 5, INK)
-  paintText(image, 'ПУЛЬС КОМАНДЫ', 64, 170, 3, INK)
+  const mark = 'V'
+  const markWidth = textWidth(FONT_DISPLAY, mark, 21)
+  paintText(image, FONT_DISPLAY, mark, Math.round(64 + (52 - markWidth) / 2), 68, 21, YELLOW)
+  paintText(image, FONT_DISPLAY, 'VIBEE', 140, 60, 35, INK)
+  paintText(image, FONT_DISPLAY, 'ПУЛЬС КОМАНДЫ', 64, 170, 21, INK)
 }
 
 function paintDemoBadge(image) {
   const label = 'ДЕМО'
-  const width = textWidth(label, 2) + 40
-  paintRoundedRect(image, image.width - 64 - width, 56, width, 40, 20, INK)
-  paintText(image, label, image.width - 64 - width + 20, 69, 2, YELLOW)
+  const capHeight = 14
+  const width = Math.round(textWidth(FONT_LABEL, label, capHeight)) + 40
+  const left = image.width - 64 - width
+  paintRoundedRect(image, left, 56, width, 40, 20, INK)
+  paintText(image, FONT_LABEL, label, left + 20, 69, capHeight, YELLOW)
 }
 
 function paintMetrics(image, metrics) {
   METRICS.forEach((metric, index) => {
     const left = CARD_LEFT + index * (CARD_WIDTH + CARD_GAP)
     paintRoundedRect(image, left, CARD_TOP, CARD_WIDTH, CARD_HEIGHT, 28, INK)
-    paintText(image, metric.label, left + 28, CARD_TOP + 34, 2, LABEL)
-    paintText(image, percentText(metrics?.[metric.key]), left + 28, CARD_TOP + 150, 9, YELLOW)
+    paintText(image, FONT_LABEL, metric.label, left + 28, CARD_TOP + 34, 14, LABEL)
+    paintText(image, FONT_DISPLAY, percentText(metrics?.[metric.key]), left + 28, CARD_TOP + 150, 63, YELLOW)
   })
 }
 

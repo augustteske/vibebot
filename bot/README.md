@@ -44,7 +44,7 @@
 ## Карточка «Пульс команды»
 
 - `/share` работает только в личном чате и только для организатора. Бот сначала читает сводку (`GET /api/bot/v1/bindings/<id>/summary?telegramUserId=…`) и при `published` скачивает PNG: `GET /api/bot/v1/bindings/<id>/share-card?telegramUserId=…`. Сервер проверяет ту же связь `telegram_links` и роль организатора; остальным отвечает `ORGANIZER_REQUIRED`, а без опубликованного периода — `PERIOD_NOT_PUBLISHED` (`server/telegram-store.mjs`, `shareCard`).
-- Картинку рисует `server/share-card.mjs` без внешних зависимостей: 1200×630, жёлтый фон и три числа периода. Название команды и подпись периода сервер кладёт в заголовки `X-Vibee-Team-Name` и `X-Vibee-Period-Label` (percent-encoding), чтобы бот не дублировал форматирование.
+- Картинку рисует `server/share-card.mjs` без внешних зависимостей: 1200×630, жёлтый фон, три числа периода и шрифт Inter из дизайна (`server/fonts`, текст растрирует `server/truetype.mjs`). Название команды и подпись периода сервер кладёт в заголовки `X-Vibee-Team-Name` и `X-Vibee-Period-Label` (percent-encoding), чтобы бот не дублировал форматирование.
 - Подпись к фото: «📊 Пульс команды <название> за <период>. Попробуйте Vibee для своей команды: <VIBEE_WEB_URL>». Без названия — «📊 Пульс команды за <период>…»; ссылка — `web_url` транспорта (как у кнопки `/stats`).
 - Статусы `calibrating`, `insufficient` и `open` дают «Пока нет опубликованного периода»; сетевая ошибка — брендовое сообщение и кнопку «Повторить» (`retry:share`).
 
