@@ -6,7 +6,8 @@
   <h3>Почувствовать команду. Сделать следующий шаг.</h3>
 
   <p>
-    <strong>Original Authors: August Teske, Ilian, Arina, Alisa, Daniil. The name &quot;Vibee&quot; and the bee mascot are trademarks of the Vibee Team.</strong>
+    <strong>Original Authors: August Teske, Arina, Alisa, Daniil. The name &quot;Vibee&quot; and the bee mascot are trademarks of the Vibee Team.</strong><br />
+    The Vibee project is maintained by August Teske, Arina, Alisa, and Daniil.
   </p>
 
   <p>
@@ -151,4 +152,4 @@ curl --fail http://127.0.0.1:8787/api/health
 
 ## 📄 Лицензия
 
-Проект распространяется по лицензии [MIT](LICENSE). Подробная информация об авторских правах и товарных знаках команды приведена в файле [NOTICE](NOTICE).
+Проект распространяется по лицензии [MIT](LICENSE). Подробная информация об авторских правах и товарных знаках команды приведена в файле [NOTICE](NOTICE). The Vibee project is maintained by August Teske, Arina, Alisa, and Daniil.
