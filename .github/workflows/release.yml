@@ -3,6 +3,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v1.1.6)'
+        required: false
+        default: ''
 permissions:
   contents: write
 jobs:
@@ -11,21 +17,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Extract release notes from CHANGELOG.md
+        id: extract
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          TAG="${{ inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          tr -d '\r' < CHANGELOG.md > CHANGELOG.clean.md
           awk -v ver="$VERSION" '
             /^## \[/ { if (found) exit; if (index($0, "## [" ver "]") == 1) { found = 1; next } }
             /^\[[^]]+\]: / { if (found) exit }
             found { print }
-          ' CHANGELOG.md > release-notes.md
+          ' CHANGELOG.clean.md > release-notes.md
           if ! grep -q '[^[:space:]]' release-notes.md; then
-            echo "::error file=CHANGELOG.md::Нет секции ## [$VERSION] для тега $GITHUB_REF_NAME"
+            echo "::error file=CHANGELOG.md::Нет секции ## [$VERSION] для тега $TAG"
             exit 1
           fi
           cat release-notes.md
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          name: Vibee ${{ github.ref_name }}
+          tag_name: ${{ steps.extract.outputs.tag }}
+          name: Vibee ${{ steps.extract.outputs.tag }}
           body_path: release-notes.md
-          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
