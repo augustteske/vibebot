@@ -96,12 +96,47 @@ export type TelegramTextEvent = {
   sentAt: string
   text: string
 }
+
+export interface ExtendedAnalyticsMetrics {
+  teamHealthScore?: number
+  unansweredQuestionsPercent: number
+  responseMedianMinutes: number | null
+  positivityIndex: number
+  intensityIndex: number
+  activityDistribution: {
+    byDay: Record<string, number>
+    byHour: Record<string | number, number>
+  }
+  trends?: MetricComparisonTrends | null
+}
+
+export interface MetricComparisonTrends {
+  outsideHoursPercentDiff?: number
+  participationEvennessDiff?: number
+  recognitionPercentDiff?: number
+  unansweredQuestionsPercentDiff?: number
+  responseMedianMinutesDiff?: number | null
+  positivityIndexDiff?: number
+  intensityIndexDiff?: number
+}
+
 export type CommunicationView =
   | { status: 'disconnected' | 'awaiting_consents' | 'paused' | 'calibrating' | 'open' | 'insufficient' | 'error' }
   | { status: 'published'; period: { id: string; start: string; end: string };
       dataSource: 'chat'; profileVersion: number;
-      metrics: { outsideHoursPercent: number; participationEvenness: number; recognitionPercent: number };
-      recognitionMethod: 'lexicon-v1'; comparison: null; demo?: boolean }
+      metrics: {
+        outsideHoursPercent: number;
+        participationEvenness: number;
+        recognitionPercent: number;
+        unansweredQuestionsPercent?: number;
+        responseMedianMinutes?: number | null;
+        positivityIndex?: number;
+        intensityIndex?: number;
+      };
+      extendedMetrics?: ExtendedAnalyticsMetrics;
+      recognitionMethod: 'lexicon-v1';
+      comparison: MetricComparisonTrends | null;
+      demo?: boolean }
 export type CommunicationRecommendation = {
   id: string; periodId: string; profileVersion: number; dataSource: 'chat'; source: 'ai' | 'template'
   observation: string; explanation: string; limitation: string; action: string; demo?: boolean

@@ -104,8 +104,9 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
       return session(saved.member_id)
     },
     createWorkspace(input) {
-      const name = text(input.name, 80, 'Название команды')
-      const memberName = text(input.displayName, 60, 'Имя участника')
+      const name = text(input?.name, 80, 'Название команды')
+      const rawMemberName = typeof input?.displayName === 'string' && input.displayName.trim() ? input.displayName : 'Тимлид'
+      const memberName = text(rawMemberName, 60, 'Имя участника')
       return tx(() => {
         const workspaceId = randomUUID(), memberId = randomUUID(), roomKey = generateRoomKey()
         run('INSERT INTO workspaces(id,name,room_key) VALUES(?,?,?)', workspaceId, name, roomKey)
@@ -261,6 +262,104 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
       const id = randomUUID()
       run('INSERT INTO app_feedback VALUES(?,?,?,?)', id, type, message, new Date().toISOString())
       return { id }
+    },
+    exportUserData(member) {
+      const workspaceRow = one('SELECT id, name FROM workspaces WHERE id=?', member.workspace_id)
+      const profile = {
+        id: member.id,
+        name: member.name,
+        role: member.role,
+        workspace: {
+          id: member.workspace_id,
+          name: workspaceRow?.name ?? '',
+        },
+      }
+
+      const rounds = all('SELECT id, created_at, closed_at FROM rounds WHERE workspace_id=? ORDER BY created_at ASC', member.workspace_id)
+      const checkins = []
+      for (const r of rounds) {
+        const voterKey = key('checkin:' + r.id, member)
+        const c = one('SELECT energy, clarity, support FROM checkins WHERE round_id=? AND voter_key=?', r.id, voterKey)
+        if (c) {
+          checkins.push({
+            roundId: r.id,
+            roundCreatedAt: r.created_at,
+            roundClosedAt: r.closed_at,
+            energy: c.energy,
+            clarity: c.clarity,
+            support: c.support,
+          })
+        }
+      }
+
+      const actions = all('SELECT id, title, goal, created_at, feedback_closed_at FROM actions WHERE workspace_id=? ORDER BY created_at ASC', member.workspace_id)
+      const feedback = []
+      for (const a of actions) {
+        const voterKey = key('feedback:' + a.id, member)
+        const f = one('SELECT helpful FROM feedback WHERE action_id=? AND voter_key=?', a.id, voterKey)
+        if (f) {
+          feedback.push({
+            actionId: a.id,
+            actionTitle: a.title,
+            helpful: f.helpful === 1,
+          })
+        }
+      }
+
+      const consents = []
+      let telegramIdentity = null
+      let telegramLinks = []
+      let telegramSubscriptions = []
+      let telegramVotes = []
+
+      try {
+        const ident = one('SELECT telegram_user_id FROM telegram_identities WHERE workspace_id=? AND member_id=?', member.workspace_id, member.id)
+        if (ident) telegramIdentity = ident.telegram_user_id
+
+        const links = all('SELECT binding_id, telegram_user_id FROM telegram_links WHERE workspace_id=? AND member_id=?', member.workspace_id, member.id)
+        telegramLinks = links.map(l => ({ bindingId: l.binding_id, telegramUserId: l.telegram_user_id }))
+
+        const subs = all('SELECT telegram_user_id, chat_id, created_at FROM telegram_notification_subscriptions WHERE workspace_id=? AND member_id=?', member.workspace_id, member.id)
+        telegramSubscriptions = subs.map(s => ({ telegramUserId: s.telegram_user_id, chatId: s.chat_id, createdAt: new Date(s.created_at).toISOString() }))
+
+        const bindings = all('SELECT id, chat_id, state FROM telegram_bindings WHERE workspace_id=?', member.workspace_id)
+        for (const b of bindings) {
+          try {
+            const state = JSON.parse(b.state)
+            const inRoster = Array.isArray(state?.roster) && state.roster.includes(member.id)
+            const decision = state?.decisions?.[member.id] ?? null
+            if (inRoster || decision !== null) {
+              consents.push({
+                bindingId: b.id,
+                chatId: b.chat_id,
+                policyVersion: state.policyVersion,
+                rosterVersion: state.rosterVersion,
+                inRoster,
+                decision,
+                ...(member.role === 'organizer' && state.companyAccepted !== undefined ? { companyAccepted: state.companyAccepted } : {}),
+              })
+            }
+          } catch {}
+        }
+
+        const votes = all('SELECT binding_id, period_id, kind, value FROM telegram_feedback_votes WHERE member_id=?', member.id)
+        telegramVotes = votes.map(v => ({ bindingId: v.binding_id, periodId: v.period_id, kind: v.kind, value: v.value }))
+      } catch {}
+
+      return {
+        version: '1.0',
+        exportedAt: new Date(now()).toISOString(),
+        profile,
+        checkins,
+        feedback,
+        consents,
+        telegram: {
+          telegramUserId: telegramIdentity,
+          links: telegramLinks,
+          notificationSubscriptions: telegramSubscriptions,
+          feedbackVotes: telegramVotes,
+        },
+      }
     },
   }
 }

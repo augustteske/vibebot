@@ -1,0 +1,481 @@
+/* Team Health Vessel Card: Visual center of the dashboard */
+
+.th-vessel-card {
+  position: relative;
+  margin-bottom: 24px;
+  padding: clamp(20px, 3.5vw, 32px);
+  border-radius: 28px;
+  background: linear-gradient(135deg, var(--vibee-surface) 0%, rgba(255, 193, 7, 0.08) 50%, rgba(245, 166, 35, 0.14) 100%);
+  border: 1.5px solid rgba(245, 166, 35, 0.35);
+  box-shadow: 0 16px 40px -10px rgba(245, 166, 35, 0.22), 0 4px 16px rgba(0, 0, 0, 0.04);
+  color: var(--vibee-ink);
+  overflow: hidden;
+  transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.th-vessel-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 48px -10px rgba(245, 166, 35, 0.3), 0 6px 20px rgba(0, 0, 0, 0.06);
+  border-color: rgba(245, 166, 35, 0.55);
+}
+
+.th-vessel-card__glow {
+  position: absolute;
+  top: -40px;
+  left: -40px;
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 193, 7, 0.3) 0%, rgba(255, 193, 7, 0) 70%);
+  pointer-events: none;
+  filter: blur(20px);
+}
+
+.th-vessel-card__layout {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(140px, 170px) 1fr;
+  gap: clamp(20px, 3.5vw, 36px);
+  align-items: center;
+}
+
+/* =========================================
+   Vessel (Flask / Glass Container)
+   ========================================= */
+
+.th-vessel-col {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.th-vessel {
+  position: relative;
+  width: 140px;
+  height: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  user-select: none;
+  filter: drop-shadow(0 10px 24px rgba(245, 166, 35, 0.25));
+  transition: filter 0.3s ease, transform 0.3s ease;
+}
+
+.th-vessel:hover {
+  transform: scale(1.02);
+  filter: drop-shadow(0 12px 28px rgba(245, 166, 35, 0.42));
+}
+
+/* Measurement ticks on the glass */
+.th-vessel__ticks {
+  position: absolute;
+  left: 4px;
+  top: 36px;
+  bottom: 12px;
+  width: 20px;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.th-vessel__tick {
+  position: absolute;
+  left: 0;
+  font-size: 0.62rem;
+  font-weight: 750;
+  color: rgba(140, 95, 20, 0.7);
+  letter-spacing: -0.02em;
+  transform: translateY(50%);
+}
+
+.th-vessel__tick::before {
+  content: '';
+  position: absolute;
+  left: 18px;
+  top: 50%;
+  width: 6px;
+  height: 1.5px;
+  background: rgba(140, 95, 20, 0.45);
+}
+
+/* Neck and lip of the flask */
+.th-vessel__neck {
+  width: 50px;
+  height: 22px;
+  position: relative;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.35) 100%);
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  z-index: 3;
+}
+
+.th-vessel__lip {
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  right: -4px;
+  height: 6px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.8) 0%, rgba(255, 255, 255, 0.3) 100%);
+  border: 1.5px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Vessel main body */
+.th-vessel__body {
+  position: relative;
+  width: 130px;
+  height: 178px;
+  border-radius: 20px 20px 55px 55px;
+  border: 2.5px solid rgba(255, 255, 255, 0.75);
+  background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.25) 0%, rgba(255, 255, 255, 0.05) 70%);
+  box-shadow: inset 0 0 16px rgba(255, 255, 255, 0.4), inset -4px -6px 12px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  z-index: 2;
+}
+
+/* Glass glare accents */
+.th-vessel__glare-left {
+  position: absolute;
+  top: 10px;
+  left: 6px;
+  bottom: 24px;
+  width: 6px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.65) 0%, rgba(255, 255, 255, 0.15) 100%);
+  pointer-events: none;
+  z-index: 5;
+}
+
+.th-vessel__glare-specular {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  width: 18px;
+  height: 32px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0) 70%);
+  transform: rotate(-25deg);
+  pointer-events: none;
+  z-index: 5;
+}
+
+.th-vessel__bottom-reflection {
+  position: absolute;
+  bottom: 4px;
+  left: 20px;
+  right: 20px;
+  height: 8px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0) 75%);
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* =========================================
+   Honey Liquid & Animated Waves
+   ========================================= */
+
+.th-vessel__liquid-wrap {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+  border-radius: 0 0 52px 52px;
+  transition: height 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 1;
+}
+
+/* Overlapping wave layers */
+.th-vessel__wave {
+  position: absolute;
+  top: -14px;
+  left: 0;
+  width: 260px;
+  height: 24px;
+  background-repeat: repeat-x;
+  background-size: 130px 24px;
+}
+
+.th-vessel__wave--front {
+  background-image: radial-gradient(ellipse at 50% 0%, #FFB300 68%, transparent 70%);
+  opacity: 0.95;
+  animation: waveScrollFront 3.4s linear infinite;
+  z-index: 2;
+}
+
+.th-vessel__wave--back {
+  top: -16px;
+  background-image: radial-gradient(ellipse at 50% 0%, #FFCA28 68%, transparent 70%);
+  opacity: 0.65;
+  animation: waveScrollBack 4.8s linear infinite reverse;
+  z-index: 1;
+}
+
+@keyframes waveScrollFront {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-130px); }
+}
+
+@keyframes waveScrollBack {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-130px); }
+}
+
+/* Liquid Body */
+.th-vessel__honey-fill {
+  position: absolute;
+  top: 8px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(180deg, #FFA000 0%, #F57C00 50%, #E65100 100%);
+  box-shadow: inset 0 2px 8px rgba(255, 241, 118, 0.6), inset 0 -4px 10px rgba(183, 71, 0, 0.4);
+}
+
+/* Bubbles inside honey */
+.th-vessel__bubble {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.8) 0%, rgba(255, 235, 59, 0.5) 60%, rgba(255, 160, 0, 0.3) 100%);
+  pointer-events: none;
+  animation: bubbleRise 4s infinite ease-in;
+}
+
+.th-vessel__bubble.b1 { left: 24%; bottom: 10px; width: 6px; height: 6px; animation-delay: 0.2s; animation-duration: 3.6s; }
+.th-vessel__bubble.b2 { left: 54%; bottom: 6px; width: 8px; height: 8px; animation-delay: 1.4s; animation-duration: 4.2s; }
+.th-vessel__bubble.b3 { left: 74%; bottom: 14px; width: 5px; height: 5px; animation-delay: 2.2s; animation-duration: 3.8s; }
+.th-vessel__bubble.b4 { left: 38%; bottom: 4px; width: 7px; height: 7px; animation-delay: 3.1s; animation-duration: 4.5s; }
+
+@keyframes bubbleRise {
+  0% {
+    transform: translateY(0) scale(0.6);
+    opacity: 0;
+  }
+  30% {
+    opacity: 0.85;
+  }
+  80% {
+    opacity: 0.7;
+  }
+  100% {
+    transform: translateY(-90px) scale(1.1);
+    opacity: 0;
+  }
+}
+
+/* Center score number */
+.th-vessel__center-score {
+  position: absolute;
+  top: 52%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 6;
+  pointer-events: none;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.25), 0 0 2px rgba(255, 255, 255, 0.6);
+}
+
+.th-vessel__number {
+  font-size: 2.1rem;
+  font-weight: 850;
+  line-height: 1;
+  color: #FFFFFF;
+  letter-spacing: -0.04em;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.35));
+}
+
+.th-vessel__label {
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.95);
+  margin-top: 2px;
+}
+
+/* =========================================
+   Details (Right Side)
+   ========================================= */
+
+.th-vessel-details {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.th-vessel-details__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.th-vessel-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: var(--vibee-surface);
+  box-shadow: var(--vibee-shadow-soft);
+}
+
+.th-vessel-badge__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.th-vessel-badge__text {
+  font-size: 0.82rem;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+.th-vessel-details__title {
+  margin: 0;
+  font-size: clamp(1.15rem, 2vw, 1.45rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--vibee-ink);
+}
+
+.th-vessel-details__lead {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--vibee-ink);
+  line-height: 1.4;
+}
+
+/* Section "Что это значит?" */
+.th-vessel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.th-vessel-section__label {
+  font-size: 0.78rem;
+  font-weight: 750;
+  color: var(--vibee-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.th-vessel-section__text {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--vibee-muted);
+  line-height: 1.45;
+}
+
+/* 4-Step Gradation Scale */
+.th-vessel-scale {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.th-vessel-scale__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 6px;
+  border-radius: 12px;
+  background: var(--vibee-surface);
+  border: 1px solid var(--vibee-line);
+  text-align: center;
+  gap: 2px;
+  opacity: 0.65;
+  transition: opacity 0.25s ease, transform 0.25s ease, border-color 0.25s ease;
+}
+
+.th-vessel-scale__item--active {
+  opacity: 1;
+  transform: translateY(-2px);
+  border-color: var(--vibee-yellow-line);
+  background: var(--vibee-yellow-soft);
+  box-shadow: 0 4px 12px rgba(245, 166, 35, 0.2);
+}
+
+.th-vessel-scale__range {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--vibee-muted);
+}
+
+.th-vessel-scale__item--active .th-vessel-scale__range {
+  color: var(--vibee-ink);
+}
+
+.th-vessel-scale__name {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--vibee-ink);
+  line-height: 1.2;
+}
+
+/* Advice Box */
+.th-vessel-advice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--vibee-surface);
+  border: 1px dashed rgba(245, 166, 35, 0.5);
+  box-shadow: var(--vibee-shadow-soft);
+}
+
+.th-vessel-advice__icon {
+  font-size: 1.3rem;
+  line-height: 1;
+  flex: none;
+  margin-top: 1px;
+}
+
+.th-vessel-advice__content {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.th-vessel-advice__content strong {
+  font-size: 0.85rem;
+  color: var(--vibee-ink);
+  font-weight: 750;
+}
+
+.th-vessel-advice__content p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--vibee-muted);
+  line-height: 1.45;
+}
+
+/* =========================================
+   Responsive Design
+   ========================================= */
+
+@media (max-width: 680px) {
+  .th-vessel-card__layout {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .th-vessel-scale {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

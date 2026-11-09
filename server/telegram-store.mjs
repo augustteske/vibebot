@@ -1,6 +1,20 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual, randomUUID } from 'node:crypto'
 import { canProcessChat, initialConsentState, transitionConsent } from '../src/core/telegram.ts'
+import { formatSharePeriod } from '../src/features/insights/shareCard.ts'
 import { templateRecommendationProvider, recommendationProviderContent } from './recommendation-provider.mjs'
+import {
+  isQuestionMessage,
+  calculateUnansweredQuestionsPercent,
+  calculateResponseMedianMinutes,
+  isPositiveMessage,
+  calculatePositivityIndex,
+  isIntensityMessage,
+  calculateIntensityIndex,
+  createActivityDistribution,
+  recordActivity,
+  calculateComparisonTrends,
+  calculateTeamHealthScore,
+} from './analytics.mjs'
 
 const DAY = 86400000
 const LINK_TTL = 600000
@@ -144,7 +158,15 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
     CREATE TABLE IF NOT EXISTS telegram_open_periods(
       binding_id TEXT PRIMARY KEY REFERENCES telegram_bindings(id), opened_at INTEGER NOT NULL,
       revision INTEGER NOT NULL, profile_version INTEGER NOT NULL,
-      total INTEGER NOT NULL, outside_count INTEGER NOT NULL, recognition_count INTEGER NOT NULL
+      total INTEGER NOT NULL, outside_count INTEGER NOT NULL, recognition_count INTEGER NOT NULL,
+      question_count INTEGER NOT NULL DEFAULT 0,
+      unanswered_count INTEGER NOT NULL DEFAULT 0,
+      positive_count INTEGER NOT NULL DEFAULT 0,
+      intensity_count INTEGER NOT NULL DEFAULT 0,
+      response_deltas TEXT NOT NULL DEFAULT '[]',
+      activity_distribution TEXT NOT NULL DEFAULT '{}',
+      last_sender_id TEXT,
+      last_sent_at INTEGER
     );
     CREATE TABLE IF NOT EXISTS telegram_period_authors(
       binding_id TEXT NOT NULL REFERENCES telegram_bindings(id), member_id TEXT NOT NULL,
@@ -154,7 +176,7 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
       binding_id TEXT NOT NULL REFERENCES telegram_bindings(id), period_id TEXT NOT NULL,
       start_at INTEGER NOT NULL, closed_at INTEGER NOT NULL, local_date TEXT NOT NULL, revision INTEGER NOT NULL,
       profile_version INTEGER NOT NULL, status TEXT NOT NULL, metrics TEXT,
-      expires INTEGER NOT NULL, PRIMARY KEY(binding_id,period_id)
+      expires INTEGER NOT NULL, extended_metrics TEXT, PRIMARY KEY(binding_id,period_id)
     );
     CREATE TABLE IF NOT EXISTS telegram_close_requests(
       binding_id TEXT NOT NULL REFERENCES telegram_bindings(id), actor_key TEXT NOT NULL,
@@ -237,6 +259,23 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
     if (!bindingColumns.some(column => column.name === 'migration_blocked')) {
       db.exec('ALTER TABLE telegram_bindings ADD COLUMN migration_blocked INTEGER NOT NULL DEFAULT 0')
     }
+    const openCols = db.prepare('PRAGMA table_info(telegram_open_periods)').all().map(column => column.name)
+    if (!openCols.includes('question_count')) {
+      db.exec(`
+        ALTER TABLE telegram_open_periods ADD COLUMN question_count INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE telegram_open_periods ADD COLUMN unanswered_count INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE telegram_open_periods ADD COLUMN positive_count INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE telegram_open_periods ADD COLUMN intensity_count INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE telegram_open_periods ADD COLUMN response_deltas TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE telegram_open_periods ADD COLUMN activity_distribution TEXT NOT NULL DEFAULT '{}';
+        ALTER TABLE telegram_open_periods ADD COLUMN last_sender_id TEXT;
+        ALTER TABLE telegram_open_periods ADD COLUMN last_sent_at INTEGER;
+      `)
+    }
+    const closedCols = db.prepare('PRAGMA table_info(telegram_closed_periods)').all().map(column => column.name)
+    if (!closedCols.includes('extended_metrics')) {
+      db.exec('ALTER TABLE telegram_closed_periods ADD COLUMN extended_metrics TEXT')
+    }
     db.exec('COMMIT')
   } catch (error) {
     db.exec('ROLLBACK')
@@ -300,9 +339,16 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
     const dates = one("SELECT COUNT(DISTINCT local_date) AS n FROM telegram_closed_periods WHERE binding_id=? AND profile_version=? AND revision=? AND status='valid' AND expires>?",
       row.binding_id, row.profile_version, row.revision, now()).n
     if (dates < 3) return { status: 'calibrating' }
+    let extendedMetrics = undefined
+    if (row.extended_metrics) {
+      try {
+        extendedMetrics = JSON.parse(row.extended_metrics)
+      } catch {}
+    }
     return { status: 'published', demo: true,
       period: { id: row.period_id, start: new Date(row.start_at).toISOString(), end: new Date(row.closed_at).toISOString() },
       dataSource: 'chat', profileVersion: row.profile_version, metrics: JSON.parse(row.metrics),
+      ...(extendedMetrics ? { extendedMetrics } : {}),
       recognitionMethod: 'lexicon-v1', comparison: null }
   }
   const publishedPeriod = (actor, id, periodId, linkedMember = false,
@@ -355,6 +401,20 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
     if (!collection.counts) return { status: 'insufficient' }
     const counts = JSON.parse(collection.counts)
     return { status: 'published', demo: true, kind, total: Object.values(counts).reduce((a, b) => a + b, 0), counts }
+  }
+  // Бот читает сводку и карточку только для организатора, чей Telegram связан с привязкой.
+  const linkedOrganizer = (actor, id, telegramUserId) => {
+    if (!telegramId(telegramUserId)) invalid()
+    bindingFor(actor, id)
+    if (actor.kind !== 'bot') fail(403, 'FORBIDDEN', 'Нужен scoped credential бота')
+    const member = one(`SELECT m.id,m.role FROM telegram_links l
+      JOIN members m ON m.workspace_id=l.workspace_id AND m.id=l.member_id
+      WHERE l.binding_id=? AND l.workspace_id=? AND l.telegram_user_id=?`,
+      id, actor.workspace_id, telegramUserId)
+    if (!member || member.role !== 'organizer') {
+      fail(403, 'ORGANIZER_REQUIRED', 'Доступно только связанному организатору')
+    }
+    return member
   }
   const expireBinding = binding => {
     if (binding.evidence_expires === null || binding.evidence_expires > now()) return binding
@@ -767,9 +827,61 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
         run('INSERT INTO telegram_texts VALUES(?,?,?,?,?,?,?)', id, input.chatId, input.messageId,
           input.senderId, input.sentAt, input.text, now() + TEXT_TTL)
         if (hasSchedule(profile)) {
-          if (!open) run('INSERT INTO telegram_open_periods VALUES(?,?,?,?,?,?,?)', id, now(), state.revision, profile.version, 0, 0, 0)
-          run('UPDATE telegram_open_periods SET total=total+1,outside_count=outside_count+?,recognition_count=recognition_count+? WHERE binding_id=?',
-            outsideHours(Date.parse(input.sentAt), profile) ? 1 : 0, recognition(input.text) ? 1 : 0, id)
+          if (!open) {
+            run(`INSERT INTO telegram_open_periods
+              (binding_id, opened_at, revision, profile_version, total, outside_count, recognition_count,
+               question_count, unanswered_count, positive_count, intensity_count, response_deltas,
+               activity_distribution, last_sender_id, last_sent_at)
+              VALUES(?, ?, ?, ?, 0, 0, 0, 0, 0, 0, 0, '[]', '{}', NULL, NULL)`,
+              id, now(), state.revision, profile.version)
+          }
+          const currentOpen = one('SELECT * FROM telegram_open_periods WHERE binding_id=?', id)
+          const sentAtMillis = Date.parse(input.sentAt)
+          const isOutside = outsideHours(sentAtMillis, profile) ? 1 : 0
+          const isRec = recognition(input.text) ? 1 : 0
+          const isQ = isQuestionMessage(input.text)
+          const isPos = isPositiveMessage(input.text) ? 1 : 0
+          const isIntensity = isIntensityMessage(input.text) ? 1 : 0
+
+          let deltas = []
+          try { deltas = JSON.parse(currentOpen.response_deltas || '[]') } catch {}
+
+          let unansweredCount = currentOpen.unanswered_count || 0
+          const questionCount = (currentOpen.question_count || 0) + (isQ ? 1 : 0)
+
+          if (currentOpen.last_sender_id && currentOpen.last_sender_id !== input.senderId && currentOpen.last_sent_at) {
+            const deltaSeconds = Math.max(0, Math.round((sentAtMillis - currentOpen.last_sent_at) / 1000))
+            if (deltaSeconds <= 86400) {
+              deltas.push(deltaSeconds)
+              if (unansweredCount > 0) {
+                unansweredCount = Math.max(0, unansweredCount - 1)
+              }
+            }
+          }
+
+          if (isQ) {
+            unansweredCount += 1
+          }
+
+          let actDist = {}
+          try { actDist = JSON.parse(currentOpen.activity_distribution || '{}') } catch {}
+          actDist = recordActivity(actDist, input.sentAt, profile.timeZone)
+
+          run(`UPDATE telegram_open_periods SET
+            total = total + 1,
+            outside_count = outside_count + ?,
+            recognition_count = recognition_count + ?,
+            question_count = ?,
+            unanswered_count = ?,
+            positive_count = positive_count + ?,
+            intensity_count = intensity_count + ?,
+            response_deltas = ?,
+            activity_distribution = ?,
+            last_sender_id = ?,
+            last_sent_at = ?
+            WHERE binding_id = ?`,
+            isOutside, isRec, questionCount, unansweredCount, isPos, isIntensity,
+            JSON.stringify(deltas), JSON.stringify(actDist), input.senderId, sentAtMillis, id)
           run('INSERT INTO telegram_period_authors VALUES(?,?,1) ON CONFLICT(binding_id,member_id) DO UPDATE SET count=count+1', id, member)
         }
         return { eventId: input.eventId, result: 'accepted', revision: state.revision }
@@ -994,17 +1106,25 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
     },
     summaryForOrganizer(actor, id, telegramUserId) {
       unavailable()
-      if (!telegramId(telegramUserId)) invalid()
-      bindingFor(actor, id)
-      if (actor.kind !== 'bot') fail(403, 'FORBIDDEN', 'Нужен scoped credential бота')
-      const member = one(`SELECT m.id,m.role FROM telegram_links l
-        JOIN members m ON m.workspace_id=l.workspace_id AND m.id=l.member_id
-        WHERE l.binding_id=? AND l.workspace_id=? AND l.telegram_user_id=?`,
-        id, actor.workspace_id, telegramUserId)
-      if (!member || member.role !== 'organizer') {
-        fail(403, 'ORGANIZER_REQUIRED', 'Статистика доступна только связанному организатору')
-      }
+      linkedOrganizer(actor, id, telegramUserId)
       return this.summary(actor, id)
+    },
+    shareCard(actor, id, telegramUserId) {
+      unavailable()
+      linkedOrganizer(actor, id, telegramUserId)
+      const view = this.summary(actor, id)
+      if (view.status !== 'published') {
+        fail(409, 'PERIOD_NOT_PUBLISHED', 'Период ещё не опубликован')
+      }
+      const workspace = one('SELECT name FROM workspaces WHERE id=?', actor.workspace_id)
+      const profile = profileFor(actor.workspace_id)
+      return {
+        teamName: workspace?.name ?? null,
+        demo: view.demo === true,
+        periodLabel: formatSharePeriod(view.period.start, view.period.end, profile.timeZone || 'UTC'),
+        period: view.period,
+        metrics: view.metrics,
+      }
     },
     currentSummary(actor) {
       unavailable()
@@ -1016,6 +1136,77 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
       return binding
         ? { bindingId: binding.id, view: this.summary(actor, binding.id) }
         : { bindingId: null, view: { status: 'disconnected' } }
+    },
+    systemHealth(actor) {
+      unavailable()
+      organizerProfile(actor)
+      return tx(() => {
+        const time = now()
+        const bindings = all('SELECT * FROM telegram_bindings WHERE workspace_id=? ORDER BY rowid DESC', actor.workspace_id)
+        if (!bindings.length || !bindings[0].chat_id) {
+          return {
+            status: 'disconnected',
+            botOnline: false,
+            processed24h: 0,
+            lastEventAt: null,
+            lastError: bindings.length ? 'Чат команды не привязан' : 'Бот не подключён',
+            checkedAt: new Date(time).toISOString(),
+          }
+        }
+        const binding = bindings.find(item => JSON.parse(item.state).phase === 'active')
+          ?? bindings.find(item => JSON.parse(item.state).phase === 'paused')
+          ?? bindings[0]
+        const state = JSON.parse(binding.state)
+
+        const eventsCount = one(
+          'SELECT count(*) AS n FROM telegram_event_ids WHERE binding_id=? AND expires > ?',
+          binding.id, time
+        )?.n ?? 0
+        const checkinsCount = one(
+          'SELECT count(*) AS n FROM telegram_checkins WHERE binding_id=? AND expires > ?',
+          binding.id, time
+        )?.n ?? 0
+        const processed24h = eventsCount + checkinsCount
+
+        const lastText = one('SELECT max(sent_at) AS t FROM telegram_texts WHERE binding_id=?', binding.id)?.t ?? null
+        const lastCheckinTime = one('SELECT max(created_at) AS t FROM telegram_checkins WHERE binding_id=?', binding.id)?.t ?? null
+        const lastCheckin = lastCheckinTime ? new Date(lastCheckinTime).toISOString() : null
+        let lastEventAt = null
+        if (lastText && lastCheckin) {
+          lastEventAt = Date.parse(lastText) > Date.parse(lastCheckin) ? lastText : lastCheckin
+        } else {
+          lastEventAt = lastText || lastCheckin || null
+        }
+
+        let lastError = null
+        if (binding.migration_blocked) {
+          lastError = 'Миграция схемы заблокирована'
+        } else if (binding.evidence_expires !== null && binding.evidence_expires <= time) {
+          lastError = 'Срок действия согласия истёк'
+        } else if (state.phase === 'paused') {
+          const decisions = Object.values(state.decisions || {})
+          const declined = decisions.some(d => d === 'declined' || d === 'withdrawn')
+          if (declined) lastError = 'Участник отклонил или отозвал согласие'
+          else if (!state.companyAccepted) lastError = 'Ожидается согласие компании'
+          else lastError = 'Сбор сообщений приостановлен'
+        } else if (state.phase === 'awaiting_consents') {
+          lastError = 'Ожидаются согласия участников'
+        }
+
+        const isActive = canProcessChat(state) && !lastError
+        const isRecent = lastEventAt ? (time - Date.parse(lastEventAt) <= DAY) : false
+        const botOnline = isActive && (isRecent || processed24h > 0)
+        const status = botOnline ? 'ok' : (lastError ? 'error' : (isActive ? 'idle' : 'offline'))
+
+        return {
+          status,
+          botOnline,
+          processed24h,
+          lastEventAt,
+          lastError,
+          checkedAt: new Date(time).toISOString(),
+        }
+      })
     },
     async recommendation(actor, id, periodId, reauthenticate) {
       unavailable()
@@ -1180,6 +1371,7 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
         const authors = db.prepare('SELECT count FROM telegram_period_authors WHERE binding_id=?').all(id)
         const valid = authors.length >= 5 && open.total >= 20 && now() - open.opened_at <= DAY
         let metrics = null
+        let extendedMetrics = null
         if (valid) {
           const authorMessageCounts = authors.map(row => row.count)
           metrics = {
@@ -1188,11 +1380,72 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
               authorMessageCounts, state.roster.length, open.total),
             recognitionPercent: calculateRecognitionPercent(open.recognition_count, open.total),
           }
+          const unansweredQuestionsPercent = calculateUnansweredQuestionsPercent(open.unanswered_count || 0, open.question_count || 0)
+          let responseDeltas = []
+          try { responseDeltas = JSON.parse(open.response_deltas || '[]') } catch {}
+          const responseMedianMinutes = calculateResponseMedianMinutes(responseDeltas)
+          const positivityIndex = calculatePositivityIndex(open.positive_count || 0, open.total)
+          const intensityIndex = calculateIntensityIndex(open.intensity_count || 0, open.total)
+          let activityDist = {}
+          try { activityDist = JSON.parse(open.activity_distribution || '{}') } catch {}
+
+          const prevRow = one('SELECT metrics, extended_metrics FROM telegram_closed_periods WHERE binding_id=? AND status=? AND period_id!=? ORDER BY closed_at DESC LIMIT 1',
+            id, 'valid', input.periodId)
+          let trends = null
+          if (prevRow) {
+            let prevMetrics = null
+            let prevExtended = null
+            try { prevMetrics = JSON.parse(prevRow.metrics || '{}') } catch {}
+            try { prevExtended = JSON.parse(prevRow.extended_metrics || '{}') } catch {}
+            const currentCombined = {
+              outsideHoursPercent: metrics.outsideHoursPercent,
+              participationEvenness: metrics.participationEvenness,
+              recognitionPercent: metrics.recognitionPercent,
+              unansweredQuestionsPercent,
+              responseMedianMinutes,
+              positivityIndex,
+              intensityIndex,
+            }
+            const prevCombined = {
+              outsideHoursPercent: prevMetrics?.outsideHoursPercent,
+              participationEvenness: prevMetrics?.participationEvenness,
+              recognitionPercent: prevMetrics?.recognitionPercent,
+              unansweredQuestionsPercent: prevExtended?.unansweredQuestionsPercent,
+              responseMedianMinutes: prevExtended?.responseMedianMinutes,
+              positivityIndex: prevExtended?.positivityIndex,
+              intensityIndex: prevExtended?.intensityIndex,
+            }
+            trends = calculateComparisonTrends(currentCombined, prevCombined)
+          }
+
+          const teamHealthScore = calculateTeamHealthScore({
+            outsideHoursPercent: metrics.outsideHoursPercent,
+            participationEvenness: metrics.participationEvenness,
+            recognitionPercent: metrics.recognitionPercent,
+            unansweredQuestionsPercent,
+            responseMedianMinutes,
+            positivityIndex,
+            intensityIndex,
+          })
+
+          extendedMetrics = {
+            teamHealthScore,
+            unansweredQuestionsPercent,
+            responseMedianMinutes,
+            positivityIndex,
+            intensityIndex,
+            activityDistribution: activityDist,
+            trends,
+          }
         }
         const closedAt = now()
-        run('INSERT INTO telegram_closed_periods VALUES(?,?,?,?,?,?,?,?,?,?)', id, input.periodId,
-          open.opened_at, closedAt, localParts(open.opened_at, profile.timeZone).date, open.revision,
-          open.profile_version, valid ? 'valid' : 'insufficient', metrics && JSON.stringify(metrics), closedAt + CLOSED_TTL)
+        run(`INSERT INTO telegram_closed_periods
+          (binding_id, period_id, start_at, closed_at, local_date, revision, profile_version, status, metrics, expires, extended_metrics)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+          id, input.periodId, open.opened_at, closedAt, localParts(open.opened_at, profile.timeZone).date,
+          open.revision, open.profile_version, valid ? 'valid' : 'insufficient',
+          metrics && JSON.stringify(metrics), closedAt + CLOSED_TTL,
+          extendedMetrics && JSON.stringify(extendedMetrics))
         clearOpenPeriod(id)
         const closed = one('SELECT * FROM telegram_closed_periods WHERE binding_id=? AND period_id=?', id, input.periodId)
         const response = periodView(closed)

@@ -1,7 +1,7 @@
 .guide-page {
   min-height: 100vh;
   color: var(--vibee-ink);
-  background: var(--vibee-bg);
+  background: var(--vibee-paper);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
   display: flex;
   flex-direction: column;

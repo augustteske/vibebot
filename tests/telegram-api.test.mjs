@@ -136,6 +136,11 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
     })
     return { status: response.status, body: await response.json() }
   }
+  const requestRaw = async (path, headers = {}) => {
+    const response = await fetch(base + path, { headers: { Connection: 'close', ...headers } })
+    return { status: response.status, headers: response.headers,
+      body: Buffer.from(await response.arrayBuffer()) }
+  }
   const web = (operation, input, token = ownerToken, bindingId = id, extra = {}) => request(
     '/telegram/bindings/' + bindingId + '/' + operation, input,
     { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1', ...extra })
@@ -174,6 +179,8 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
     input, { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1' })
   const profile = (input, token = ownerToken) => request('/telegram/profile', input,
     { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1' })
+  const systemHealth = (token = ownerToken) => request('/telegram/system-health', undefined,
+    { Cookie: 'vibebot_session=' + token })
   const setProfile = () => profile({ requestId: randomUUID(), expectedVersion: 0,
     timeZone: 'Asia/Omsk', intervals: demoIntervals })
   const command = (expectedRevision, fields) => ({ requestId: randomUUID(), expectedRevision, ...fields })
@@ -203,7 +210,7 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
     assert.equal(result.body.phase, 'active')
     return result.body
   }
-  return { db, id, otherBindingId, owner, people, tokens, foreignToken, foreignOwner, foreignPeople, request, web, bot, linkToken, link, bindingToken, bind, subscribeNotifications, closePeriod, summary, currentSummary, currentRecommendation, recommendation, confirmAction, chatFeedback, closeChatFeedback, profile, setProfile, command, status,
+  return { db, id, otherBindingId, owner, people, tokens, foreignToken, foreignOwner, foreignPeople, request, requestRaw, web, bot, linkToken, link, bindingToken, bind, subscribeNotifications, closePeriod, summary, currentSummary, currentRecommendation, recommendation, confirmAction, chatFeedback, closeChatFeedback, profile, setProfile, systemHealth, command, status,
     mutate, decision, prepare, activate, time: () => clock, advance: ms => { clock += ms }, setTime: ms => { clock = ms },
     restart: async () => { await app.close(); await launch() } }
 }
@@ -719,6 +726,41 @@ test('HTTP/SQLite: bot summary is limited to a linked organizer of its binding',
   error(await f.bot('summary'), 400, 'INVALID_INPUT')
   error(await f.bot('summary?telegramUserId=100000001', undefined, f.otherBindingId, credential),
     404, 'NOT_FOUND')
+})
+
+test('HTTP/SQLite: bot share card is a PNG for the linked organizer of a published period', async t => {
+  const f = await fixture(t)
+  await publishForRecommendation(f)
+  const summary = (await f.summary()).body
+  assert.equal(summary.status, 'published')
+
+  const card = await f.requestRaw(
+    '/bot/v1/bindings/' + f.id + '/share-card?telegramUserId=100000001',
+    { Authorization: 'Bearer ' + credential })
+  assert.equal(card.status, 200)
+  assert.match(card.headers.get('content-type'), /^image\/png/)
+  assert.equal(card.headers.get('cache-control'), 'no-store')
+  assert.deepEqual(card.body.subarray(0, 8),
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  assert.equal(card.body.readUInt32BE(16), 1200)
+  assert.equal(card.body.readUInt32BE(20), 630)
+  assert.equal(decodeURIComponent(card.headers.get('x-vibee-team-name')), 'Synthetic A')
+  assert.equal(decodeURIComponent(card.headers.get('x-vibee-period-label')), '4 ноября')
+  assert.equal(card.body.includes(Buffer.from('100000001')), false)
+
+  error(await f.bot('share-card?telegramUserId=100000002'), 403, 'ORGANIZER_REQUIRED')
+  error(await f.bot('share-card?telegramUserId=999999999'), 403, 'ORGANIZER_REQUIRED')
+  error(await f.bot('share-card?telegramUserId=100000001', undefined, f.id, bootstrapCredential),
+    401, 'BOT_AUTH_REQUIRED')
+  error(await f.bot('share-card'), 400, 'INVALID_INPUT')
+  error(await f.bot('share-card?telegramUserId=100000001', undefined, f.otherBindingId, credential),
+    404, 'NOT_FOUND')
+})
+
+test('HTTP/SQLite: bot share card waits for a published period', async t => {
+  const f = await fixture(t)
+  await f.activate()
+  error(await f.bot('share-card?telegramUserId=100000001'), 409, 'PERIOD_NOT_PUBLISHED')
 })
 
 test('HTTP/SQLite: three synthetic closed dates publish only aggregate metrics and expire after seven days', async t => {
@@ -1700,4 +1742,46 @@ test('HTTP/SQLite: transcription routes are absent when the synthetic gate is of
     { Authorization: 'Bearer ' + credential }), 503, 'UNAVAILABLE')
   error(await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs/' + randomUUID(),
     undefined, { Authorization: 'Bearer ' + credential }), 503, 'UNAVAILABLE')
+})
+
+test('HTTP/SQLite: system health endpoint reports bot status, 24h count and errors for organizers', async t => {
+  const f = await fixture(t)
+  // Before activation / full consent
+  const initial = await f.systemHealth()
+  assert.equal(initial.status, 200)
+  assert.equal(initial.body.botOnline, false)
+  assert.equal(initial.body.processed24h, 0)
+  assert.equal(initial.body.lastError, 'Ожидаются согласия участников')
+
+  // Activate binding
+  await f.activate()
+  const active = await f.systemHealth()
+  assert.equal(active.status, 200)
+  assert.equal(active.body.lastError, null)
+
+  // Submit checkin
+  const checkinRes = await f.bot('checkins', {
+    telegramUserId: '100000001',
+    nonce: 'a1b2c3d4e5f60718',
+    scores: { energy: 4, clarity: 3, support: 5 },
+    submittedAt: new Date(f.time()).toISOString(),
+  })
+  assert.equal(checkinRes.status, 200)
+
+  const withCheckin = await f.systemHealth()
+  assert.equal(withCheckin.status, 200)
+  assert.equal(withCheckin.body.botOnline, true)
+  assert.equal(withCheckin.body.processed24h, 1)
+  assert.ok(withCheckin.body.lastEventAt !== null)
+  assert.equal(withCheckin.body.lastError, null)
+
+  // Participant cannot access
+  const participantRes = await f.systemHealth(f.tokens[1])
+  assert.equal(participantRes.status, 403)
+  assert.equal(participantRes.body.error.code, 'FORBIDDEN')
+
+  // Without auth
+  const unauthorizedRes = await f.systemHealth('')
+  assert.equal(unauthorizedRes.status, 401)
+  assert.equal(unauthorizedRes.body.error.code, 'SIGN_IN_REQUIRED')
 })

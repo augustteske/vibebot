@@ -9,8 +9,18 @@ export function ThemeToggle({ className = '' }: { className?: string }) {
   const [theme, setTheme] = useState<Theme>(readTheme)
 
   useEffect(() => {
-    applyTheme(theme)
-  }, [theme])
+    applyTheme(readTheme())
+  }, [])
+
+  // Текущая страница переключила тему в другом компоненте
+  useEffect(() => {
+    function handleThemeChange(event: Event) {
+      const custom = event as CustomEvent<{ theme: Theme }>
+      if (custom.detail?.theme) setTheme(custom.detail.theme)
+    }
+    window.addEventListener('vibee-theme-change', handleThemeChange)
+    return () => window.removeEventListener('vibee-theme-change', handleThemeChange)
+  }, [])
 
   // Другая вкладка переключила тему — подхватываем выбор без перезагрузки.
   useEffect(() => {

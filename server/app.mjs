@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
 import { AppError, createStore } from './store.mjs'
+import { renderShareCardPng } from './share-card.mjs'
 
 function formatSafeError(error, context = {}) {
   const errorName = error instanceof Error && error.name ? error.name : 'UnknownError'
@@ -122,6 +123,13 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         const current = store.telegram.currentSummary(actor)
         return json(res, 200, url.searchParams.get('includeBinding') === '1' ? current : current.view)
       }
+      if (url.pathname === '/api/telegram/system-health') {
+        if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
+        if (req.method !== 'GET') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
+        const actor = store.authenticate(tokenFrom(req))
+        if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
+        return json(res, 200, store.telegram.systemHealth(actor))
+      }
       if (url.pathname === '/api/telegram/recommendation') {
         if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
         if (req.method !== 'GET') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
@@ -165,6 +173,25 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         if (!actor) throw new AppError(401, 'BOT_AUTH_REQUIRED', 'Нужна авторизация бота')
         return json(res, 200, store.telegram.summaryForOrganizer(
           actor, botSummaryRoute[1], url.searchParams.get('telegramUserId')))
+      }
+      const botShareCardRoute = url.pathname.match(/^\/api\/bot\/v1\/bindings\/([a-f0-9-]+)\/share-card$/)
+      if (botShareCardRoute) {
+        if (req.method !== 'GET') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
+        if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
+        const actor = store.telegram.authenticate(req.headers.authorization)
+        if (!actor) throw new AppError(401, 'BOT_AUTH_REQUIRED', 'Нужна авторизация бота')
+        const card = store.telegram.shareCard(
+          actor, botShareCardRoute[1], url.searchParams.get('telegramUserId'))
+        const png = renderShareCardPng(card)
+        // Заголовки — только ASCII: название и период уходят в percent-encoding.
+        res.writeHead(200, {
+          'Content-Type': 'image/png',
+          'Content-Length': png.length,
+          'Cache-Control': 'no-store',
+          'X-Vibee-Team-Name': encodeURIComponent(card.teamName ?? ''),
+          'X-Vibee-Period-Label': encodeURIComponent(card.periodLabel ?? ''),
+        })
+        return res.end(png)
       }
       const transcriptionJobRoute = url.pathname.match(/^\/api\/bot\/v1\/bindings\/([a-f0-9-]+)\/transcription-jobs$/)
       if (transcriptionJobRoute) {
@@ -288,13 +315,17 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         return json(res, 201, store.snapshot(store.authenticate(newToken)))
       }
       const feedback = req.method === 'POST' ? url.pathname.match(/^\/api\/actions\/([a-f0-9-]+)\/(feedback|close-feedback)$/) : null
-      const knownRoute = (req.method === 'GET' && ['/api/session', '/api/summary', '/api/telegram-checkin-stats'].includes(url.pathname))
+      const knownRoute = (req.method === 'GET' && ['/api/session', '/api/summary', '/api/telegram-checkin-stats', '/api/export-my-data'].includes(url.pathname))
         || (req.method === 'POST' && (['/api/logout', '/api/invitations', '/api/recovery-key', '/api/checkins', '/api/rounds/close', '/api/rounds/open', '/api/actions'].includes(url.pathname) || !!feedback))
       if (!knownRoute) throw new AppError(404, 'NOT_FOUND', 'Действие не найдено')
       if (!member) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, store.snapshot(member))
       if (req.method === 'GET' && url.pathname === '/api/summary') return json(res, 200, store.summary(member))
       if (req.method === 'GET' && url.pathname === '/api/telegram-checkin-stats') return json(res, 200, store.telegramCheckinStats(member))
+      if (req.method === 'GET' && url.pathname === '/api/export-my-data') {
+        res.setHeader('Content-Disposition', 'attachment; filename="vibee-my-data.json"')
+        return json(res, 200, store.exportUserData(member))
+      }
       if (req.method === 'POST') {
         if (url.pathname === '/api/logout') {
           store.logout(token); res.setHeader('Set-Cookie', cookie('')); return json(res, 200, { ok: true })

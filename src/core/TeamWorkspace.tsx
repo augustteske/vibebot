@@ -5,8 +5,11 @@ import { RequestError } from './RequestError'
 import type { SessionSnapshot } from './contracts'
 import { SummaryPanels } from './SummaryPanels'
 import { TeamSettings } from './TeamSettings'
+import { SystemHealthPanel } from './SystemHealthPanel'
 import { TelegramCheckinsPanel } from '../features/insights/TelegramCheckinsPanel'
 import { InviteColleagueButton } from './InviteModal'
+import { downloadUserData } from './dataExport'
+import { DemoPulsePreview } from './DemoPulsePreview'
 import './team.css'
 
 export type TeamMemberRole = 'lead' | 'developer' | 'designer' | 'manager' | 'other';
@@ -134,6 +137,15 @@ export function TeamWorkspace({ onOpenGuide }: TeamWorkspaceProps = {}) {
   const [teamProfileError, setTeamProfileError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const [summaryRefreshKey, setSummaryRefreshKey] = useState(0)
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState('')
+  const [showOnboardingBanner, setShowOnboardingBanner] = useState(() => {
+    try {
+      return sessionStorage.getItem('vibee:onboarding-active') === 'true' || !!sessionStorage.getItem('vibee:onboarding-room')
+    } catch {
+      return false
+    }
+  })
   const requestVersion = useRef(0)
   const busyRef = useRef(false)
   const refreshingRef = useRef(false)
@@ -269,6 +281,19 @@ export function TeamWorkspace({ onOpenGuide }: TeamWorkspaceProps = {}) {
     } catch (failure) { setError(failure); setErrorMutation(true) }
     finally { busyRef.current = false; setBusy(false) }
   }
+  async function handleExport() {
+    if (exporting) return
+    setExporting(true)
+    setExportError('')
+    try {
+      await downloadUserData()
+      setNotice('Файл с вашими данными успешно сформирован и скачан.')
+    } catch (failure) {
+      setExportError(failure instanceof Error ? failure.message : 'Ошибка при экспорте данных')
+    } finally {
+      setExporting(false)
+    }
+  }
   function authenticate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const values = new FormData(event.currentTarget)
@@ -332,8 +357,59 @@ export function TeamWorkspace({ onOpenGuide }: TeamWorkspaceProps = {}) {
         <h3>Как управлять участием</h3>
         <p>Участие добровольное: можно не отправлять ответ. Пока раунд или сбор отзывов открыт, повторная отправка заменяет прежний ответ. Самостоятельное удаление аккаунта и отправленных ответов сейчас не реализовано. Выход из кабинета завершает сессию, но не удаляет данные.</p>
         <p>Личный чек-ин в Telegram — отдельный сценарий: его ответы не попадают в эту командную сводку. Команда <code>/stop</code> отменяет личный сценарий и очищает черновик бота, но не удаляет веб-ответы или сообщения из истории Telegram.</p>
+        <p><button className="button secondary" type="button" onClick={() => void handleExport()} disabled={exporting}>{exporting ? 'Подготовка файла…' : 'Скачать мои данные (JSON)'}</button></p>
         <a href="/docs.html#privacy">Подробнее об обработке данных</a>
       </details>}
+      {showOnboardingBanner && snapshot.member.role === 'organizer' && (
+        <section className="panel onboarding-banner" aria-label="Онбординг команды">
+          <div className="onboarding-banner__header">
+            <div className="onboarding-banner__step-info">
+              <span className="onboarding-progress__badge">Шаг 3 из 3</span>
+              <strong>Знакомство с кабинетом</strong>
+            </div>
+            <button
+              type="button"
+              className="text-button onboarding-banner__dismiss"
+              onClick={() => {
+                setShowOnboardingBanner(false)
+                try {
+                  sessionStorage.removeItem('vibee:onboarding-active')
+                  sessionStorage.removeItem('vibee:onboarding-room')
+                } catch {}
+              }}
+            >
+              Понятно ✓
+            </button>
+          </div>
+          <div className="onboarding-progress__track" style={{ margin: '10px 0 16px 0' }}>
+            <div className="onboarding-progress__bar" style={{ width: '100%' }} />
+          </div>
+          <div className="onboarding-banner__body">
+            <div className="onboarding-banner__key-col">
+              <span className="onboarding-banner__key-label">Ключ для коллег</span>
+              <div className="onboarding-banner__key-box">
+                <code>{snapshot.workspace.roomKey || '—'}</code>
+                <button
+                  type="button"
+                  className="button secondary"
+                  style={{ padding: '4px 10px', fontSize: '0.85rem' }}
+                  onClick={() => {
+                    void navigator.clipboard.writeText(snapshot.workspace.roomKey ?? '')
+                    setNotice('Ключ комнаты скопирован.')
+                  }}
+                >
+                  Скопировать
+                </button>
+              </div>
+            </div>
+            <p className="onboarding-banner__text">
+              Отправьте этот ключ коллегам. Они смогут войти в Vibee за 2 клика.
+            </p>
+          </div>
+        </section>
+      )}
+      {snapshot.member.role === 'organizer' && <DemoPulsePreview onConnectBot={onOpenGuide} />}
+      {snapshot.member.role === 'organizer' && <SystemHealthPanel key={'health-' + activeWorkspaceId} onLogin={beginLogin}/>}
       {snapshot.member.role === 'organizer' && <SummaryPanels key={snapshot.workspace.id + ':' + snapshot.round.id + ':' + snapshot.round.summary.status} refreshKey={summaryRefreshKey} onLogin={beginLogin}/>}
       {snapshot.member.role === 'organizer' && <TelegramCheckinsPanel key={'checkins-' + activeWorkspaceId} onLogin={beginLogin}/>}
       {snapshot.member.role === 'organizer' && <TeamSettings key={'settings-' + activeWorkspaceId} onLogin={beginLogin}/>}
@@ -414,6 +490,7 @@ export function TeamWorkspace({ onOpenGuide }: TeamWorkspaceProps = {}) {
         </section>
         {snapshot.member.role === 'organizer' && <section className="panel"><h2>Пригласить участника</h2><p className="muted">Передайте участникам короткий ключ комнаты для быстрого входа или создайте одноразовую ссылку на 24 часа.</p>{snapshot.workspace.roomKey && <div className="room-key-share"><label className="team-field">Ключ комнаты<input readOnly value={snapshot.workspace.roomKey} onFocus={event => event.currentTarget.select()}/></label><button className="text-button" type="button" onClick={() => { void navigator.clipboard.writeText(snapshot.workspace.roomKey ?? '').then(() => setNotice('Ключ комнаты скопирован.'), () => setNotice('Выделите ключ комнаты и скопируйте его вручную.')) }}>Скопировать ключ комнаты</button></div>}<button className="button secondary" disabled={busy} onClick={() => void issueInvite()}>Создать приглашение</button>{inviteLink && <><label className="team-field">Ссылка для одного участника<input readOnly value={inviteLink} onFocus={event => event.currentTarget.select()}/></label><button className="text-button" onClick={() => { void navigator.clipboard.writeText(inviteLink).then(() => setNotice('Приглашение скопировано.'), () => setNotice('Выделите ссылку и скопируйте её вручную.')) }}>Скопировать ссылку</button></>}</section>}
         <section className="panel"><h2>Вернуться с другого устройства</h2><p className="muted">Сохраните личный код входа. Он действует 30 дней и сохраняет ваши права и участие. Новый код заменяет предыдущий.</p><button className="button secondary" disabled={busy} onClick={() => void createAccessKey()}>Создать личный код входа</button>{accessKey && <label className="team-field">Ваш личный код<input value={accessKey} readOnly onFocus={event => event.currentTarget.select()}/></label>}</section>
+        <section className="panel data-export-panel"><h2>Экспорт данных</h2><p className="muted">Скачайте копию своих данных (профиль, оценки чек-инов, статусы согласий и отзывы) в формате JSON согласно стандартам приватности.</p><button className="button secondary" type="button" onClick={() => void handleExport()} disabled={exporting}>{exporting ? 'Подготовка файла…' : 'Скачать мои данные'}</button>{exportError && <p className="error" role="alert">{exportError}</p>}</section>
         <div className="note"><strong>Приватность в небольших командах</strong><p>При четырёх участниках статистика скрыта. Добровольные упражнения остаются доступны. Сессия привязана к этому браузеру на семь дней.</p></div>
       </aside></div>
     </>}

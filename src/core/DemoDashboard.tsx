@@ -17,6 +17,28 @@ const demoMetrics: InsightsMetrics = {
   recognitionPercent: 20,
   participantCount: 6,
   messageCount: 120,
+  unansweredQuestionsPercent: 8.5,
+  responseMedianMinutes: 4.2,
+  positivityIndex: 28.4,
+  intensityIndex: 1.8,
+  activityDistribution: {
+    byDay: { 'Пн': 24, 'Вт': 32, 'Ср': 28, 'Чт': 22, 'Пт': 14, 'Сб': 0, 'Вс': 0 },
+    byHour: {
+      0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0,
+      6: 2, 7: 5, 8: 12, 9: 18, 10: 22, 11: 19,
+      12: 15, 13: 14, 14: 16, 15: 18, 16: 15, 17: 12,
+      18: 8, 19: 5, 20: 3, 21: 2, 22: 1, 23: 0,
+    },
+  },
+  trends: {
+    outsideHoursPercentDiff: -3.5,
+    participationEvennessDiff: 4.2,
+    recognitionPercentDiff: 2.1,
+    unansweredQuestionsPercentDiff: -2.3,
+    responseMedianMinutesDiff: -1.1,
+    positivityIndexDiff: 3.4,
+    intensityIndexDiff: -0.5,
+  },
 }
 
 export function DemoDashboard({ onBack, onEnter, onCreateTeam }: DemoDashboardProps) {

@@ -215,12 +215,222 @@
   margin: 6px 0 14px;
 }
 
+.iw-hero-stat__row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .iw-hero-stat__number {
   font-size: clamp(2rem, 3.2vw, 2.75rem);
   font-weight: 850;
   letter-spacing: -0.04em;
   color: var(--vibee-ink);
   line-height: 1;
+}
+
+/* Apple-style trend badge */
+.iw-trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  transition: transform 0.2s ease;
+}
+
+.iw-trend:hover {
+  transform: translateY(-1px);
+}
+
+.iw-trend__arrow {
+  font-size: 0.82rem;
+  line-height: 1;
+}
+
+.iw-trend--good {
+  background: rgba(46, 204, 113, 0.15);
+  color: #27ae60;
+  border: 1px solid rgba(46, 204, 113, 0.3);
+}
+
+.iw-trend--warn {
+  background: rgba(231, 76, 60, 0.12);
+  color: #e74c3c;
+  border: 1px solid rgba(231, 76, 60, 0.25);
+}
+
+.iw-trend--neutral {
+  background: var(--vibee-surface-alt);
+  color: var(--vibee-muted);
+  border: 1px solid var(--vibee-line);
+}
+
+/* Expandable secondary section */
+.iw-details {
+  margin-top: 24px;
+  border-top: 1px solid var(--vibee-line);
+  padding-top: 16px;
+}
+
+.iw-details__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--vibee-surface-alt);
+  border: 1px solid var(--vibee-line);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.iw-details__summary::-webkit-details-marker {
+  display: none;
+}
+
+.iw-details__summary:hover {
+  background: var(--vibee-yellow-soft);
+  border-color: var(--vibee-yellow-line);
+}
+
+.iw-details__summary-text {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--vibee-ink);
+}
+
+.iw-details__chevron {
+  font-size: 1.1rem;
+  color: var(--vibee-muted);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.iw-details[open] .iw-details__chevron {
+  transform: rotate(180deg);
+}
+
+.iw-details__content {
+  padding-top: 16px;
+}
+
+.iw-grid--sub {
+  margin-top: 0;
+}
+
+.iw-card--sub {
+  background: var(--vibee-surface);
+  border-style: dashed;
+}
+
+.iw-card--span {
+  grid-column: 1 / -1;
+}
+
+/* Rhythm distribution heatmap */
+.iw-rhythm {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-top: 8px;
+}
+
+.iw-rhythm__section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.iw-rhythm__title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--vibee-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.iw-rhythm__days {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  height: 90px;
+  padding: 10px 12px 6px;
+  border-radius: 14px;
+  background: var(--vibee-surface-alt);
+  border: 1px solid var(--vibee-line);
+  gap: 6px;
+}
+
+.iw-rhythm__day-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  height: 100%;
+}
+
+.iw-rhythm__bar-wrap {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.iw-rhythm__bar {
+  width: min(100%, 14px);
+  border-radius: 6px;
+  background: linear-gradient(180deg, var(--vibee-yellow) 0%, rgba(217, 174, 0, 0.4) 100%);
+  transition: height 0.3s ease;
+}
+
+.iw-rhythm__day-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--vibee-muted);
+}
+
+.iw-rhythm__blocks {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.iw-rhythm__block {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--vibee-surface-alt);
+  border: 1px solid var(--vibee-line);
+  gap: 2px;
+}
+
+.iw-rhythm__block-name {
+  font-size: 0.75rem;
+  color: var(--vibee-muted);
+  font-weight: 600;
+}
+
+.iw-rhythm__block-pct {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--vibee-ink);
+}
+
+@media (max-width: 640px) {
+  .iw-rhythm {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
 }
 
 .iw-hero-stat__label {

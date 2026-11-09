@@ -29,6 +29,7 @@ SessionSnapshot содержит только своё имя/роль, прос
 | POST /restore | {key} | Возвращает того же участника с теми же правами |
 | GET /session | — | SessionSnapshot своей команды либо 401 |
 | GET /summary | — | Summary текущего раунда своей команды либо 401 |
+| GET /export-my-data | — | Сессия участника: JSON-файл со всеми данными текущего пользователя (GDPR экспорт) |
 | POST /logout | {} | Отзывает текущую сессию |
 | POST /recovery-key | {} | Свой личный код входа на 30 дней; новый заменяет старый |
 | POST /invitations | {} | Только организатор: {token, expiresAt}; одно использование, 24 часа |
@@ -126,7 +127,9 @@ workspaceId — существующая команда; bindingId — серв�
 | POST telegram/bindings/:id/periods/close | веб-организатор | {requestId, expectedRevision, periodId}; CommunicationView |
 | GET telegram/bindings/:id/summary | веб-организатор | CommunicationView |
 | GET telegram/summary | веб-организатор с сессией | CommunicationView текущей привязки; без привязки — disconnected |
+| GET telegram/system-health | веб-организатор с сессией | {status, botOnline, processed24h, lastEventAt, lastError, checkedAt} текущей привязки |
 | GET bot/v1/bindings/:id/summary?telegramUserId=:id | бот, связанный организатор | CommunicationView этой привязки; остальным — ORGANIZER_REQUIRED |
+| GET bot/v1/bindings/:id/share-card?telegramUserId=:id | бот, связанный организатор | PNG 1200×630 (image/png); заголовки X-Vibee-Team-Name и X-Vibee-Period-Label в percent-encoding; без опубликованного периода — 409 PERIOD_NOT_PUBLISHED |
 | GET telegram/recommendation?periodId=:id | веб-организатор с сессией | CommunicationRecommendation последнего опубликованного периода текущей привязки |
 | GET telegram/bindings/:id/periods/:periodId/recommendation | веб-организатор | Только карточка последнего опубликованного периода |
 | POST telegram/bindings/:id/periods/:periodId/action | веб-организатор | {requestId, expectedRevision, periodId, recommendationId, action}; подтверждённый шаг |

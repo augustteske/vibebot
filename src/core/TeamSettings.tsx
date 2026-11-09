@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { api } from './client'
 import { RequestError } from './RequestError'
+import { downloadUserData } from './dataExport'
 import './team-settings.css'
 
 interface WorkInterval {
@@ -59,6 +60,22 @@ export function TeamSettings({ onLogin }: { onLogin?: () => void }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<unknown>(null)
   const [status, setStatus] = useState('')
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState('')
+
+  async function handleExport() {
+    if (exporting) return
+    setExporting(true)
+    setExportError('')
+    try {
+      await downloadUserData()
+      setStatus('Файл с вашими данными успешно выгружен.')
+    } catch (failure) {
+      setExportError(failure instanceof Error ? failure.message : 'Ошибка при экспорте данных')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   useEffect(() => {
     let active = true
@@ -163,6 +180,14 @@ export function TeamSettings({ onLogin }: { onLogin?: () => void }) {
           </div>
           <button className="button" type="submit" disabled={saving || loading}>{saving ? 'Сохраняем…' : 'Сохранить расписание'}</button>
         </form>
+        <div className="team-settings-export">
+          <h3>Экспорт данных</h3>
+          <p className="muted">Скачайте копию персональных данных (профиль, оценки чек-инов, согласия и отзывы) в формате JSON согласно GDPR.</p>
+          <button className="button secondary" type="button" onClick={() => void handleExport()} disabled={exporting}>
+            {exporting ? 'Подготовка файла…' : 'Скачать мои данные (JSON)'}
+          </button>
+          {exportError && <p className="error" role="alert">{exportError}</p>}
+        </div>
       </>}
   </section>
 }
