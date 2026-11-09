@@ -35,24 +35,71 @@ const tempCopy = join(backupDir, `temp_${timestamp}.sqlite`);
 const finalBak = join(backupDir, `vibebot_${timestamp}.bak`);
 
 // 1. Hot atomic backup to temporary database file
+const quoteSql = (s) => "\x27" + String(s).replaceAll("\x27", "\x27\x27") + "\x27";
+
 const srcDb = new DatabaseSync(dbPath);
 try {
-  srcDb.exec(`VACUUM INTO "${tempCopy}"`);
+  srcDb.exec("VACUUM INTO " + quoteSql(tempCopy));
+} catch (err) {
+  console.error("Vibee backup error during initial snapshot: " + (err?.message || err));
+  process.exit(1);
 } finally {
-  srcDb.close();
+  try { srcDb.close(); } catch {}
 }
 
 try { chmodSync(tempCopy, 0o600); } catch {}
 
-// 2. In the copy: delete raw tables per privacy contract, then VACUUM INTO final backup
+// 2. In the copy: delete raw tables and tokens per privacy contract, verify, then VACUUM INTO final backup
 const copyDb = new DatabaseSync(tempCopy);
+let backupSuccess = false;
 try {
-  try { copyDb.exec("DELETE FROM telegram_texts;"); } catch {}
-  try { copyDb.exec("DELETE FROM telegram_media_observations;"); } catch {}
-  copyDb.exec(`VACUUM INTO "${finalBak}"`);
+  const runIgnoreMissing = (sql) => {
+    try {
+      copyDb.exec(sql);
+    } catch (err) {
+      if (!err?.message?.includes("no such table")) {
+        throw err;
+      }
+    }
+  };
+
+  runIgnoreMissing("DELETE FROM telegram_texts;");
+  runIgnoreMissing("DELETE FROM telegram_media_observations;");
+  runIgnoreMissing("UPDATE users SET access_token = NULL, refresh_token = NULL;");
+  runIgnoreMissing("DELETE FROM oauth_states;");
+
+  const checkZero = (sql, label) => {
+    try {
+      const row = copyDb.prepare(sql).get();
+      if (!row) return;
+      const count = Number(Object.values(row)[0]);
+      if (count !== 0) {
+        throw new Error("Backup verification failed: " + label + " is not empty (" + count + ")");
+      }
+    } catch (err) {
+      if (!err?.message?.includes("no such table")) {
+        throw err;
+      }
+    }
+  };
+
+  checkZero("SELECT COUNT(*) FROM telegram_texts;", "telegram_texts");
+  checkZero("SELECT COUNT(*) FROM telegram_media_observations;", "telegram_media_observations");
+  checkZero("SELECT COUNT(*) FROM users WHERE access_token IS NOT NULL OR refresh_token IS NOT NULL;", "users tokens");
+  checkZero("SELECT COUNT(*) FROM oauth_states;", "oauth_states");
+
+  copyDb.exec("VACUUM INTO " + quoteSql(finalBak));
+  backupSuccess = true;
+} catch (err) {
+  console.error("Vibee backup error during cleanup/verification: " + (err?.message || err));
 } finally {
-  copyDb.close();
+  try { copyDb.close(); } catch {}
   try { unlinkSync(tempCopy); } catch {}
+}
+
+if (!backupSuccess) {
+  try { unlinkSync(finalBak); } catch {}
+  process.exit(1);
 }
 
 try { chmodSync(finalBak, 0o600); } catch {}
@@ -102,7 +149,8 @@ elif [ "$MODE" = "host" ]; then
     FINAL_FILE="${BACKUP_DIR}/vibebot_${TIMESTAMP}.bak"
     sqlite3 "$DB_PATH" "VACUUM INTO '${TEMP_FILE}'"
     chmod 600 "$TEMP_FILE" 2>/dev/null || true
-    sqlite3 "$TEMP_FILE" "DELETE FROM telegram_texts; DELETE FROM telegram_media_observations; VACUUM INTO '${FINAL_FILE}'"
+    sqlite3 "$TEMP_FILE" "DELETE FROM telegram_texts; DELETE FROM telegram_media_observations; UPDATE users SET access_token = NULL, refresh_token = NULL; DELETE FROM oauth_states;" 2>/dev/null || true
+    sqlite3 "$TEMP_FILE" "VACUUM INTO '${FINAL_FILE}'"
     rm -f "$TEMP_FILE"
     chmod 600 "$FINAL_FILE" 2>/dev/null || true
     echo "Vibee backup created: ${FINAL_FILE}"
