@@ -5,6 +5,7 @@ import './InsightsWidget.css'
 
 const TeamHealthVessel = lazy(() => import('./TeamHealthVessel').then(m => ({ default: m.TeamHealthVessel })))
 const ActionPlanPanel = lazy(() => import('../actions/ActionPlanPanel').then(m => ({ default: m.ActionPlanPanel })))
+const AchievementsPanel = lazy(() => import('./AchievementsPanel').then(m => ({ default: m.AchievementsPanel })))
 const InsightsCharts = lazy(() => import('./InsightsCharts').then(module => ({ default: module.InsightsCharts })))
 
 export interface InsightsMetrics {
@@ -258,6 +259,11 @@ export function InsightsWidget({
           trends={currentTrends}
           periodId={periodLabel}
         />
+      </Suspense>
+
+      {/* Достижения команды (геймификация) */}
+      <Suspense fallback={null}>
+        <AchievementsPanel metrics={metrics} />
       </Suspense>
 
       <div className="iw-grid">

@@ -1,0 +1,272 @@
+/* AchievementsPanel.css - Team Gamification & Achievements Grid */
+
+.ach-panel {
+  position: relative;
+  margin-bottom: 24px;
+  padding: clamp(20px, 3vw, 28px);
+  border-radius: 24px;
+  background: var(--vibee-surface);
+  border: 1px solid var(--vibee-line);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
+  color: var(--vibee-ink);
+  transition: box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.ach-panel:hover {
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.06);
+  border-color: var(--vibee-line-strong);
+}
+
+.ach-panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.ach-panel__heading-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ach-panel__title {
+  margin: 0;
+  font-size: clamp(1.15rem, 2vw, 1.35rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--vibee-ink);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ach-panel__subtitle {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--vibee-muted);
+}
+
+.ach-panel__progress-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, rgba(255, 214, 56, 0.18), rgba(245, 196, 0, 0.12));
+  border: 1px solid rgba(245, 196, 0, 0.35);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--vibee-yellow-ink);
+  white-space: nowrap;
+}
+
+.ach-panel__progress-count {
+  font-weight: 700;
+  font-feature-settings: "tnum";
+}
+
+.ach-panel__progress-label {
+  opacity: 0.9;
+}
+
+/* =========================================
+   Achievements Grid
+   ========================================= */
+
+.ach-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 16px;
+}
+
+@media (min-width: 900px) {
+  .ach-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 1200px) {
+  .ach-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* =========================================
+   Achievement Card
+   ========================================= */
+
+.ach-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 20px 16px;
+  border-radius: 18px;
+  background: var(--vibee-surface-alt);
+  border: 1.5px solid var(--vibee-line);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.25s ease,
+              background 0.25s ease;
+  cursor: pointer;
+  outline: none;
+}
+
+.ach-card:focus-visible {
+  outline: 2px solid var(--vibee-focus);
+  outline-offset: 2px;
+}
+
+/* Locked Card State */
+.ach-card--locked {
+  background: rgba(140, 140, 150, 0.04);
+  border-color: rgba(140, 140, 150, 0.18);
+  opacity: 0.72;
+}
+
+.ach-card--locked:hover,
+.ach-card--locked:focus-visible {
+  transform: translateY(-3px);
+  opacity: 0.9;
+  border-color: rgba(140, 140, 150, 0.35);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.05);
+}
+
+.ach-card--locked .ach-card__emoji {
+  filter: grayscale(1);
+  opacity: 0.45;
+}
+
+/* Unlocked Card State */
+.ach-card--unlocked {
+  background: linear-gradient(145deg, var(--vibee-surface) 0%, rgba(255, 214, 56, 0.09) 100%);
+  border-color: rgba(245, 196, 0, 0.45);
+  box-shadow: 0 6px 18px rgba(245, 196, 0, 0.12);
+}
+
+.ach-card--unlocked:hover,
+.ach-card--unlocked:focus-visible {
+  transform: translateY(-4px) scale(1.02);
+  border-color: rgba(245, 196, 0, 0.75);
+  box-shadow: 0 12px 28px rgba(245, 196, 0, 0.25), 0 0 16px rgba(255, 214, 56, 0.3);
+}
+
+/* Card Icon & Badges */
+.ach-card__icon-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  height: 58px;
+  margin-bottom: 12px;
+  border-radius: 50%;
+  background: var(--vibee-surface);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  transition: transform 0.25s ease;
+}
+
+.ach-card:hover .ach-card__icon-wrapper {
+  transform: scale(1.1);
+}
+
+.ach-card__emoji {
+  font-size: 1.9rem;
+  line-height: 1;
+  user-select: none;
+}
+
+.ach-card__lock-badge {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  font-size: 0.85rem;
+  background: var(--vibee-surface);
+  border-radius: 50%;
+  padding: 2px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.15);
+}
+
+/* Card Text Content */
+.ach-card__content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.ach-card__title {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--vibee-ink);
+  line-height: 1.3;
+}
+
+.ach-card__status {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.ach-card__status--unlocked {
+  color: #c98800;
+}
+
+.ach-card__status--locked {
+  color: var(--vibee-muted);
+}
+
+/* Tooltip on hover/focus */
+.ach-tooltip {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 220px;
+  padding: 10px 14px;
+  background: var(--vibee-ink);
+  color: #fff;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.22);
+  z-index: 50;
+  pointer-events: none;
+  animation: achTooltipFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.ach-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: var(--vibee-ink);
+}
+
+.ach-tooltip__title {
+  font-weight: 700;
+  margin-bottom: 3px;
+  color: #ffd638;
+}
+
+.ach-tooltip__desc {
+  opacity: 0.95;
+}
+
+@keyframes achTooltipFadeIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
