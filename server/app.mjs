@@ -115,7 +115,7 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         res.writeHead(200, { 'Content-Type': mime[extname(file)] ?? 'application/octet-stream' }); return res.end(data)
       }
       if (req.method === 'GET' && url.pathname === '/api/health') return json(res, 200, { ok: true })
-      if (!['GET', 'POST'].includes(req.method)) throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Метод не поддерживается')
+      if (!['GET', 'POST', 'PATCH'].includes(req.method)) throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Метод не поддерживается')
       if (url.pathname === '/api/telegram/summary') {
         if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
         if (req.method !== 'GET') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
@@ -221,6 +221,23 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         return json(res, 200, store.telegram.transcriptionJobStatus(
           actor, transcriptionJobStatusRoute[1], transcriptionJobStatusRoute[2]))
       }
+      const leaderMessageBotRoute = url.pathname.match(/^\/api\/bot\/v1\/bindings\/([a-f0-9-]+)\/leader-messages$/)
+      if (leaderMessageBotRoute) {
+        if (req.method !== 'POST') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
+        if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
+        const actor = store.telegram.authenticate(req.headers.authorization)
+        if (!actor) throw new AppError(401, 'BOT_AUTH_REQUIRED', 'Нужна авторизация бота')
+        const input = await body(req, 'INVALID_INPUT')
+        const isAnonymous = Boolean(input?.isAnonymous ?? input?.is_anonymous ?? true)
+        const result = store.createLeaderMessage({
+          workspace_id: actor.workspace_id,
+          member_id: null,
+          sender_name: isAnonymous ? null : (input?.senderName ?? input?.sender_name ?? 'Участник Telegram'),
+          message: input?.message,
+          is_anonymous: isAnonymous,
+        })
+        return json(res, 201, result)
+      }
       if (['/api/telegram/link-tokens', '/api/bot/v1/links', '/api/telegram/binding-tokens', '/api/bot/v1/bindings'].includes(url.pathname)) {
         if (req.method !== 'POST') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
         if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
@@ -297,6 +314,66 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
           : operation === 'checkins' ? store.telegram.acceptCheckin(actor, route[2], await body(req, 'INVALID_INPUT'))
           : store.telegram.mutate(actor, route[2], operation, await body(req, 'INVALID_INPUT'))
         return json(res, 200, result)
+      }
+      const messagePatchRoute = url.pathname.match(/^\/api\/messages\/([a-f0-9-]+)$/)
+      if (messagePatchRoute) {
+        if (req.method !== 'PATCH') throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Метод не поддерживается')
+        checkBrowser(req)
+        const member = store.authenticate(tokenFrom(req))
+        if (!member) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
+        const input = await body(req, 'INVALID_INPUT')
+        return json(res, 200, store.updateLeaderMessage(member, messagePatchRoute[1], input))
+      }
+      if (url.pathname === '/api/messages') {
+        if (req.method === 'GET') {
+          const member = store.authenticate(tokenFrom(req))
+          if (!member) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
+          return json(res, 200, store.listLeaderMessages(member))
+        }
+        if (req.method === 'POST') {
+          const isBot = Boolean(req.headers.authorization && !tokenFrom(req))
+          if (!isBot) checkBrowser(req)
+          const input = await body(req, 'INVALID_INPUT')
+          const member = store.authenticate(tokenFrom(req))
+          let workspaceId = null
+          let memberId = null
+          let senderName = null
+
+          if (member) {
+            workspaceId = member.workspace_id
+            if (!input?.is_anonymous && !input?.isAnonymous) {
+              memberId = member.id
+              senderName = member.name
+            }
+          } else if (req.headers.authorization) {
+            const actor = store.telegram.authenticate(req.headers.authorization)
+            if (!actor) throw new AppError(401, 'BOT_AUTH_REQUIRED', 'Нужна авторизация бота')
+            workspaceId = actor.workspace_id
+            if (!input?.is_anonymous && !input?.isAnonymous) {
+              senderName = input?.senderName ?? input?.sender_name ?? 'Участник Telegram'
+            }
+          } else if (input?.roomKey || input?.room_key) {
+            const rawKey = input.roomKey ?? input.room_key
+            const ws = store.getWorkspaceByRoomKey(rawKey)
+            if (!ws) throw new AppError(400, 'INVALID_ROOM_KEY', 'Ключ комнаты не найден')
+            workspaceId = ws.id
+            if (!input?.is_anonymous && !input?.isAnonymous) {
+              senderName = input?.senderName ?? input?.sender_name ?? 'Участник'
+            }
+          } else {
+            throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды или укажите ключ комнаты')
+          }
+
+          const result = store.createLeaderMessage({
+            workspace_id: workspaceId,
+            member_id: memberId,
+            sender_name: senderName,
+            message: input?.message,
+            is_anonymous: Boolean(input?.is_anonymous ?? input?.isAnonymous ?? true),
+          })
+          return json(res, 201, result)
+        }
+        throw new AppError(405, 'METHOD_NOT_ALLOWED', 'Метод не поддерживается')
       }
       if (req.method === 'POST') checkBrowser(req)
       const input = req.method === 'POST' ? await body(req) : null
