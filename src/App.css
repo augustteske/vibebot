@@ -1,3 +1,30 @@
+@keyframes pageFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.landing,
+.workspace,
+.demo-dashboard,
+.guide-page {
+  animation: pageFadeIn .36s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing,
+  .workspace,
+  .demo-dashboard,
+  .guide-page {
+    animation: none;
+  }
+}
+
 .workspace {
   width: min(100%, 1360px);
   min-height: 100vh;
@@ -327,11 +354,13 @@
 }
 
 @media (max-width: 460px) {
-  .workspace > header { gap: 8px; }
+  .workspace { padding: 10px 12px 24px; }
+  .workspace > header { gap: 8px; padding: 8px 12px; }
   .brand { font-size: 20px; }
   .badge { max-width: 58%; text-align: center; }
-  .intro h1 { font-size: clamp(40px, 11vw, 52px); }
+  .intro h1 { font-size: clamp(34px, 10vw, 48px); }
   .scenario { align-items: stretch; flex-direction: column; }
+  .panel { padding: 18px 14px; border-radius: 18px; }
   .metrics { grid-template-columns: 1fr; }
   .metric { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .metric strong { margin: 0; }

@@ -237,6 +237,68 @@
 .shared-action .goal { white-space: pre-wrap; overflow-wrap: anywhere; }
 .suggestion + .suggestion { margin-top: 24px; border-top: 1px solid var(--vibee-line); padding-top: 18px; }
 
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 14px;
+  margin: 18px 0;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 18px;
+  border: 1px solid var(--vibee-tint-border);
+  border-radius: 18px;
+  background: var(--vibee-surface);
+  color: var(--vibee-eyebrow);
+  box-shadow: var(--vibee-shadow-soft);
+  transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease;
+}
+
+.metric:hover {
+  transform: translateY(-2px);
+  border-color: var(--vibee-yellow-line);
+  box-shadow: var(--vibee-shadow-card);
+}
+
+.metric strong {
+  color: var(--vibee-ink);
+  font-size: 32px;
+  font-weight: 850;
+  letter-spacing: -0.045em;
+  line-height: 1;
+  margin-top: 4px;
+}
+
+.metric small {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--vibee-muted);
+  margin-left: 2px;
+}
+
+.suggestion {
+  padding: 20px 22px;
+  border: 1px solid var(--vibee-line);
+  border-radius: 18px;
+  background: var(--vibee-surface);
+  box-shadow: var(--vibee-shadow-soft);
+  margin-top: 14px;
+  transition: border-color .2s ease;
+}
+
+.suggestion:hover {
+  border-color: var(--vibee-yellow-line);
+}
+
+.suggestion h3 {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+  font-weight: 750;
+}
+
 .mode-switch {
   display: flex;
   flex-wrap: wrap;

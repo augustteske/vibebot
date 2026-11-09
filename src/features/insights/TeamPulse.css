@@ -48,6 +48,25 @@
 .team-pulse__share-row p { flex: 1 1 320px; margin: 0; }
 .team-pulse__share-row--end { justify-content: flex-end; margin-top: 12px; }
 
+.team-pulse__calibrating {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: clamp(26px, 4vw, 40px) 18px;
+  border: 1px dashed var(--vibee-line-strong);
+  border-radius: 20px;
+  background: var(--vibee-surface-alt);
+  margin-top: 14px;
+}
+
+.team-pulse__calibrating-title {
+  margin: 12px 0 6px;
+  font-size: 1.25rem;
+  font-weight: 780;
+  color: var(--vibee-ink);
+}
+
 @media (max-width: 480px) {
   .team-pulse__period { width: 100%; }
 }

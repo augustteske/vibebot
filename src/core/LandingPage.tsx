@@ -112,6 +112,7 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
   const [expandedContrastCard, setExpandedContrastCard] = useState<string | null>(null)
   const [contrastView, setContrastView] = useState<'split' | 'before' | 'after'>('split')
   const [isPrivacyLocked, setIsPrivacyLocked] = useState(false)
+  const [isScrolled, setIsScrolled] = useState(false)
   const privacyRef = useRef<HTMLElement | null>(null)
   const lockTimeoutRef = useRef<number | null>(null)
 
@@ -131,6 +132,15 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
   useEffect(() => {
     document.documentElement.dataset.season = newYear ? 'new-year' : 'default'
   }, [newYear])
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 16)
+    }
+    handleScroll()
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
 
   useEffect(() => {
     const el = privacyRef.current
@@ -207,7 +217,7 @@ export function LandingPage({ onEnter, onDemo, onJoinByKey, onGuide }: LandingPa
           ))}
         </div>
       )}
-      <header className="landing-header">
+      <header className={`landing-header${isScrolled ? ' is-scrolled' : ''}`}>
         <a className="landing-brand" href="#top" aria-label="Vibee — главная">
           <img src="/bee.svg" alt="" />
           <span>vibee</span>

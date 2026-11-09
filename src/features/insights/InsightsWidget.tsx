@@ -1,4 +1,5 @@
 import { lazy, Suspense, useId, useState } from 'react'
+import { CuteBeeMagnifier } from '../../core/CuteBeeMagnifier'
 import './InsightsWidget.css'
 
 const InsightsCharts = lazy(() => import('./InsightsCharts').then(module => ({ default: module.InsightsCharts })))
@@ -94,10 +95,12 @@ export function InsightsWidget({ state, metrics, teamProfile, periodLabel, demo 
   if (state === 'calibrating') {
     return (
       <div className="iw-container iw-empty-state">
-        <div className="iw-empty-state__icon">🐝🔍</div>
-        <h2 className="iw-title">Идёт калибровка</h2>
-        <p className="iw-empty-state__lead">Мы собираем первые сообщения, чтобы понять ритм и стиль вашей команды.</p>
-        <p className="iw-hint">Пока накапливается история, сравнение с привычной нормой недоступно.</p>
+        <div className="iw-empty-state__icon">
+          <CuteBeeMagnifier size={84} />
+        </div>
+        <h2 className="iw-title">Мы собираем данные...</h2>
+        <p className="iw-empty-state__lead">Идёт калибровка первых сообщений команды.</p>
+        <p className="iw-hint">Мы анализируем стиль и ритм вашей команды, чтобы сформировать объективную картину без шума.</p>
       </div>
     );
   }
@@ -135,6 +138,10 @@ export function InsightsWidget({ state, metrics, teamProfile, periodLabel, demo 
               note={teamProfile ? PROFILE_NOTE[teamProfile] : undefined}
             />
           </div>
+          <div className="iw-hero-stat">
+            <span className="iw-hero-stat__number">{metrics.outsideHoursPercent}%</span>
+            <span className="iw-hero-stat__label">сообщений вне работы</span>
+          </div>
           <Suspense fallback={<div className="iw-chart iw-chart--donut" aria-hidden="true" />}>
             <InsightsCharts metric="outsideHoursPercent" value={metrics.outsideHoursPercent} />
           </Suspense>
@@ -150,6 +157,10 @@ export function InsightsWidget({ state, metrics, teamProfile, periodLabel, demo 
               doesNotProve="вклад людей в результат и не определяет «главного» в команде."
             />
           </div>
+          <div className="iw-hero-stat">
+            <span className="iw-hero-stat__number">{metrics.participationEvenness.toFixed(1)}%</span>
+            <span className="iw-hero-stat__label">вовлечённость команды</span>
+          </div>
           <Suspense fallback={<div className="iw-chart" aria-hidden="true" />}>
             <InsightsCharts metric="participationEvenness" value={metrics.participationEvenness} />
           </Suspense>
@@ -163,7 +174,11 @@ export function InsightsWidget({ state, metrics, teamProfile, periodLabel, demo 
               doesNotProve="настоящую культуру признания: автоматическое распознавание лишь подсвечивает добрые слова."
             />
           </div>
-          <p className="iw-value">{metrics.recognitionPercent}%</p>
+          <div className="iw-hero-stat">
+            <span className="iw-hero-stat__number">{metrics.recognitionPercent}%</span>
+            <span className="iw-hero-stat__label">сообщений с благодарностью</span>
+          </div>
+          <p className="iw-value-sub">Тёплые слова и признание вклада в диалогах</p>
         </div>
       </div>
     </div>

@@ -4,6 +4,7 @@ import { api, ApiError } from '../../core/client'
 import { RequestError } from '../../core/RequestError'
 import { InsightsWidget } from './InsightsWidget'
 import type { InsightsMetrics } from './InsightsWidget'
+import { CuteBeeMagnifier } from '../../core/CuteBeeMagnifier'
 import { ShareCardButton } from './ShareCardButton'
 import { formatSharePeriod } from './shareCard'
 import type { ShareCardData } from './shareCard'
@@ -34,7 +35,7 @@ const explanations = {
   disconnected: 'История пока не собирается: нет активной привязки Telegram-чата.',
   paused: 'Сбор приостановлен. Показатели скрыты до возобновления с согласиями участников.',
   awaiting_consents: 'История пока не собирается: ожидается согласие всех участников.',
-  calibrating: 'Идёт калибровка. Мы собираем первые сообщения, чтобы понять стиль вашей команды.',
+  calibrating: 'Мы собираем данные... Мы анализируем первые сообщения, чтобы понять стиль и ритм вашей команды.',
   open: 'Текущий период ещё собирается. Пригласите коллег поделиться чек-ином, и показатели появятся!',
   insufficient: 'Пока нет данных для анализа. Пригласите коллег в чат, и мы начнём!',
   error: 'Анализ чата временно недоступен. Показатели скрыты.',
@@ -127,6 +128,12 @@ export function TeamPulse({ bindingId = null, view, loading, error, onRetry, ret
       </div>
       {view.demo && <p className="team-pulse__demo">Демо: вымышленные данные, не реальные сообщения команды.</p>}
       <InsightsWidget state="published" metrics={view.metrics} periodLabel={pulsePeriodLabel(view)} demo={view.demo}/>
-    </> : view && <p role="status">{explanations[view.status]}</p>}
+    </> : view?.status === 'calibrating' ? (
+      <div className="team-pulse__calibrating">
+        <CuteBeeMagnifier size={80} />
+        <h3 className="team-pulse__calibrating-title">Мы собираем данные...</h3>
+        <p role="status" className="team-pulse__hint">{explanations.calibrating}</p>
+      </div>
+    ) : view && <p role="status">{explanations[view.status]}</p>}
   </section>
 }
