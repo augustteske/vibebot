@@ -11,6 +11,7 @@ import {
   createActivityDistribution,
   recordActivity,
   calculateComparisonTrends,
+  calculateTeamHealthScore,
 } from '../server/analytics.mjs'
 
 test('analytics: isQuestionMessage accurately identifies questions', () => {
@@ -208,4 +209,61 @@ test('analytics: conversational simulation correctly calculates aggregates', () 
   // Activity: Monday 09:00 hour has all 5 messages
   assert.equal(dist.byDay['Пн'], 5)
   assert.equal(dist.byHour[9], 5)
+})
+
+test('analytics: calculateTeamHealthScore correctly handles normal, edge, and extreme values', () => {
+  // Empty / null metrics returns default 50
+  assert.equal(calculateTeamHealthScore(null), 50)
+  assert.equal(calculateTeamHealthScore({}), 50)
+
+  // Ideal team: 100% participation, 0% outside hours, 35% positivity, 0% intensity, 0% unanswered questions
+  const idealTeam = {
+    participationEvenness: 100,
+    outsideHoursPercent: 0,
+    positivityIndex: 35,
+    intensityIndex: 0,
+    unansweredQuestionsPercent: 0,
+  }
+  assert.equal(calculateTeamHealthScore(idealTeam), 100)
+
+  // Critical risk team: 10% participation, 70% outside hours, 0% positivity, 25% intensity, 65% unanswered questions
+  const worstTeam = {
+    participationEvenness: 10,
+    outsideHoursPercent: 70,
+    positivityIndex: 0,
+    intensityIndex: 25,
+    unansweredQuestionsPercent: 65,
+  }
+  assert.equal(calculateTeamHealthScore(worstTeam), 0)
+
+  // Demo team metrics: solid balanced healthy team
+  const demoTeam = {
+    participationEvenness: 89,
+    outsideHoursPercent: 25,
+    positivityIndex: 28.4,
+    intensityIndex: 1.8,
+    unansweredQuestionsPercent: 8.5,
+  }
+  const demoScore = calculateTeamHealthScore(demoTeam)
+  assert.ok(demoScore >= 75 && demoScore <= 85, `Demo score was ${demoScore}, expected ~76-80`)
+
+  // Fallback to recognitionPercent if positivityIndex is absent
+  const recognitionTeam = {
+    participationEvenness: 90,
+    outsideHoursPercent: 15,
+    recognitionPercent: 25,
+    unansweredQuestionsPercent: 5,
+  }
+  const recognitionScore = calculateTeamHealthScore(recognitionTeam)
+  assert.ok(recognitionScore > 75, `Expected recognitionScore > 75, got ${recognitionScore}`)
+
+  // High intensity penalty check
+  const highIntensityTeam = {
+    participationEvenness: 70,
+    outsideHoursPercent: 20,
+    intensityIndex: 15,
+    unansweredQuestionsPercent: 15,
+  }
+  // Base 50 - min(20, (15 - 5) * 2) = 50 - 20 = 30
+  assert.equal(calculateTeamHealthScore(highIntensityTeam), 30)
 })

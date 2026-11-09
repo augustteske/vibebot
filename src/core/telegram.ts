@@ -98,6 +98,7 @@ export type TelegramTextEvent = {
 }
 
 export interface ExtendedAnalyticsMetrics {
+  teamHealthScore?: number
   unansweredQuestionsPercent: number
   responseMedianMinutes: number | null
   positivityIndex: number

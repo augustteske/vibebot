@@ -200,3 +200,73 @@ export function calculateComparisonTrends(current, previous) {
 
   return Object.keys(diff).length > 0 ? diff : null
 }
+
+/**
+ * Computes the overall Team Health Score (0-100) combining communication metrics.
+ * 100 is ideal healthy balance, 0 is critical risk.
+ *
+ * Base score: 50
+ * + High participation (>70): up to +15 pts (low <50: up to -15 pts)
+ * + Low outside hours (<20): up to +15 pts (high >30: up to -20 pts)
+ * + High positivity/recognition (>10): up to +15 pts (<3: -5 pts)
+ * - High intensity/slang (>5): up to -20 pts
+ * - High unanswered questions (>20): up to -20 pts (<=10: +5 pts)
+ * Clamped strictly to 0..100 integer.
+ */
+export function calculateTeamHealthScore(metrics) {
+  if (!metrics || typeof metrics !== 'object') {
+    return 50
+  }
+
+  let score = 50
+
+  // 1. Participation evenness (0..100)
+  const participation = typeof metrics.participationEvenness === 'number'
+    ? metrics.participationEvenness
+    : 70
+  if (participation > 70) {
+    score += Math.min(15, (participation - 70) * 0.5)
+  } else if (participation < 50) {
+    score -= Math.min(15, (50 - participation) * 0.5)
+  }
+
+  // 2. Outside hours percent (0..100)
+  const outside = typeof metrics.outsideHoursPercent === 'number'
+    ? metrics.outsideHoursPercent
+    : 20
+  if (outside < 20) {
+    score += Math.min(15, (20 - outside) * 0.75)
+  } else if (outside > 30) {
+    score -= Math.min(20, (outside - 30) * 0.5)
+  }
+
+  // 3. Positivity / Recognition (0..100)
+  const positive = typeof metrics.positivityIndex === 'number'
+    ? metrics.positivityIndex
+    : (typeof metrics.recognitionPercent === 'number' ? metrics.recognitionPercent : 10)
+  if (positive > 10) {
+    score += Math.min(15, (positive - 10) * 0.6)
+  } else if (positive < 3) {
+    score -= 5
+  }
+
+  // 4. Intensity index (0..100)
+  const intensity = typeof metrics.intensityIndex === 'number'
+    ? metrics.intensityIndex
+    : 0
+  if (intensity > 5) {
+    score -= Math.min(20, (intensity - 5) * 2)
+  }
+
+  // 5. Unanswered questions percent (0..100)
+  const unanswered = typeof metrics.unansweredQuestionsPercent === 'number'
+    ? metrics.unansweredQuestionsPercent
+    : 15
+  if (unanswered > 20) {
+    score -= Math.min(20, (unanswered - 20) * 0.6)
+  } else if (unanswered <= 10) {
+    score += 5
+  }
+
+  return Math.max(0, Math.min(100, Math.round(score)))
+}

@@ -13,6 +13,7 @@ import {
   createActivityDistribution,
   recordActivity,
   calculateComparisonTrends,
+  calculateTeamHealthScore,
 } from './analytics.mjs'
 
 const DAY = 86400000
@@ -1417,7 +1418,18 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
             trends = calculateComparisonTrends(currentCombined, prevCombined)
           }
 
+          const teamHealthScore = calculateTeamHealthScore({
+            outsideHoursPercent: metrics.outsideHoursPercent,
+            participationEvenness: metrics.participationEvenness,
+            recognitionPercent: metrics.recognitionPercent,
+            unansweredQuestionsPercent,
+            responseMedianMinutes,
+            positivityIndex,
+            intensityIndex,
+          })
+
           extendedMetrics = {
+            teamHealthScore,
             unansweredQuestionsPercent,
             responseMedianMinutes,
             positivityIndex,
