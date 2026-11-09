@@ -336,3 +336,13 @@
   .team-heading .button-row { flex-direction: column; }
   .team-heading .button-row .button { width: 100%; }
 }
+
+.data-export-panel .button {
+  margin-top: 12px;
+}
+
+.data-export-panel .error {
+  margin-top: 8px;
+  color: #e53935;
+  font-size: 13px;
+}

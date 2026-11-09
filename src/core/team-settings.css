@@ -12,3 +12,26 @@
 @media (max-width: 520px) {
   .team-settings__hours { grid-template-columns: 1fr; gap: 4px; }
 }
+
+.team-settings-export {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--vibee-line);
+}
+
+.team-settings-export h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.team-settings-export .muted {
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.team-settings-export .error {
+  margin-top: 8px;
+  color: #e53935;
+  font-size: 13px;
+}

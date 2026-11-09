@@ -315,13 +315,17 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         return json(res, 201, store.snapshot(store.authenticate(newToken)))
       }
       const feedback = req.method === 'POST' ? url.pathname.match(/^\/api\/actions\/([a-f0-9-]+)\/(feedback|close-feedback)$/) : null
-      const knownRoute = (req.method === 'GET' && ['/api/session', '/api/summary', '/api/telegram-checkin-stats'].includes(url.pathname))
+      const knownRoute = (req.method === 'GET' && ['/api/session', '/api/summary', '/api/telegram-checkin-stats', '/api/export-my-data'].includes(url.pathname))
         || (req.method === 'POST' && (['/api/logout', '/api/invitations', '/api/recovery-key', '/api/checkins', '/api/rounds/close', '/api/rounds/open', '/api/actions'].includes(url.pathname) || !!feedback))
       if (!knownRoute) throw new AppError(404, 'NOT_FOUND', 'Действие не найдено')
       if (!member) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, store.snapshot(member))
       if (req.method === 'GET' && url.pathname === '/api/summary') return json(res, 200, store.summary(member))
       if (req.method === 'GET' && url.pathname === '/api/telegram-checkin-stats') return json(res, 200, store.telegramCheckinStats(member))
+      if (req.method === 'GET' && url.pathname === '/api/export-my-data') {
+        res.setHeader('Content-Disposition', 'attachment; filename="vibee-my-data.json"')
+        return json(res, 200, store.exportUserData(member))
+      }
       if (req.method === 'POST') {
         if (url.pathname === '/api/logout') {
           store.logout(token); res.setHeader('Set-Cookie', cookie('')); return json(res, 200, { ok: true })

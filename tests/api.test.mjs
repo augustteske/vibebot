@@ -663,3 +663,63 @@ test('app feedback is accepted without a session and stored in its own table', a
     assert.ok(!Number.isNaN(Date.parse(rows[0].created_at)))
   } finally { inspection.close() }
 })
+
+test('data export: authenticated member receives their own GDPR export while others remain isolated', async t => {
+  const { client } = await start(t)
+  const unauth = client()
+  const unauthRes = await unauth('/export-my-data')
+  assert.equal(unauthRes.status, 401)
+  assert.equal(unauthRes.body.error.code, 'SIGN_IN_REQUIRED')
+
+  const owner = client()
+  const created = await owner('/workspaces', { name: 'Команда Экспорта', displayName: 'Алексей Лид' })
+  assert.equal(created.status, 201)
+  const roundId = created.body.round.id
+
+  // Owner submits a checkin
+  await owner('/checkins', { roundId, scores: { energy: 5, clarity: 4, support: 5 } })
+
+  // Owner creates an action
+  const actionRes = await owner('/actions', { roundId, suggestionId: 'recognition', goal: 'Благодарим коллег' })
+  const actionId = actionRes.body.actions[0].id
+
+  // Participant joins
+  const invite = await owner('/invitations', {})
+  const participant = client()
+  const joined = await participant('/join', { token: invite.body.token, displayName: 'Мария Разработчик' })
+  assert.equal(joined.status, 201)
+
+  // Participant submits different checkin
+  await participant('/checkins', { roundId, scores: { energy: 2, clarity: 3, support: 2 } })
+
+  // Participant submits feedback
+  await participant('/actions/' + actionId + '/feedback', { helpful: true })
+
+  // 1. Check Owner export
+  const ownerExport = await owner('/export-my-data')
+  assert.equal(ownerExport.status, 200)
+  assert.match(ownerExport.headers['content-disposition'], /attachment; filename="vibee-my-data\.json"/)
+  assert.equal(ownerExport.body.version, '1.0')
+  assert.equal(ownerExport.body.profile.name, 'Алексей Лид')
+  assert.equal(ownerExport.body.profile.role, 'organizer')
+  assert.equal(ownerExport.body.profile.workspace.name, 'Команда Экспорта')
+  assert.equal(ownerExport.body.checkins.length, 1)
+  assert.equal(ownerExport.body.checkins[0].energy, 5)
+  assert.equal(ownerExport.body.checkins[0].clarity, 4)
+  assert.equal(ownerExport.body.checkins[0].support, 5)
+  // Owner did not submit feedback for this action yet
+  assert.equal(ownerExport.body.feedback.length, 0)
+
+  // 2. Check Participant export
+  const partExport = await participant('/export-my-data')
+  assert.equal(partExport.status, 200)
+  assert.equal(partExport.body.profile.name, 'Мария Разработчик')
+  assert.equal(partExport.body.profile.role, 'participant')
+  assert.equal(partExport.body.checkins.length, 1)
+  assert.equal(partExport.body.checkins[0].energy, 2)
+  assert.equal(partExport.body.checkins[0].clarity, 3)
+  assert.equal(partExport.body.checkins[0].support, 2)
+  assert.equal(partExport.body.feedback.length, 1)
+  assert.equal(partExport.body.feedback[0].actionId, actionId)
+  assert.equal(partExport.body.feedback[0].helpful, true)
+})
