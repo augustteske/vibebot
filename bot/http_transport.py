@@ -324,6 +324,37 @@ class HttpTransport:
             raise PausedError("Server rejected check-in sender")
         raise TransportError("Vibee rejected check-in submission")
 
+    async def submit_leader_message(
+        self,
+        message: str,
+        is_anonymous: bool = True,
+        telegram_user_id: int | str | None = None,
+        sender_name: str | None = None,
+    ) -> dict[str, object]:
+        """Отправляет обращение к тимлиду на сервер."""
+        url = f"{self._base_url}/api/bot/v1/bindings/{self._binding_id}/leader-messages"
+        payload = {
+            "message": message,
+            "isAnonymous": is_anonymous,
+            "telegramUserId": str(telegram_user_id) if telegram_user_id else None,
+            "senderName": sender_name,
+        }
+        headers, request_id = self._post_headers()
+        try:
+            response = await self._client.post(url, headers=headers, json=payload)
+        except (httpx.TimeoutException, httpx.RequestError) as error:
+            kind = http_error_kind(error)
+            logger.warning("Vibee leader message submission failed kind=%s request_id=%s", kind, request_id)
+            raise TransportError(
+                "Vibee leader message submission failed", kind=kind, request_id=request_id,
+            ) from error
+        body = self._response_body(response)
+        if response.status_code in (200, 201):
+            return body
+        if response.status_code == 403 and self._error_code(body) == "FORBIDDEN":
+            raise PausedError("Server rejected leader message sender")
+        raise TransportError("Vibee rejected leader message submission")
+
     async def close(self) -> None:
         """Закрывает созданный транспортом HTTP-клиент."""
         if self._owns_client:

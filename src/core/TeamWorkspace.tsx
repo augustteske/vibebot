@@ -6,6 +6,7 @@ import type { SessionSnapshot } from './contracts'
 import { SummaryPanels } from './SummaryPanels'
 import { TeamSettings } from './TeamSettings'
 import { SystemHealthPanel } from './SystemHealthPanel'
+import { LeaderMessagesPanel } from './LeaderMessagesPanel'
 import { TelegramCheckinsPanel } from '../features/insights/TelegramCheckinsPanel'
 import { InviteColleagueButton } from './InviteModal'
 import { downloadUserData } from './dataExport'
@@ -411,6 +412,7 @@ export function TeamWorkspace({ onOpenGuide }: TeamWorkspaceProps = {}) {
       {snapshot.member.role === 'organizer' && <DemoPulsePreview onConnectBot={onOpenGuide} />}
       {snapshot.member.role === 'organizer' && <SystemHealthPanel key={'health-' + activeWorkspaceId} onLogin={beginLogin}/>}
       {snapshot.member.role === 'organizer' && <SummaryPanels key={snapshot.workspace.id + ':' + snapshot.round.id + ':' + snapshot.round.summary.status} refreshKey={summaryRefreshKey} onLogin={beginLogin}/>}
+      {snapshot.member.role === 'organizer' && <LeaderMessagesPanel key={'messages-' + activeWorkspaceId} onLogin={beginLogin}/>}
       {snapshot.member.role === 'organizer' && <TelegramCheckinsPanel key={'checkins-' + activeWorkspaceId} onLogin={beginLogin}/>}
       {snapshot.member.role === 'organizer' && <TeamSettings key={'settings-' + activeWorkspaceId} onLogin={beginLogin}/>}
       {confirm === 'logout' && <div className="panel confirmation"><p>Для возвращения понадобится личный код входа. Сохраните его перед выходом.</p><div className="button-row"><button className="button secondary" onClick={() => setConfirm('')} disabled={busy}>Остаться</button><button className="button" onClick={() => void logout()} disabled={busy}>Выйти из пространства</button></div></div>}

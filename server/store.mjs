@@ -36,6 +36,19 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
     CREATE TABLE IF NOT EXISTS actions(id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), round_id TEXT NOT NULL REFERENCES rounds(id), kind TEXT NOT NULL, title TEXT NOT NULL, goal TEXT NOT NULL, created_at TEXT NOT NULL, feedback_closed_at TEXT, feedback_summary TEXT, UNIQUE(round_id,kind));
     CREATE TABLE IF NOT EXISTS feedback(action_id TEXT NOT NULL REFERENCES actions(id), voter_key TEXT NOT NULL, helpful INTEGER NOT NULL CHECK(helpful IN (0,1)), PRIMARY KEY(action_id,voter_key));
     CREATE TABLE IF NOT EXISTS app_feedback(id TEXT PRIMARY KEY, type TEXT NOT NULL CHECK(type IN ('bug','idea','other')), message TEXT NOT NULL, created_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS leader_messages(
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+      member_id TEXT REFERENCES members(id),
+      sender_name TEXT,
+      message TEXT NOT NULL,
+      is_anonymous INTEGER NOT NULL DEFAULT 1 CHECK(is_anonymous IN (0,1)),
+      created_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new','read','replied')),
+      reply TEXT,
+      replied_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_leader_messages_workspace ON leader_messages(workspace_id, created_at);
   `)
   const workspaceColumns = db.prepare('PRAGMA table_info(workspaces)').all()
   if (!workspaceColumns.some(column => column.name === 'room_key')) {
@@ -346,6 +359,8 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
         telegramVotes = votes.map(v => ({ bindingId: v.binding_id, periodId: v.period_id, kind: v.kind, value: v.value }))
       } catch {}
 
+      const myLeaderMessages = all('SELECT id, message, is_anonymous, created_at, status, reply, replied_at FROM leader_messages WHERE member_id=?', member.id)
+
       return {
         version: '1.0',
         exportedAt: new Date(now()).toISOString(),
@@ -353,12 +368,102 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
         checkins,
         feedback,
         consents,
+        leaderMessages: myLeaderMessages.map(m => ({
+          id: m.id,
+          message: m.message,
+          isAnonymous: Boolean(m.is_anonymous),
+          createdAt: m.created_at,
+          status: m.status,
+          reply: m.reply,
+          repliedAt: m.replied_at,
+        })),
         telegram: {
           telegramUserId: telegramIdentity,
           links: telegramLinks,
           notificationSubscriptions: telegramSubscriptions,
           feedbackVotes: telegramVotes,
         },
+      }
+    },
+    getWorkspaceByRoomKey(roomKey) {
+      if (typeof roomKey !== 'string' || !roomKey.trim()) return null
+      return one('SELECT id, name, room_key FROM workspaces WHERE UPPER(room_key)=?', roomKey.trim().toUpperCase()) ?? null
+    },
+    createLeaderMessage(input) {
+      const wsId = text(input?.workspace_id, 36, 'Команда')
+      const msg = text(input?.message, 2000, 'Текст обращения')
+      const isAnon = Boolean(input?.is_anonymous)
+      const memberId = isAnon ? null : (input?.member_id ?? null)
+      const senderName = isAnon ? null : (typeof input?.sender_name === 'string' && input.sender_name.trim() ? input.sender_name.trim().slice(0, 100) : null)
+      const id = randomUUID()
+      const createdAt = new Date(now()).toISOString()
+      run('INSERT INTO leader_messages(id, workspace_id, member_id, sender_name, message, is_anonymous, created_at, status) VALUES(?,?,?,?,?,?,?,?)',
+        id, wsId, memberId, senderName, msg, isAnon ? 1 : 0, createdAt, 'new')
+      return {
+        id,
+        workspaceId: wsId,
+        message: msg,
+        isAnonymous: isAnon,
+        author: isAnon ? 'Аноним' : (senderName || 'Участник'),
+        createdAt,
+        status: 'new',
+      }
+    },
+    listLeaderMessages(member) {
+      requireOrganizer(member)
+      const rows = all(`
+        SELECT lm.id, lm.workspace_id, lm.member_id, lm.sender_name, lm.message, lm.is_anonymous, lm.created_at, lm.status, lm.reply, lm.replied_at,
+               m.name AS member_name
+        FROM leader_messages lm
+        LEFT JOIN members m ON lm.member_id = m.id
+        WHERE lm.workspace_id = ?
+        ORDER BY lm.created_at DESC
+      `, member.workspace_id)
+      return rows.map(r => ({
+        id: r.id,
+        workspaceId: r.workspace_id,
+        message: r.message,
+        isAnonymous: Boolean(r.is_anonymous),
+        author: r.is_anonymous ? 'Аноним' : (r.member_name || r.sender_name || 'Участник'),
+        memberId: r.is_anonymous ? null : r.member_id,
+        status: r.status,
+        reply: r.reply,
+        repliedAt: r.replied_at,
+        createdAt: r.created_at,
+      }))
+    },
+    updateLeaderMessage(member, id, input) {
+      requireOrganizer(member)
+      const msgId = text(id, 36, 'Идентификатор обращения')
+      const existing = one('SELECT * FROM leader_messages WHERE id=? AND workspace_id=?', msgId, member.workspace_id)
+      if (!existing) fail(404, 'NOT_FOUND', 'Обращение не найдено')
+
+      let status = existing.status
+      let reply = existing.reply
+      let repliedAt = existing.replied_at
+
+      if (typeof input?.reply === 'string' && input.reply.trim()) {
+        reply = text(input.reply, 2000, 'Ответ на обращение')
+        repliedAt = new Date(now()).toISOString()
+        status = 'replied'
+      } else if (input?.status) {
+        if (!['new', 'read', 'replied'].includes(input.status)) fail(400, 'INVALID_INPUT', 'Недопустимый статус')
+        status = input.status
+      }
+
+      run('UPDATE leader_messages SET status=?, reply=?, replied_at=? WHERE id=?', status, reply, repliedAt, msgId)
+      const memberRow = existing.member_id ? one('SELECT name FROM members WHERE id=?', existing.member_id) : null
+      return {
+        id: msgId,
+        workspaceId: existing.workspace_id,
+        message: existing.message,
+        isAnonymous: Boolean(existing.is_anonymous),
+        author: existing.is_anonymous ? 'Аноним' : (memberRow?.name || existing.sender_name || 'Участник'),
+        memberId: existing.is_anonymous ? null : existing.member_id,
+        status,
+        reply,
+        repliedAt,
+        createdAt: existing.created_at,
       }
     },
   }

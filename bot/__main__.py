@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Vibee Team. MIT License.
 """Telegram polling entry point with optional Vibee HTTP delivery."""
 import asyncio
 from contextlib import suppress
@@ -132,9 +133,14 @@ def create_dispatcher(
         return styles.for_chat(style, getattr(getattr(message, "chat", None), "type", None))
 
     def menu_keyboard(language: str):
-        rows = [[InlineKeyboardButton(
-            text=i18n.text(language, "menu.checkin"), callback_data="menu:checkin",
-        )]]
+        rows = [
+            [InlineKeyboardButton(
+                text=i18n.text(language, "menu.checkin"), callback_data="menu:checkin",
+            )],
+            [InlineKeyboardButton(
+                text=i18n.text(language, "menu.leader_message"), callback_data="menu:leader_message",
+            )],
+        ]
         if voice_transcription is not None:
             rows.append([InlineKeyboardButton(
                 text=i18n.text(language, "menu.voice"), callback_data="menu:voice",
@@ -163,6 +169,7 @@ def create_dispatcher(
     # Завершённые чек-ины, доставку которых не удалось подтвердить:
     # nonce -> (Telegram ID, оценки, срок хранения для кнопки «Повторить»).
     pending_checkins: dict[str, tuple[int, dict[str, int], float]] = {}
+    pending_leader_messages: dict[int, dict[str, object]] = {}
 
     def remember_pending_checkin(nonce: str, user_id: int, scores: dict[str, int]) -> None:
         now = monotonic()
@@ -437,6 +444,9 @@ def create_dispatcher(
         if checkin_history is not None:
             checkin_history.register_user(message.from_user.id)
         flow.cancel(message.from_user.id)
+        pending_leader_messages.pop(message.from_user.id, None)
+        if state is not None:
+            await state.update_data(waiting_leader_message=False, leader_msg_text=None)
         await message.answer(
             i18n.styled_text(language, style, "start.private"),
             reply_markup=menu_keyboard(language),
@@ -455,9 +465,10 @@ def create_dispatcher(
     async def help_command(message: Message, state: FSMContext | None = None):
         language = await language_of(state)
         url = resolve_guide_url()
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text=i18n.text(language, "guide.button"), url=url),
-        ]])
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=i18n.text(language, "menu.leader_message"), callback_data="menu:leader_message")],
+            [InlineKeyboardButton(text=i18n.text(language, "guide.button"), url=url)],
+        ])
         await message.answer(
             i18n.help_text(
                 language,
@@ -694,6 +705,63 @@ def create_dispatcher(
             reply_markup=keyboard,
         )
 
+    @dispatcher.callback_query(F.data == "menu:leader_message")
+    async def select_leader_message(event: CallbackQuery, state: FSMContext | None = None):
+        language = await language_of(state)
+        message = event.message
+        if (message is None or getattr(getattr(message, "chat", None), "type", None) != "private"
+                or event.from_user.is_bot or not callable(getattr(message, "answer", None))):
+            await event.answer(i18n.text(language, "alert.checkin_private_only"), show_alert=True)
+            return
+        pending_leader_messages[event.from_user.id] = {"stage": "text"}
+        if state is not None:
+            await state.update_data(waiting_leader_message=True)
+        await event.answer()
+        await message.answer(i18n.text(language, "leader_msg.prompt"))
+
+    @dispatcher.callback_query(F.data.in_({"leadermsg:anon", "leadermsg:open"}))
+    async def submit_leader_message_callback(event: CallbackQuery, state: FSMContext | None = None):
+        language = await language_of(state)
+        message = event.message
+        if (message is None or getattr(getattr(message, "chat", None), "type", None) != "private"
+                or event.from_user.is_bot):
+            await event.answer(i18n.text(language, "alert.checkin_private_only"), show_alert=True)
+            return
+        user_id = event.from_user.id
+        state_data = await state.get_data() if state is not None else {}
+        draft = pending_leader_messages.pop(user_id, None)
+        text_content = (draft.get("text") if isinstance(draft, dict) else None) or state_data.get("leader_msg_text")
+        if not text_content:
+            await event.answer(i18n.text(language, "error.generic"), show_alert=True)
+            return
+
+        if state is not None:
+            await state.update_data(leader_msg_text=None, waiting_leader_message=False)
+
+        is_anon = event.data == "leadermsg:anon"
+        sender_name = None
+        if not is_anon:
+            name_parts = [event.from_user.first_name or "", event.from_user.last_name or ""]
+            full_name = " ".join(p for p in name_parts if p).strip()
+            sender_name = full_name or (f"@{event.from_user.username}" if event.from_user.username else "Участник Telegram")
+
+        transport = checkin_transport or notification_transport
+        if transport is not None and hasattr(transport, "submit_leader_message"):
+            try:
+                await transport.submit_leader_message(
+                    message=text_content,
+                    is_anonymous=is_anon,
+                    telegram_user_id=user_id,
+                    sender_name=sender_name,
+                )
+            except Exception as e:
+                logging.getLogger(__name__).warning("Failed to submit leader message: %s", e)
+
+        await clear_buttons(message)
+        await event.answer()
+        confirmation_key = "leader_msg.sent_anonymous" if is_anon else "leader_msg.sent_open"
+        await message.answer(i18n.text(language, confirmation_key))
+
     @dispatcher.message(Command("stop"))
     async def stop(message: Message, state: FSMContext | None = None):
         if message.chat.type != "private" or message.from_user is None:
@@ -701,6 +769,9 @@ def create_dispatcher(
         language = await language_of(state)
         style = chat_style(await style_of(state), message)
         flow.cancel(message.from_user.id)
+        pending_leader_messages.pop(message.from_user.id, None)
+        if state is not None:
+            await state.update_data(waiting_leader_message=False, leader_msg_text=None)
         if voice_transcription is not None:
             voice_transcription.cancel(message.from_user.id)
         await message.answer(i18n.styled_text(
@@ -717,6 +788,9 @@ def create_dispatcher(
         if message.from_user is None or message.from_user.is_bot:
             return
         flow.cancel(message.from_user.id)
+        pending_leader_messages.pop(message.from_user.id, None)
+        if state is not None:
+            await state.update_data(waiting_leader_message=False, leader_msg_text=None)
         if voice_transcription is not None:
             voice_transcription.cancel(message.from_user.id)
         deleted, complete = await delete_recent_messages(message.bot, journal, message.chat.id)
@@ -808,6 +882,40 @@ def create_dispatcher(
     @dispatcher.message(F.text)
     async def intake_message(message: Message, state: FSMContext | None = None) -> None:
         if message.chat.type == "private" and message.text and not message.text.startswith("/"):
+            user_id = message.from_user.id if message.from_user else None
+            is_waiting = (
+                user_id is not None
+                and user_id in pending_leader_messages
+                and pending_leader_messages[user_id].get("stage") == "text"
+            )
+            if not is_waiting and state is not None and hasattr(state, "get_data"):
+                try:
+                    data = await state.get_data()
+                    if isinstance(data, dict) and data.get("waiting_leader_message") is True:
+                        is_waiting = True
+                except Exception:
+                    pass
+
+            if is_waiting:
+                cleaned = message.text.strip()
+                language = await language_of(state)
+                if not cleaned:
+                    await message.answer(i18n.text(language, "leader_msg.empty"))
+                    return
+                if user_id:
+                    pending_leader_messages[user_id] = {"stage": "choice", "text": cleaned}
+                if state is not None and hasattr(state, "update_data"):
+                    try:
+                        await state.update_data(waiting_leader_message=False, leader_msg_text=cleaned)
+                    except Exception:
+                        pass
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text=i18n.text(language, "leader_msg.anonymous"), callback_data="leadermsg:anon"),
+                    InlineKeyboardButton(text=i18n.text(language, "leader_msg.open"), callback_data="leadermsg:open"),
+                ]])
+                await message.answer(i18n.text(language, "leader_msg.choose_type"), reply_markup=keyboard)
+                return
+
             room_key = parse_room_key(message.text)
             if room_key:
                 if state is not None:

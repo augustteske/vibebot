@@ -5,8 +5,26 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { createServer } from 'vite'
 
 test('weekly pulse renders real periods and hides insufficient, calibrating and paused metrics', async t => {
-  const vite = await createServer({ server: { middlewareMode: true, watch: null, hmr: false }, appType: 'custom' })
+  const vite = await createServer({
+    server: { middlewareMode: true, watch: null, hmr: false },
+    appType: 'custom',
+    optimizeDeps: { noDiscovery: true },
+    plugins: [{
+      name: 'ignore-css-ssr',
+      enforce: 'pre',
+      resolveId(id) {
+        if (id.endsWith('.css')) return '\0virtual:empty.css'
+      },
+      load(id) {
+        if (id === '\0virtual:empty.css' || id.endsWith('.css')) return 'export default {}'
+      },
+    }],
+  })
   t.after(() => vite.close())
+  await vite.ssrLoadModule('/src/core/telegram.ts')
+  if (vite._ssrCompatModuleRunner?.transport) {
+    vite._ssrCompatModuleRunner.transport.timeout = 300000
+  }
   const { PulseHistory, TeamPulse } = await vite.ssrLoadModule('/src/features/insights/TeamPulse.tsx')
   const period = { id: 'synthetic', start: '2026-11-02T03:00:00.000Z', end: '2026-11-02T04:00:00.000Z' }
   const history = { status: 'active', demo: true, window: period, periods: [] }

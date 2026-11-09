@@ -63,7 +63,7 @@ class ExperienceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Привет! Я Vibee", text)
         self.assertIn("выберите сценарий", text.lower())
         self.assertNotIn("1/3", text)
-        self.assertEqual(callbacks, ["menu:checkin"])
+        self.assertEqual(callbacks, ["menu:checkin", "menu:leader_message"])
         self.assertEqual(flow.drafts, {})
 
     async def test_menu_checkin_requires_consent_before_first_question(self):

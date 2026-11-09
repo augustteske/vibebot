@@ -1,10 +1,10 @@
 import { lazy, Suspense, useId, useState } from 'react'
 import { CuteBeeMagnifier } from '../../core/CuteBeeMagnifier'
 import type { ExtendedAnalyticsMetrics, MetricComparisonTrends } from '../../core/telegram'
-import { TeamHealthVessel } from './TeamHealthVessel'
-import { ActionPlanPanel } from '../actions/ActionPlanPanel'
 import './InsightsWidget.css'
 
+const TeamHealthVessel = lazy(() => import('./TeamHealthVessel').then(m => ({ default: m.TeamHealthVessel })))
+const ActionPlanPanel = lazy(() => import('../actions/ActionPlanPanel').then(m => ({ default: m.ActionPlanPanel })))
 const InsightsCharts = lazy(() => import('./InsightsCharts').then(module => ({ default: module.InsightsCharts })))
 
 export interface InsightsMetrics {
@@ -246,15 +246,19 @@ export function InsightsWidget({
       {periodLabel && <p className="iw-period">Период: {periodLabel}</p>}
 
       {/* Центральная карточка-колба: Общая температура команды */}
-      <TeamHealthVessel metrics={metrics} extendedMetrics={extendedMetrics} />
+      <Suspense fallback={null}>
+        <TeamHealthVessel metrics={metrics} extendedMetrics={extendedMetrics} />
+      </Suspense>
 
       {/* Интерактивный план действий команды */}
-      <ActionPlanPanel
-        metrics={metrics}
-        extendedMetrics={extendedMetrics}
-        trends={currentTrends}
-        periodId={periodLabel}
-      />
+      <Suspense fallback={null}>
+        <ActionPlanPanel
+          metrics={metrics}
+          extendedMetrics={extendedMetrics}
+          trends={currentTrends}
+          periodId={periodLabel}
+        />
+      </Suspense>
 
       <div className="iw-grid">
         {/* Карточка 1: Общение вне рабочих часов */}

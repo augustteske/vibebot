@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Vibee Team. MIT License.
 import { createHash, createHmac, randomBytes, timingSafeEqual, randomUUID } from 'node:crypto'
 import { canProcessChat, initialConsentState, transitionConsent } from '../src/core/telegram.ts'
 import { formatSharePeriod } from '../src/features/insights/shareCard.ts'
