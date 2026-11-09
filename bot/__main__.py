@@ -11,6 +11,7 @@ from math import isfinite
 from time import monotonic
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -62,6 +63,10 @@ ERROR_KEYS = {
 RETRY_TTL_SECONDS = 300
 STATS_BAR_CELLS = 10
 SHARE_CARD_FILE_NAME = "vibee-team-pulse.png"
+# Кнопка на карточке: отправить её же в связанный групповой чат.
+GROUP_SHARE_CALLBACK = "share:group"
+# Статусы участника чата, при которых бот точно может писать сообщения.
+GROUP_POST_STATUSES = frozenset({"creator", "administrator", "member"})
 
 
 class JournalBot(Bot):
@@ -89,6 +94,7 @@ def create_dispatcher(
     checkin_transport: HttpTransport | None = None,
     stats_transport: HttpTransport | None = None,
     share_transport: HttpTransport | None = None,
+    group_chat_id: int | None = None,
     message_log: SentMessageJournal | None = None,
     question_images: QuestionImageCache | None = None,
     question_images_dir: Path | None = None,
@@ -295,7 +301,49 @@ def create_dispatcher(
         await message.answer_photo(
             BufferedInputFile(card.image, filename=SHARE_CARD_FILE_NAME),
             caption=share_caption(language, card, share_transport.web_url),
+            reply_markup=group_share_keyboard(language),
         )
+
+    def group_caption(language: str, card, url: str) -> str:
+        """Подпись к карточке в общем чате: только итоги периода, без личных данных."""
+        period = card.period_label or i18n.text(language, "share.period_fallback")
+        if card.team_name:
+            return i18n.text(language, "share.group_caption", team=card.team_name, period=period, url=url)
+        return i18n.text(language, "share.group_caption_no_name", period=period, url=url)
+
+    def group_share_keyboard(language: str) -> InlineKeyboardMarkup | None:
+        """Кнопка «Отправить в группу»; без связанного чата кнопки нет."""
+        if group_chat_id is None:
+            return None
+        return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+            text=i18n.text(language, "share.group_button"), callback_data=GROUP_SHARE_CALLBACK,
+        )]])
+
+    async def group_share_block_reason() -> str | None:
+        """Почему карточку нельзя отправить в чат команды; None — можно."""
+        if group_chat_id is None:
+            return "share.group_no_chat"
+        if intake is None or share_transport is None:
+            return "share.no_connection"
+        try:
+            status = await intake.get_binding_status()
+        except TransportError:
+            return "share.group_failed"
+        if isinstance(status, dict) or status.phase != "active" or not intake.is_active_chat(group_chat_id):
+            return "share.group_paused"
+        return None
+
+    async def bot_can_post_to_group(bot, chat_id: int) -> bool:
+        """Проверяет, что бот состоит в чате и ему разрешено писать сообщения."""
+        try:
+            member = await bot.get_chat_member(chat_id=chat_id, user_id=bot.id)
+        except TelegramAPIError:
+            return False
+        status = getattr(member, "status", "")
+        status = getattr(status, "value", status)
+        if status in GROUP_POST_STATUSES:
+            return True
+        return status == "restricted" and getattr(member, "can_send_messages", False) is True
 
     async def submit_checkin(
         message, user_id: int, scores: dict[str, int], nonce: str, language: str, style: str,
@@ -563,6 +611,64 @@ def create_dispatcher(
             return
         await event.answer(i18n.text(language, "error.generic"), show_alert=True)
 
+    @dispatcher.callback_query(F.data == GROUP_SHARE_CALLBACK)
+    async def group_share_callback(event: CallbackQuery, state: FSMContext | None = None):
+        """Публикует готовую карточку в связанный чат команды по кнопке организатора."""
+        language = await language_of(state)
+        message = event.message
+        if (message is None or getattr(getattr(message, "chat", None), "type", None) != "private"
+                or event.from_user.is_bot):
+            await event.answer(i18n.text(language, "alert.checkin_private"), show_alert=True)
+            return
+        reason = await group_share_block_reason()
+        if reason is not None:
+            await event.answer(i18n.text(language, reason), show_alert=True)
+            return
+        bot = getattr(event, "bot", None)
+        if bot is None or not await bot_can_post_to_group(bot, group_chat_id):
+            await event.answer(i18n.text(language, "share.group_no_rights"), show_alert=True)
+            return
+        try:
+            view = await share_transport.get_summary(telegram_user_id=event.from_user.id)
+        except OrganizerRequiredError:
+            await event.answer(i18n.text(language, "share.organizer_only"), show_alert=True)
+            return
+        except TransportError:
+            await event.answer(i18n.text(language, "share.group_failed"), show_alert=True)
+            return
+        status = view.get("status")
+        if status in ("paused", "awaiting_consents", "disconnected"):
+            await event.answer(i18n.text(language, "share.group_paused"), show_alert=True)
+            return
+        if status in ("calibrating", "insufficient", "open"):
+            await event.answer(i18n.text(language, "share.no_period"), show_alert=True)
+            return
+        if status != "published":
+            await event.answer(i18n.text(language, "share.unavailable"), show_alert=True)
+            return
+        try:
+            card = await share_transport.get_share_card(event.from_user.id)
+        except OrganizerRequiredError:
+            await event.answer(i18n.text(language, "share.organizer_only"), show_alert=True)
+            return
+        except TransportError:
+            await event.answer(i18n.text(language, "share.group_failed"), show_alert=True)
+            return
+        try:
+            # В чат уходит только карточка с итогами периода: личных данных участников в ней нет.
+            await bot.send_photo(
+                chat_id=group_chat_id,
+                photo=BufferedInputFile(card.image, filename=SHARE_CARD_FILE_NAME),
+                caption=group_caption(language, card, share_transport.web_url),
+            )
+        except TelegramAPIError:
+            logging.getLogger(__name__).warning("Share card was not delivered to the team chat")
+            await event.answer(i18n.text(language, "share.group_failed"), show_alert=True)
+            return
+        # Кнопку убираем: карточка уже в чате, случайный повтор не нужен.
+        await clear_buttons(message)
+        await event.answer(i18n.text(language, "share.group_sent"))
+
     @dispatcher.callback_query(F.data == "menu:checkin")
     async def select_checkin(event: CallbackQuery, state: FSMContext | None = None):
         language = await language_of(state)
@@ -790,6 +896,7 @@ async def main():
     message_log = SentMessageJournal(data_dir / journal_name)
     question_image_cache = QuestionImageCache(data_dir / ("bot-question-images-" + suffix + ".json"))
     checkin_history = CheckinHistoryJournal(data_dir / ("bot-checkin-history-" + suffix + ".json"))
+    group_chat_id: int | None = None
 
     if api_token and binding_id and chat_id_raw:
         try:
@@ -798,6 +905,7 @@ async def main():
                 raise ValueError()
         except ValueError:
             raise SystemExit("VIBEE_CHAT_ID must be a negative Telegram group ID.") from None
+        group_chat_id = chat_id
         transport = HttpTransport(api_base_url, binding_id, api_token)
         try:
             status = await transport.get_binding_status()
@@ -829,6 +937,7 @@ async def main():
         checkin_transport=transport,
         stats_transport=transport,
         share_transport=transport,
+        group_chat_id=group_chat_id,
         message_log=message_log,
         question_images=question_image_cache,
         checkin_history=checkin_history,

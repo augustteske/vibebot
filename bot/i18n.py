@@ -226,6 +226,22 @@ _TEXTS: dict[str, dict[str, str]] = {
         "share.caption_no_name": (
             "📊 Пульс команды за {period}. Попробуйте Vibee для своей команды: {url}"
         ),
+        "share.group_button": "Отправить в группу",
+        "share.group_caption": (
+            "📊 Пульс команды {team} за {period}. Подробнее в кабинете: {url}"
+        ),
+        "share.group_caption_no_name": (
+            "📊 Пульс команды за {period}. Подробнее в кабинете: {url}"
+        ),
+        "share.group_sent": "Карточка отправлена в чат команды.",
+        "share.group_no_chat": "Чат команды не подключён: карточку пока некуда отправить.",
+        "share.group_paused": (
+            "Сейчас карточку в чат не отправить: сбор на паузе или не хватает согласий."
+        ),
+        "share.group_no_rights": (
+            "Бот не может писать в чат команды: проверьте его права или добавьте бота в чат."
+        ),
+        "share.group_failed": "Не получилось отправить карточку в чат. Попробуйте ещё раз.",
         "cute.start.private": "Приветик! Я Vibee 🐝💛 Выбери, чем займёмся. О данных — /privacy.",
         "cute.question.ask": (
             "{index}/{total} · {question}\n"
@@ -521,6 +537,22 @@ _TEXTS: dict[str, dict[str, str]] = {
             "📊 Team pulse of {team} for {period}. Try Vibee for your team: {url}"
         ),
         "share.caption_no_name": "📊 Team pulse for {period}. Try Vibee for your team: {url}",
+        "share.group_button": "Send to the group",
+        "share.group_caption": (
+            "📊 Team pulse of {team} for {period}. Details in the dashboard: {url}"
+        ),
+        "share.group_caption_no_name": (
+            "📊 Team pulse for {period}. Details in the dashboard: {url}"
+        ),
+        "share.group_sent": "The card was sent to the team chat.",
+        "share.group_no_chat": "The team chat is not connected yet: there is nowhere to send the card.",
+        "share.group_paused": (
+            "The card cannot go to the chat right now: collection is paused or consents are missing."
+        ),
+        "share.group_no_rights": (
+            "The bot cannot post to the team chat: check its rights or add the bot to the chat."
+        ),
+        "share.group_failed": "Could not send the card to the chat. Please try again.",
         "cute.start.private": "Hi there! I'm Vibee 🐝💛 Pick what we're doing. About data — /privacy.",
         "cute.question.ask": (
             "{index}/{total} · {question}\n"
