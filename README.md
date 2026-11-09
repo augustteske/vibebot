@@ -6,8 +6,11 @@
   <h3>Почувствовать команду. Сделать следующий шаг.</h3>
 
   <p>
-    <strong>Original Authors: August Teske, Arina, Alisa, Daniil. The name &quot;Vibee&quot; and the bee mascot are trademarks of the Vibee Team.</strong><br />
-    The Vibee project is maintained by August Teske, Arina, Alisa, and Daniil.
+    <strong>Created and maintained by <a href="https://github.com/augustteske">August Teske</a></strong>
+  </p>
+
+  <p>
+    <strong>Авторы: August Teske (создатель), Anton Nedelko, Arina Ivleva, Daniil Samsonov, Dmitry Smyzhenkov, Alisa Karpova. The name &quot;Vibee&quot; and the bee mascot are trademarks of the Vibee Team.</strong>
   </p>
 
   <p>
@@ -145,11 +148,14 @@ curl --fail http://127.0.0.1:8787/api/health
   <a href="bot/README.md">Telegram-бот</a> ·
   <a href="docs/QA.md">Проверка и деплой</a> ·
   <a href="LICENSE">Лицензия MIT</a> ·
-  <a href="NOTICE">NOTICE</a>
+  <a href="NOTICE">NOTICE</a> ·
+  <a href="AUTHORS.md">AUTHORS</a>
 </p>
 
 ---
 
 ## 📄 Лицензия
 
-Проект распространяется по лицензии [MIT](LICENSE). Подробная информация об авторских правах и товарных знаках команды приведена в файле [NOTICE](NOTICE). The Vibee project is maintained by August Teske, Arina, Alisa, and Daniil.
+Проект распространяется по лицензии [MIT](LICENSE). Подробная информация об авторских правах и товарных знаках команды приведена в файле [NOTICE](NOTICE). Полный список контрибьюторов — в [AUTHORS.md](AUTHORS.md).
+
+Авторы: **August Teske (создатель), Anton Nedelko, Arina Ivleva, Daniil Samsonov, Dmitry Smyzhenkov, Alisa Karpova**.
