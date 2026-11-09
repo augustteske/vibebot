@@ -33,12 +33,14 @@ class QuickMenuTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("menu:checkin", callbacks_start)
         self.assertIn("menu:stats", callbacks_start)
+        self.assertIn("menu:achievements", callbacks_start)
         self.assertIn("menu:leader_message", callbacks_start)
         self.assertIn("menu:guide", callbacks_start)
         self.assertIn("menu:settings", callbacks_start)
 
         buttons_text = [btn.text for row in keyboard_start.inline_keyboard for btn in row]
         self.assertTrue(any("Мой статус" in t or "My status" in t for t in buttons_text))
+        self.assertTrue(any("Достижения" in t or "Achievements" in t for t in buttons_text))
         self.assertTrue(any("Обратиться к тимлиду" in t or "Message Team Lead" in t for t in buttons_text))
         self.assertTrue(any("Как подключить?" in t or "How to connect?" in t for t in buttons_text))
         self.assertTrue(any("Настройки" in t or "Settings" in t for t in buttons_text))
@@ -61,6 +63,20 @@ class QuickMenuTests(unittest.IsolatedAsyncioTestCase):
         )
 
         await handler(dispatcher.callback_query, "select_stats")(event)
+        event.answer.assert_awaited_once()
+        message.answer.assert_awaited_once()
+
+    async def test_menu_achievements_callback_triggers_achievements(self):
+        dispatcher, _ = create_dispatcher()
+        message = FakeMessage()
+        event = SimpleNamespace(
+            message=message,
+            from_user=message.from_user,
+            data="menu:achievements",
+            answer=AsyncMock(),
+        )
+
+        await handler(dispatcher.callback_query, "select_achievements")(event)
         event.answer.assert_awaited_once()
         message.answer.assert_awaited_once()
 

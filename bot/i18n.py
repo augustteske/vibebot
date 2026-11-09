@@ -43,6 +43,7 @@ _TEXTS: dict[str, dict[str, str]] = {
         "menu.guide": "📖 Как подключить?",
         "menu.settings": "⚙️ Настройки",
         "menu.settings_prompt": "⚙️ Настройки бота:\nВыберите язык интерфейса или стиль общения.",
+        "menu.achievements": "🏆 Достижения команды",
         "menu.voice": "Расшифровать голосовое",
         "leader_msg.prompt": "Напишите текст вашего обращения к тимлиду:\n(Для отмены отправьте /stop)",
         "leader_msg.choose_type": "Текст получен! Как вы хотите отправить это обращение?",
@@ -230,6 +231,21 @@ _TEXTS: dict[str, dict[str, str]] = {
         "stats.recognition": "🙏 Благодарности: {value}%",
         "stats.report": "Открыть полный отчет",
         "stats.error": "Не удалось разобрать статистику. Попробуйте позже.",
+        "achievements.header": "🏆 Достижения команды:",
+        "achievements.unlocked": "✅ Открыто",
+        "achievements.locked": "🔒 Заблокировано",
+        "achievements.private_only": "Достижения команды доступны только в личном диалоге с ботом.",
+        "achievements.no_connection": "Достижения пока недоступны: бот не подключён к серверу.",
+        "achievements.organizer_only": (
+            "Достижения доступны только организатору, чей Telegram-аккаунт связан с этой командой."
+        ),
+        "achievements.insufficient": "Пока недостаточно данных для достижений команды. Продолжайте общение!",
+        "achievements.healthy_rhythm": "Здоровый ритм",
+        "achievements.balanced_team": "Идеальный баланс",
+        "achievements.gratitude_culture": "Культура благодарности",
+        "achievements.fast_responders": "Быстрые ответы",
+        "achievements.no_unanswered": "Все услышаны",
+        "achievements.zen_communication": "Дзен-общение",
         "share.private_only": "Карточка «Пульс команды» доступна только в личном диалоге с ботом.",
         "share.organizer_only": (
             "Карточку может собрать только организатор, чей Telegram-аккаунт связан с этой командой."
@@ -397,6 +413,7 @@ _TEXTS: dict[str, dict[str, str]] = {
         "menu.guide": "📖 How to connect?",
         "menu.settings": "⚙️ Settings",
         "menu.settings_prompt": "⚙️ Bot settings:\nChoose interface language or communication style.",
+        "menu.achievements": "🏆 Team achievements",
         "menu.voice": "Transcribe a voice message",
         "leader_msg.prompt": "Write your message for the team lead:\n(Send /stop to cancel)",
         "leader_msg.choose_type": "Message received! How would you like to send it?",
@@ -584,6 +601,21 @@ _TEXTS: dict[str, dict[str, str]] = {
         "stats.recognition": "🙏 Thanks: {value}%",
         "stats.report": "Open the full report",
         "stats.error": "Could not read the team metrics. Try again later.",
+        "achievements.header": "🏆 Team Achievements:",
+        "achievements.unlocked": "✅ Unlocked",
+        "achievements.locked": "🔒 Locked",
+        "achievements.private_only": "Team achievements are available only in a private chat with the bot.",
+        "achievements.no_connection": "Achievements are unavailable: the bot is not connected to the server.",
+        "achievements.organizer_only": (
+            "Achievements are available only to the organizer whose Telegram account is linked to this team."
+        ),
+        "achievements.insufficient": "Not enough data for team achievements yet. Keep communicating!",
+        "achievements.healthy_rhythm": "Healthy Rhythm",
+        "achievements.balanced_team": "Balanced Team",
+        "achievements.gratitude_culture": "Culture of Gratitude",
+        "achievements.fast_responders": "Fast Responders",
+        "achievements.no_unanswered": "All Heard",
+        "achievements.zen_communication": "Zen Communication",
         "share.private_only": "The “Team pulse” card is available only in a private chat with the bot.",
         "share.organizer_only": (
             "Only an organizer whose Telegram account is linked to this team can build the card."

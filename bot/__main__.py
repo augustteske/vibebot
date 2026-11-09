@@ -44,6 +44,7 @@ BOT_COMMANDS = [
     BotCommand(command="lang", description="Язык / Language: ru, en"),
     BotCommand(command="style", description="Режим общения: классик, ми-ми-ми, правдарубка"),
     BotCommand(command="stats", description="Статистика команды (для организатора)"),
+    BotCommand(command="achievements", description="Достижения команды (геймификация)"),
     BotCommand(command="share", description="Карточка «Пульс команды» (для организатора)"),
     BotCommand(command="transcribe", description="Согласие на одну голосовую (нужна локальная модель)"),
     BotCommand(command="subscribe", description="Уведомления организатора (если настроены)"),
@@ -140,6 +141,9 @@ def create_dispatcher(
             )],
             [InlineKeyboardButton(
                 text=i18n.text(language, "menu.stats"), callback_data="menu:stats",
+            )],
+            [InlineKeyboardButton(
+                text=i18n.text(language, "menu.achievements"), callback_data="menu:achievements",
             )],
             [InlineKeyboardButton(
                 text=i18n.text(language, "menu.leader_message"), callback_data="menu:leader_message",
@@ -274,6 +278,91 @@ def create_dispatcher(
                 text=i18n.text(language, "stats.report"), url=report_url,
             )]])
         await message.answer(text, reply_markup=keyboard)
+
+    def calculate_achievements(metrics: dict[str, object] | None) -> list[tuple[str, str, bool]]:
+        m = metrics or {}
+        return [
+            (
+                "🌙",
+                "achievements.healthy_rhythm",
+                isinstance(m.get("outsideHoursPercent"), (int, float)) and m["outsideHoursPercent"] < 20,
+            ),
+            (
+                "⚖️",
+                "achievements.balanced_team",
+                isinstance(m.get("participationEvenness"), (int, float)) and m["participationEvenness"] > 80,
+            ),
+            (
+                "🙏",
+                "achievements.gratitude_culture",
+                (isinstance(m.get("positivityIndex"), (int, float)) and m["positivityIndex"] > 20)
+                or (isinstance(m.get("recognitionPercent"), (int, float)) and m["recognitionPercent"] > 20),
+            ),
+            (
+                "⚡",
+                "achievements.fast_responders",
+                isinstance(m.get("responseMedianMinutes"), (int, float))
+                and m["responseMedianMinutes"] is not None
+                and m["responseMedianMinutes"] < 30,
+            ),
+            (
+                "💬",
+                "achievements.no_unanswered",
+                isinstance(m.get("unansweredQuestionsPercent"), (int, float))
+                and m["unansweredQuestionsPercent"] < 5,
+            ),
+            (
+                "🧘",
+                "achievements.zen_communication",
+                isinstance(m.get("intensityIndex"), (int, float)) and m["intensityIndex"] < 2,
+            ),
+        ]
+
+    def achievements_message(language: str, metrics: dict[str, object] | None) -> str:
+        """Сообщение со списком достижений команды."""
+        items = calculate_achievements(metrics)
+        header = i18n.text(language, "achievements.header")
+        unlocked_label = i18n.text(language, "achievements.unlocked")
+        locked_label = i18n.text(language, "achievements.locked")
+
+        lines = [header, ""]
+        for emoji, key, is_unlocked in items:
+            title = i18n.text(language, key)
+            status_label = unlocked_label if is_unlocked else locked_label
+            lines.append(f"{emoji} {title} — {status_label}")
+
+        return "\n".join(lines)
+
+    async def deliver_achievements(message, user_id: int, language: str, style: str) -> None:
+        """Показывает достижения команды; при сетевой ошибке даёт кнопку «Повторить»."""
+        if stats_transport is None:
+            await message.answer(i18n.text(language, "achievements.no_connection"))
+            return
+        try:
+            view = await stats_transport.get_summary(telegram_user_id=user_id)
+        except OrganizerRequiredError:
+            await message.answer(i18n.styled_text(language, style, "achievements.organizer_only"))
+            return
+        except TransportError:
+            await message.answer(
+                i18n.text(language, "error.network"),
+                reply_markup=retry_keyboard(language, "achievements"),
+            )
+            return
+
+        status = view.get("status")
+        if status in ("calibrating", "insufficient"):
+            await message.answer(i18n.styled_text(language, style, "achievements.insufficient"))
+            return
+        if status != "published":
+            await message.answer(i18n.styled_text(language, style, "achievements.no_connection"))
+            return
+
+        metrics = view.get("metrics")
+        if not isinstance(metrics, dict):
+            metrics = {}
+        text = achievements_message(language, metrics)
+        await message.answer(text)
 
     def share_caption(language: str, card, url: str) -> str:
         """Подпись к карточке: название команды, период и ссылка на Vibee."""
@@ -623,6 +712,10 @@ def create_dispatcher(
             await event.answer()
             await deliver_stats(message, event.from_user.id, language, style)
             return
+        if len(parts) == 2 and parts[1] == "achievements":
+            await event.answer()
+            await deliver_achievements(message, event.from_user.id, language, style)
+            return
         if len(parts) == 2 and parts[1] == "share":
             await event.answer()
             await deliver_share(message, event.from_user.id, language)
@@ -730,6 +823,18 @@ def create_dispatcher(
         style = chat_style(await style_of(state), message)
         await event.answer()
         await deliver_stats(message, event.from_user.id, language, style)
+
+    @dispatcher.callback_query(F.data == "menu:achievements")
+    async def select_achievements(event: CallbackQuery, state: FSMContext | None = None):
+        language = await language_of(state)
+        message = event.message
+        if (message is None or getattr(getattr(message, "chat", None), "type", None) != "private"
+                or event.from_user.is_bot or not callable(getattr(message, "answer", None))):
+            await event.answer(i18n.text(language, "alert.checkin_private_only"), show_alert=True)
+            return
+        style = chat_style(await style_of(state), message)
+        await event.answer()
+        await deliver_achievements(message, event.from_user.id, language, style)
 
     @dispatcher.callback_query(F.data == "menu:guide")
     async def select_guide(event: CallbackQuery, state: FSMContext | None = None):
@@ -884,6 +989,17 @@ def create_dispatcher(
         if message.from_user is None or message.from_user.is_bot:
             return
         await deliver_stats(message, message.from_user.id, language, style)
+
+    @dispatcher.message(Command("achievements"))
+    async def achievements_command(message: Message, state: FSMContext | None = None):
+        language = await language_of(state)
+        style = chat_style(await style_of(state), message)
+        if message.chat.type != "private":
+            await message.answer(i18n.text(language, "achievements.private_only"))
+            return
+        if message.from_user is None or message.from_user.is_bot:
+            return
+        await deliver_achievements(message, message.from_user.id, language, style)
 
     @dispatcher.message(Command("share"))
     async def share_command(message: Message, state: FSMContext | None = None):
