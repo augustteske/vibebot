@@ -1785,3 +1785,24 @@ test('HTTP/SQLite: system health endpoint reports bot status, 24h count and erro
   assert.equal(unauthorizedRes.status, 401)
   assert.equal(unauthorizedRes.body.error.code, 'SIGN_IN_REQUIRED')
 })
+
+test('HTTP/SQLite: achievements endpoint returns gamification items with unlocked status', async t => {
+  const f = await fixture(t)
+
+  // 1. Without session -> 401
+  const unauthorized = await f.request('/telegram/achievements')
+  assert.equal(unauthorized.status, 401)
+
+  // 2. With organizer session -> 200 array of achievements
+  const res = await f.request('/telegram/achievements', undefined, { Cookie: 'vibebot_session=' + f.tokens[0] })
+  assert.equal(res.status, 200)
+  assert.ok(Array.isArray(res.body))
+  assert.ok(res.body.length >= 5)
+  for (const item of res.body) {
+    assert.ok(typeof item.id === 'string')
+    assert.ok(typeof item.title === 'string')
+    assert.ok(typeof item.description === 'string')
+    assert.ok(typeof item.emoji === 'string')
+    assert.ok(typeof item.unlocked === 'boolean')
+  }
+})
