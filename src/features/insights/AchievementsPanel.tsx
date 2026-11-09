@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import type { InsightsMetrics } from './InsightsWidget'
 import './AchievementsPanel.css'
 
@@ -14,6 +14,61 @@ export interface AchievementsPanelProps {
   metrics?: InsightsMetrics | null
   achievements?: AchievementItem[]
   className?: string
+}
+
+const STORAGE_KEY = 'vibee_seen_achievements'
+
+function getSeenAchievements(): string[] {
+  try {
+    if (typeof localStorage === 'undefined') return []
+    const raw = localStorage.getItem(STORAGE_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch {
+    return []
+  }
+}
+
+function saveSeenAchievements(ids: string[]) {
+  try {
+    if (typeof localStorage === 'undefined') return
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(ids))
+  } catch {
+    // Ignore in private browsing / sandboxed storage
+  }
+}
+
+interface ConfettiPiece {
+  x: number
+  color: string
+  delay: number
+  duration: number
+  angle: number
+  size: number
+}
+
+function generateConfettiPieces(count = 36): ConfettiPiece[] {
+  const colors = [
+    '#ffd638',
+    '#f59e0b',
+    '#10b981',
+    '#3b82f6',
+    '#ec4899',
+    '#8b5cf6',
+    '#f97316',
+    '#06b6d4',
+  ]
+  const pieces: ConfettiPiece[] = []
+  for (let i = 0; i < count; i++) {
+    pieces.push({
+      x: Math.round(Math.random() * 96 + 2),
+      color: colors[i % colors.length],
+      delay: Math.round(Math.random() * 800) / 1000,
+      duration: Math.round((2.2 + Math.random() * 1.6) * 10) / 10,
+      angle: Math.round(Math.random() * 360),
+      size: Math.round(7 + Math.random() * 6),
+    })
+  }
+  return pieces
 }
 
 function computeClientAchievements(metrics?: InsightsMetrics | null): AchievementItem[] {
@@ -72,15 +127,18 @@ function computeClientAchievements(metrics?: InsightsMetrics | null): Achievemen
 
 interface AchievementCardProps {
   item: AchievementItem
+  isNewlyUnlocked?: boolean
 }
 
-function AchievementCard({ item }: AchievementCardProps) {
+function AchievementCard({ item, isNewlyUnlocked = false }: AchievementCardProps) {
   const [hovered, setHovered] = useState(false)
   const tooltipId = useId()
 
   return (
     <div
-      className={`ach-card ${item.unlocked ? 'ach-card--unlocked' : 'ach-card--locked'}`}
+      className={`ach-card ${item.unlocked ? 'ach-card--unlocked' : 'ach-card--locked'} ${
+        isNewlyUnlocked ? 'ach-card--newly-unlocked' : ''
+      }`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onFocus={() => setHovered(true)}
@@ -90,6 +148,12 @@ function AchievementCard({ item }: AchievementCardProps) {
       aria-label={`${item.title}: ${item.unlocked ? 'Разблокировано' : 'Заблокировано'}`}
       aria-describedby={tooltipId}
     >
+      {isNewlyUnlocked && (
+        <span className="ach-card__new-ribbon" aria-hidden="true">
+          Новое!
+        </span>
+      )}
+
       <div className="ach-card__icon-wrapper">
         <span className="ach-card__emoji" aria-hidden="true">
           {item.emoji}
@@ -103,7 +167,11 @@ function AchievementCard({ item }: AchievementCardProps) {
 
       <div className="ach-card__content">
         <h4 className="ach-card__title">{item.title}</h4>
-        <span className={`ach-card__status ${item.unlocked ? 'ach-card__status--unlocked' : 'ach-card__status--locked'}`}>
+        <span
+          className={`ach-card__status ${
+            item.unlocked ? 'ach-card__status--unlocked' : 'ach-card__status--locked'
+          }`}
+        >
           {item.unlocked ? '✨ Открыто' : '🔒 Заблокировано'}
         </span>
       </div>
@@ -127,6 +195,10 @@ export function AchievementsPanel({
   className = '',
 }: AchievementsPanelProps) {
   const [serverAchievements, setServerAchievements] = useState<AchievementItem[] | null>(null)
+  const [celebratingItems, setCelebratingItems] = useState<AchievementItem[]>([])
+  const [showConfetti, setShowConfetti] = useState(false)
+
+  const confettiPieces = useMemo(() => generateConfettiPieces(40), [])
 
   useEffect(() => {
     let cancelled = false
@@ -138,7 +210,7 @@ export function AchievementsPanel({
         }
       })
       .catch(() => {
-        // Fallback to client-computed achievements on failure or offline
+        // Fallback to client-computed achievements
       })
     return () => {
       cancelled = true
@@ -149,8 +221,84 @@ export function AchievementsPanel({
   const unlockedCount = items.filter(a => a.unlocked).length
   const totalCount = items.length
 
+  // Check for newly unlocked achievements and trigger animation
+  useEffect(() => {
+    const unlockedNow = items.filter(a => a.unlocked)
+    if (unlockedNow.length === 0) return
+
+    const seen = getSeenAchievements()
+    const newlyUnlocked = unlockedNow.filter(a => !seen.includes(a.id))
+
+    if (newlyUnlocked.length > 0) {
+      setCelebratingItems(newlyUnlocked)
+      setShowConfetti(true)
+
+      const updatedSeen = Array.from(new Set([...seen, ...unlockedNow.map(a => a.id)]))
+      saveSeenAchievements(updatedSeen)
+
+      const timer = window.setTimeout(() => {
+        setShowConfetti(false)
+      }, 4500)
+
+      return () => window.clearTimeout(timer)
+    }
+  }, [items])
+
+  const newlyUnlockedIdSet = useMemo(
+    () => new Set(celebratingItems.map(c => c.id)),
+    [celebratingItems],
+  )
+
   return (
     <section className={`ach-panel ${className}`} aria-labelledby="ach-panel-heading">
+      {/* Confetti Animation Effect */}
+      {showConfetti && (
+        <div className="ach-confetti-container" aria-hidden="true">
+          {confettiPieces.map((piece, i) => (
+            <div
+              key={i}
+              className="ach-confetti-piece"
+              style={{
+                left: `${piece.x}%`,
+                backgroundColor: piece.color,
+                animationDelay: `${piece.delay}s`,
+                animationDuration: `${piece.duration}s`,
+                width: `${piece.size}px`,
+                height: `${Math.round(piece.size * 1.5)}px`,
+                transform: `rotate(${piece.angle}deg)`,
+              }}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Celebration Notification Toast */}
+      {celebratingItems.length > 0 && (
+        <div className="ach-celebration-toast" role="status" aria-live="polite">
+          <span className="ach-celebration-toast__icon" aria-hidden="true">
+            🎉
+          </span>
+          <div className="ach-celebration-toast__content">
+            <strong className="ach-celebration-toast__title">
+              {celebratingItems.length === 1
+                ? 'Новое достижение разблокировано!'
+                : 'Новые достижения команды!'}
+            </strong>
+            <span className="ach-celebration-toast__items">
+              {celebratingItems.map(c => `${c.emoji} «${c.title}»`).join(', ')}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="ach-celebration-toast__close"
+            onClick={() => setCelebratingItems([])}
+            aria-label="Скрыть уведомление"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       <div className="ach-panel__header">
         <div className="ach-panel__heading-group">
           <h3 id="ach-panel-heading" className="ach-panel__title">
@@ -170,7 +318,11 @@ export function AchievementsPanel({
 
       <div className="ach-grid">
         {items.map(item => (
-          <AchievementCard key={item.id} item={item} />
+          <AchievementCard
+            key={item.id}
+            item={item}
+            isNewlyUnlocked={newlyUnlockedIdSet.has(item.id)}
+          />
         ))}
       </div>
     </section>

@@ -10,12 +10,141 @@
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
   color: var(--vibee-ink);
   transition: box-shadow 0.25s ease, border-color 0.25s ease;
+  overflow: hidden;
 }
 
 .ach-panel:hover {
   box-shadow: 0 14px 38px rgba(0, 0, 0, 0.06);
   border-color: var(--vibee-line-strong);
 }
+
+/* =========================================
+   Confetti Burst Effect
+   ========================================= */
+
+.ach-confetti-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 40;
+}
+
+.ach-confetti-piece {
+  position: absolute;
+  top: -20px;
+  border-radius: 2px;
+  opacity: 0.95;
+  animation: achConfettiRain 3.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+@keyframes achConfettiRain {
+  0% {
+    top: -20px;
+    transform: translateY(0) rotate(0deg) scale(0.6);
+    opacity: 1;
+  }
+  20% {
+    transform: translateY(60px) rotate(120deg) scale(1.1);
+    opacity: 1;
+  }
+  80% {
+    opacity: 0.9;
+  }
+  100% {
+    top: 105%;
+    transform: translateY(120px) rotate(720deg) scale(0.8);
+    opacity: 0;
+  }
+}
+
+/* =========================================
+   Celebration Notification Toast
+   ========================================= */
+
+.ach-celebration-toast {
+  position: relative;
+  z-index: 35;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+  padding: 14px 18px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #fffdf2 0%, #fff6cf 100%);
+  border: 1.5px solid #f5c400;
+  box-shadow: 0 8px 24px rgba(245, 196, 0, 0.22);
+  animation: achToastSlideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes achToastSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.ach-celebration-toast__icon {
+  font-size: 1.6rem;
+  line-height: 1;
+  animation: achIconBounce 0.8s ease infinite alternate;
+}
+
+@keyframes achIconBounce {
+  from {
+    transform: scale(1) rotate(-5deg);
+  }
+  to {
+    transform: scale(1.18) rotate(10deg);
+  }
+}
+
+.ach-celebration-toast__content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.ach-celebration-toast__title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #332700;
+}
+
+.ach-celebration-toast__items {
+  font-size: 0.84rem;
+  color: #614a00;
+  font-weight: 500;
+}
+
+.ach-celebration-toast__close {
+  background: none;
+  border: none;
+  font-size: 1.3rem;
+  line-height: 1;
+  color: #8c721c;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.ach-celebration-toast__close:hover {
+  background: rgba(0, 0, 0, 0.07);
+  color: #332700;
+}
+
+/* =========================================
+   Header & Progress
+   ========================================= */
 
 .ach-panel__header {
   display: flex;
@@ -153,6 +282,36 @@
   transform: translateY(-4px) scale(1.02);
   border-color: rgba(245, 196, 0, 0.75);
   box-shadow: 0 12px 28px rgba(245, 196, 0, 0.25), 0 0 16px rgba(255, 214, 56, 0.3);
+}
+
+/* Newly Unlocked Celebration Effect */
+.ach-card--newly-unlocked {
+  animation: achCardPulseGlow 2s ease infinite alternate;
+  border-color: #f5c400;
+}
+
+@keyframes achCardPulseGlow {
+  0% {
+    box-shadow: 0 0 10px rgba(255, 214, 56, 0.3), 0 6px 18px rgba(245, 196, 0, 0.15);
+  }
+  100% {
+    box-shadow: 0 0 25px rgba(255, 214, 56, 0.65), 0 12px 30px rgba(245, 196, 0, 0.3);
+  }
+}
+
+.ach-card__new-ribbon {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #ffd638, #f5c400);
+  color: #332700;
+  box-shadow: 0 2px 8px rgba(245, 196, 0, 0.4);
 }
 
 /* Card Icon & Badges */
