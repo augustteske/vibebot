@@ -594,7 +594,7 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
         || Object.keys(input).length !== 2 || !telegramId(input.telegramUserId)
         || input.chatId !== input.telegramUserId) invalid()
       return tx(() => {
-        const binding = bindingFor(actor, id)
+        bindingFor(actor, id)
         if (actor.kind !== 'bot') fail(403, 'FORBIDDEN', 'Нужен scoped credential бота')
         const member = one(`SELECT m.id,m.role FROM telegram_links l
           JOIN members m ON m.workspace_id=l.workspace_id AND m.id=l.member_id

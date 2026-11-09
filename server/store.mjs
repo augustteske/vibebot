@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID, hkdfSync } from 'node:crypto'
 import { aggregateRound } from '../src/core/rules.ts'
 import { createTelegramStore } from './telegram-store.mjs'
 
@@ -58,6 +58,30 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
   const all = (sql, ...args) => db.prepare(sql).all(...args)
   const run = (sql, ...args) => db.prepare(sql).run(...args)
   const key = (scope, member) => createHmac('sha256', secret).update(scope + ':' + member.id).digest('hex')
+  const tokenKey = Buffer.from(hkdfSync('sha256', secret, '', 'vibee-oauth-token-encryption', 32))
+  const encryptToken = val => {
+    if (!val) return null
+    const iv = randomBytes(12)
+    const cipher = createCipheriv('aes-256-gcm', tokenKey, iv)
+    const enc = Buffer.concat([cipher.update(val, 'utf8'), cipher.final()])
+    const tag = cipher.getAuthTag()
+    return iv.toString('hex') + ':' + tag.toString('hex') + ':' + enc.toString('hex')
+  }
+  const decryptToken = val => {
+    if (!val || typeof val !== 'string') return null
+    const parts = val.split(':')
+    if (parts.length !== 3) return null
+    try {
+      const iv = Buffer.from(parts[0], 'hex')
+      const tag = Buffer.from(parts[1], 'hex')
+      const data = Buffer.from(parts[2], 'hex')
+      const decipher = createDecipheriv('aes-256-gcm', tokenKey, iv)
+      decipher.setAuthTag(tag)
+      return decipher.update(data, null, 'utf8') + decipher.final('utf8')
+    } catch {
+      return null
+    }
+  }
   const tx = fn => { db.exec('BEGIN IMMEDIATE'); try { const result = fn(); db.exec('COMMIT'); return result } catch (error) { db.exec('ROLLBACK'); throw error } }
   const requireOrganizer = member => { if (member.role !== 'organizer') fail(403, 'FORBIDDEN', 'Это действие доступно организатору') }
   const roundFor = member => one('SELECT * FROM rounds WHERE workspace_id=? ORDER BY rowid DESC LIMIT 1', member.workspace_id)
@@ -169,73 +193,98 @@ export function createStore({ path = ':memory:', secret, telegramBootstrapCreden
         return row ?? null
       })
     },
-    loginWithGoogle({ googleId, email, name, avatarUrl, accessToken, refreshToken, expiresIn, existingMemberId }) {
+    loginWithGoogle({ googleId, email, emailVerified, name, avatarUrl, accessToken, refreshToken, expiresIn }) {
       if (!googleId || typeof googleId !== 'string' || !googleId.trim()) fail(400, 'INVALID_INPUT', 'Отсутствует google_id')
       if (!email || typeof email !== 'string' || !email.trim()) fail(400, 'INVALID_INPUT', 'Отсутствует email')
       const cleanGoogleId = googleId.trim()
       const cleanEmail = email.trim().toLowerCase().slice(0, 120)
       const safeName = (typeof name === 'string' && name.trim()) ? name.trim().slice(0, 100) : cleanEmail.split('@')[0]
-      const tokenExpiresAt = Number.isInteger(expiresIn) ? now() + expiresIn * 1000 : null
-      const currentTime = new Date(now()).toISOString()
+      const tokenExpiresAt = Number.isInteger(expiresIn) ? (now ? now() : Date.now()) + expiresIn * 1000 : null
+      const currentTime = new Date(now ? now() : Date.now()).toISOString()
 
       return tx(() => {
         let user = one('SELECT * FROM users WHERE google_id=?', cleanGoogleId)
-        if (!user) user = one('SELECT * FROM users WHERE email=?', cleanEmail)
-
-        let memberId = existingMemberId || user?.member_id
-        if (memberId && !one('SELECT id FROM members WHERE id=?', memberId)) {
-          memberId = null
+        if (!user) {
+          const existingByEmail = one('SELECT * FROM users WHERE email=?', cleanEmail)
+          if (existingByEmail) {
+            if (existingByEmail.google_id && existingByEmail.google_id !== cleanGoogleId) {
+              fail(409, 'EMAIL_CONFLICT', 'Этот email уже привязан к другому аккаунту Google')
+            }
+            if (emailVerified === true) {
+              user = existingByEmail
+            } else {
+              fail(403, 'EMAIL_NOT_VERIFIED', 'Email не подтверждён провайдером Google')
+            }
+          }
+        } else {
+          const otherEmailUser = one('SELECT * FROM users WHERE email=? AND id!=?', cleanEmail, user.id)
+          if (otherEmailUser) {
+            fail(409, 'EMAIL_CONFLICT', 'Этот email уже привязан к другому аккаунту')
+          }
         }
 
-        if (!memberId) {
-          const workspaceId = randomUUID()
-          memberId = randomUUID()
-          const workspaceName = `Команда ${safeName}`.slice(0, 80)
-          run('INSERT INTO workspaces VALUES(?,?)', workspaceId, workspaceName)
-          run('INSERT INTO members VALUES(?,?,?,?)', memberId, workspaceId, safeName, 'organizer')
-          createRound(workspaceId)
-        }
+        const encAccess = accessToken ? encryptToken(accessToken) : null
+        const encRefresh = refreshToken ? encryptToken(refreshToken) : null
 
         if (user) {
           run(`UPDATE users SET
-            google_id=?, email=?, name=?, avatar_url=?,
-            access_token=?,
+            email=?, name=?, avatar_url=?,
+            access_token=COALESCE(?, access_token),
             refresh_token=COALESCE(?, refresh_token),
-            token_expires_at=?, member_id=?, updated_at=?
+            token_expires_at=COALESCE(?, token_expires_at),
+            updated_at=?
             WHERE id=?`,
-            cleanGoogleId, cleanEmail, safeName, avatarUrl ?? null,
-            accessToken ?? null, refreshToken ?? null,
-            tokenExpiresAt, memberId, currentTime, user.id
+            cleanEmail, safeName, avatarUrl ?? null,
+            encAccess, encRefresh, tokenExpiresAt,
+            currentTime, user.id
           )
           user = one('SELECT * FROM users WHERE id=?', user.id)
         } else {
           const userId = randomUUID()
+          const workspaceId = randomUUID()
+          const memberId = randomUUID()
+          const workspaceName = `Команда ${safeName}`.slice(0, 80)
+          run('INSERT INTO workspaces VALUES(?,?)', workspaceId, workspaceName)
+          run('INSERT INTO members VALUES(?,?,?,?)', memberId, workspaceId, safeName, 'organizer')
+          createRound(workspaceId)
+
           run(`INSERT INTO users(id, google_id, email, name, avatar_url, access_token, refresh_token, token_expires_at, member_id, created_at, updated_at)
             VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
             userId, cleanGoogleId, cleanEmail, safeName, avatarUrl ?? null,
-            accessToken ?? null, refreshToken ?? null, tokenExpiresAt,
+            encAccess, encRefresh, tokenExpiresAt,
             memberId, currentTime, currentTime
           )
           user = one('SELECT * FROM users WHERE id=?', userId)
         }
 
-        const sessionToken = session(memberId)
-        return { sessionToken, user, memberId }
+        const sessionToken = session(user.member_id)
+        return { sessionToken, user, memberId: user.member_id }
       })
     },
     getUserByMemberId(memberId) {
       if (!memberId) return null
       return one('SELECT id, google_id, email, name, avatar_url, token_expires_at, created_at, updated_at FROM users WHERE member_id=?', memberId) ?? null
     },
+    getUserRaw(userId) {
+      if (!userId) return null
+      return one('SELECT * FROM users WHERE id=?', userId) ?? null
+    },
     getGoogleTokensForMember(memberId) {
       if (!memberId) return null
-      return one('SELECT id, google_id, email, access_token, refresh_token, token_expires_at FROM users WHERE member_id=?', memberId) ?? null
+      const row = one('SELECT id, google_id, email, access_token, refresh_token, token_expires_at FROM users WHERE member_id=?', memberId)
+      if (!row) return null
+      return {
+        ...row,
+        access_token: decryptToken(row.access_token),
+        refresh_token: decryptToken(row.refresh_token),
+      }
     },
     updateGoogleTokens(userId, { accessToken, expiresIn }) {
       if (!userId || !accessToken) return
-      const tokenExpiresAt = Number.isInteger(expiresIn) ? now() + expiresIn * 1000 : null
+      const encAccess = encryptToken(accessToken)
+      const tokenExpiresAt = Number.isInteger(expiresIn) ? (now ? now() : Date.now()) + expiresIn * 1000 : null
       run('UPDATE users SET access_token=?, token_expires_at=?, updated_at=? WHERE id=?',
-        accessToken, tokenExpiresAt, new Date(now()).toISOString(), userId)
+        encAccess, tokenExpiresAt, new Date(now ? now() : Date.now()).toISOString(), userId)
     },
     summary(member) {
       const round = roundFor(member)

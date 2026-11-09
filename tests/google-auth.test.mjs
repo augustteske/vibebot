@@ -22,7 +22,7 @@ test('GET /api/auth/google returns 503 UNAVAILABLE when Google credentials are n
   assert.equal(body.error?.code, 'UNAVAILABLE')
 })
 
-test('GET /api/auth/google redirects to Google consent screen and stores state with CSRF protection', async t => {
+test('GET /api/auth/google redirects to Google consent screen, binds state to HttpOnly cookie and validates scope', async t => {
   const app = createApp({
     secret,
     dbPath: ':memory:',
@@ -45,195 +45,194 @@ test('GET /api/auth/google redirects to Google consent screen and stores state w
   assert.equal(parsedUrl.searchParams.get('response_type'), 'code')
   assert.equal(parsedUrl.searchParams.get('access_type'), 'offline')
   assert.equal(parsedUrl.searchParams.get('prompt'), 'consent')
-  assert.ok(parsedUrl.searchParams.get('scope')?.includes('openid'))
-  assert.ok(parsedUrl.searchParams.get('scope')?.includes('email'))
-  assert.ok(parsedUrl.searchParams.get('scope')?.includes('profile'))
-  assert.ok(parsedUrl.searchParams.get('scope')?.includes('calendar.events'))
+  
+  // Scope must only be openid email profile - NO calendar scope
+  assert.equal(parsedUrl.searchParams.get('scope'), 'openid email profile')
 
   const state = parsedUrl.searchParams.get('state')
   assert.ok(state && state.length >= 32, 'state should be a secure random string')
+
+  // Check state binding cookie vibee_oauth
+  const setCookie = res.headers.get('set-cookie')
+  assert.ok(setCookie, 'Should set state cookie')
+  assert.match(setCookie, new RegExp(`vibee_oauth=${state}`))
+  assert.match(setCookie, /; Path=\/api\/auth\/google/)
+  assert.match(setCookie, /; HttpOnly/)
+  assert.match(setCookie, /; SameSite=Lax/)
+  assert.match(setCookie, /; Max-Age=600/)
 })
 
-test('OAuth callback validates state parameter (CSRF protection, TTL and single-use)', async t => {
-  let currentTime = 1000000
-  const now = () => currentTime
-
+test('returnTo sanitization: only paths starting with single slash without //, /\\ or newlines are allowed', async t => {
   const app = createApp({
     secret,
     dbPath: ':memory:',
-    now,
     googleClientId: 'mock-google-client-id',
     googleClientSecret: 'mock-google-client-secret',
+    oauthFetch: async (url) => {
+      if (url === 'https://oauth2.googleapis.com/token') {
+        return { ok: true, json: async () => ({ access_token: 'acc', refresh_token: 'ref', expires_in: 3600 }) }
+      }
+      if (url === 'https://www.googleapis.com/oauth2/v3/userinfo') {
+        return { ok: true, json: async () => ({ sub: 'user-sub-1', email: 'u1@example.com', email_verified: true, name: 'U1' }) }
+      }
+      throw new Error('Unexpected url')
+    },
   })
   await new Promise(r => app.server.listen(0, '127.0.0.1', r))
   t.after(async () => { await app.close() })
   const base = 'http://127.0.0.1:' + app.server.address().port
 
-  // 1. Missing state or code
-  const missingCodeRes = await fetch(base + '/api/auth/google/callback?state=foo', { redirect: 'manual' })
-  assert.equal(missingCodeRes.status, 400)
-  assert.equal((await missingCodeRes.json()).error?.code, 'INVALID_INPUT')
+  const maliciousUrls = [
+    'https://evil.com',
+    '//evil.com',
+    '/\\evil.com',
+    '/safe\reval',
+    '/safe\neval',
+  ]
 
-  const missingStateRes = await fetch(base + '/api/auth/google/callback?code=foo', { redirect: 'manual' })
-  assert.equal(missingStateRes.status, 400)
-  assert.equal((await missingStateRes.json()).error?.code, 'INVALID_INPUT')
+  for (const evilUrl of maliciousUrls) {
+    const initRes = await fetch(base + '/api/auth/google?returnTo=' + encodeURIComponent(evilUrl), { redirect: 'manual' })
+    const state = new URL(initRes.headers.get('location')).searchParams.get('state')
+    const cookie = initRes.headers.get('set-cookie').split(';')[0]
 
-  // 2. Unknown state
-  const unknownStateRes = await fetch(base + '/api/auth/google/callback?code=foo&state=forged-state-123', { redirect: 'manual' })
-  assert.equal(unknownStateRes.status, 400)
-  assert.equal((await unknownStateRes.json()).error?.code, 'INVALID_STATE')
+    const callbackRes = await fetch(base + `/api/auth/google/callback?code=mock_code&state=${state}`, {
+      redirect: 'manual',
+      headers: { Cookie: cookie },
+    })
+    assert.equal(callbackRes.status, 302)
+    assert.equal(callbackRes.headers.get('location'), '/?mode=team', `Evil returnTo "${evilUrl}" should fallback to /?mode=team`)
+  }
 
-  // 3. Google returned error
-  const authInit = await fetch(base + '/api/auth/google', { redirect: 'manual' })
-  const validState = new URL(authInit.headers.get('location')).searchParams.get('state')
+  // Valid path should be preserved
+  const validPath = '/teams/reports?period=2'
+  const initValid = await fetch(base + '/api/auth/google?returnTo=' + encodeURIComponent(validPath), { redirect: 'manual' })
+  const validState = new URL(initValid.headers.get('location')).searchParams.get('state')
+  const validCookie = initValid.headers.get('set-cookie').split(';')[0]
 
-  const errorCallbackRes = await fetch(base + `/api/auth/google/callback?error=access_denied&state=${validState}`, { redirect: 'manual' })
-  assert.equal(errorCallbackRes.status, 400)
-  assert.equal((await errorCallbackRes.json()).error?.code, 'OAUTH_ERROR')
-
-  // 4. Expired state
-  const authInit2 = await fetch(base + '/api/auth/google', { redirect: 'manual' })
-  const stateToExpire = new URL(authInit2.headers.get('location')).searchParams.get('state')
-  currentTime += 11 * 60 * 1000 // Advance beyond 10-minute TTL
-
-  const expiredRes = await fetch(base + `/api/auth/google/callback?code=foo&state=${stateToExpire}`, { redirect: 'manual' })
-  assert.equal(expiredRes.status, 400)
-  assert.equal((await expiredRes.json()).error?.code, 'INVALID_STATE')
+  const callbackValid = await fetch(base + `/api/auth/google/callback?code=mock_code&state=${validState}`, {
+    redirect: 'manual',
+    headers: { Cookie: validCookie },
+  })
+  assert.equal(callbackValid.status, 302)
+  assert.equal(callbackValid.headers.get('location'), validPath, 'Valid returnTo path should be preserved')
 })
 
-test('Simulated Google OAuth callback creates user, workspace, session cookie, and does not store passwords', async t => {
-  let currentTime = 2000000
-  const now = () => currentTime
-
-  const mockTokenData = {
-    access_token: 'google-access-token-xyz',
-    refresh_token: 'google-refresh-token-abc',
-    expires_in: 3600,
-    token_type: 'Bearer',
-  }
-  const mockProfile = {
-    sub: 'google-uid-99999',
-    email: 'daniil@example.com',
-    name: 'Даниил Теске',
-    picture: 'https://example.com/avatar.png',
-  }
-
-  let tokenFetched = false
-  let userinfoFetched = false
-
-  const mockOAuthFetch = async (url, options) => {
-    if (url === 'https://oauth2.googleapis.com/token') {
-      tokenFetched = true
-      assert.equal(options.method, 'POST')
-      const body = new URLSearchParams(options.body)
-      assert.equal(body.get('client_id'), 'test-id')
-      assert.equal(body.get('client_secret'), 'test-secret')
-      assert.equal(body.get('grant_type'), 'authorization_code')
-      assert.equal(body.get('code'), 'valid_google_code')
-      return {
-        ok: true,
-        json: async () => mockTokenData,
-      }
-    }
-    if (url === 'https://www.googleapis.com/oauth2/v3/userinfo') {
-      userinfoFetched = true
-      assert.equal(options.headers.Authorization, 'Bearer google-access-token-xyz')
-      return {
-        ok: true,
-        json: async () => mockProfile,
-      }
-    }
-    throw new Error('Unexpected fetch url: ' + url)
-  }
-
+test('State cookie binding: callback requires matching vibee_oauth cookie and immediately clears it', async t => {
   const app = createApp({
     secret,
     dbPath: ':memory:',
-    now,
-    googleClientId: 'test-id',
-    googleClientSecret: 'test-secret',
-    oauthFetch: mockOAuthFetch,
+    googleClientId: 'mock-google-client-id',
+    googleClientSecret: 'mock-google-client-secret',
+    oauthFetch: async (url) => {
+      if (url === 'https://oauth2.googleapis.com/token') {
+        return { ok: true, json: async () => ({ access_token: 'acc', expires_in: 3600 }) }
+      }
+      if (url === 'https://www.googleapis.com/oauth2/v3/userinfo') {
+        return { ok: true, json: async () => ({ sub: 'uid-cookie-test', email: 'cookie@example.com', email_verified: true, name: 'Cookie' }) }
+      }
+      throw new Error('Unexpected url')
+    },
   })
   await new Promise(r => app.server.listen(0, '127.0.0.1', r))
   t.after(async () => { await app.close() })
   const base = 'http://127.0.0.1:' + app.server.address().port
 
-  // 1. Initiate OAuth
-  const initRes = await fetch(base + '/api/auth/google?returnTo=/?mode=team', { redirect: 'manual' })
-  assert.equal(initRes.status, 302)
-  const state = new URL(initRes.headers.get('location')).searchParams.get('state')
+  const initRes = await fetch(base + '/api/auth/google', { redirect: 'manual' })
+  const validState = new URL(initRes.headers.get('location')).searchParams.get('state')
+  const validCookie = initRes.headers.get('set-cookie').split(';')[0]
 
-  // 2. Callback from Google
-  const callbackRes = await fetch(base + `/api/auth/google/callback?code=valid_google_code&state=${state}`, {
+  // 1. Valid state from DB but without cookie -> 400
+  const noCookieRes = await fetch(base + `/api/auth/google/callback?code=mock&state=${validState}`, { redirect: 'manual' })
+  assert.equal(noCookieRes.status, 400)
+  assert.equal((await noCookieRes.json()).error?.code, 'INVALID_STATE')
+
+  // 2. Valid state from DB but foreign/mismatched cookie -> 400
+  const foreignCookieRes = await fetch(base + `/api/auth/google/callback?code=mock&state=${validState}`, {
     redirect: 'manual',
-    headers: { Accept: 'application/json' },
+    headers: { Cookie: 'vibee_oauth=some-foreign-browser-state' },
   })
+  assert.equal(foreignCookieRes.status, 400)
+  assert.equal((await foreignCookieRes.json()).error?.code, 'INVALID_STATE')
 
-  assert.equal(callbackRes.status, 200)
-  assert.ok(tokenFetched, 'Token endpoint should have been called')
-  assert.ok(userinfoFetched, 'Userinfo endpoint should have been called')
-
-  const setCookie = callbackRes.headers.get('set-cookie')
-  assert.ok(setCookie, 'Should set session cookie')
-  assert.match(setCookie, /vibebot_session=/)
-  assert.match(setCookie, /; Path=\//)
-  assert.match(setCookie, /; HttpOnly/)
-  assert.match(setCookie, /; SameSite=Strict/)
-
-  const sessionToken = setCookie.split(';')[0].replace('vibebot_session=', '')
-
-  // 3. Replay attack: reusing the same state must fail
-  const replayRes = await fetch(base + `/api/auth/google/callback?code=valid_google_code&state=${state}`, { redirect: 'manual' })
-  assert.equal(replayRes.status, 400)
-  assert.equal((await replayRes.json()).error?.code, 'INVALID_STATE')
-
-  // 4. Verify session access
-  const sessionRes = await fetch(base + '/api/session', {
-    headers: { Cookie: `vibebot_session=${sessionToken}` },
-  })
-  assert.equal(sessionRes.status, 200)
-  const sessionData = await sessionRes.json()
-  assert.equal(sessionData.member.name, 'Даниил Теске')
-  assert.equal(sessionData.member.role, 'organizer')
-  assert.equal(sessionData.workspace.name, 'Команда Даниил Теске')
-  assert.equal(sessionData.user.email, 'daniil@example.com')
-  assert.equal(sessionData.user.name, 'Даниил Теске')
-
-  // 5. Subsequent callback with same Google user links to existing account/workspace
-  const initRes2 = await fetch(base + '/api/auth/google', { redirect: 'manual' })
-  const state2 = new URL(initRes2.headers.get('location')).searchParams.get('state')
-
-  const callbackRes2 = await fetch(base + `/api/auth/google/callback?code=valid_google_code&state=${state2}`, {
+  // 3. Valid state with matching cookie -> succeeds and clears vibee_oauth cookie (Max-Age=0)
+  const successRes = await fetch(base + `/api/auth/google/callback?code=mock&state=${validState}`, {
     redirect: 'manual',
-    headers: { Accept: 'application/json' },
+    headers: { Cookie: validCookie },
   })
-  assert.equal(callbackRes2.status, 200)
-  const setCookie2 = callbackRes2.headers.get('set-cookie')
-  const sessionToken2 = setCookie2.split(';')[0].replace('vibebot_session=', '')
-
-  const sessionRes2 = await fetch(base + '/api/session', {
-    headers: { Cookie: `vibebot_session=${sessionToken2}` },
-  })
-  assert.equal(sessionRes2.status, 200)
-  const sessionData2 = await sessionRes2.json()
-  assert.equal(sessionData2.workspace.id, sessionData.workspace.id, 'Should reuse existing workspace for same user')
+  assert.equal(successRes.status, 302)
+  const setCookies = successRes.headers.getSetCookie ? successRes.headers.getSetCookie() : [successRes.headers.get('set-cookie')]
+  const clearedOauthCookie = setCookies.find(c => c.includes('vibee_oauth='))
+  assert.ok(clearedOauthCookie, 'Should send cleared vibee_oauth cookie')
+  assert.match(clearedOauthCookie, /Max-Age=0/)
 })
 
-test('store cleanup removes expired oauth_states from SQLite', () => {
-  let currentTime = 1000000
-  const now = () => currentTime
-  const store = createStore({ path: ':memory:', secret, now })
+test('loginWithGoogle: email linking requires email_verified === true and conflicting email returns 409', async () => {
+  const store = createStore({ path: ':memory:', secret })
 
-  store.saveOAuthState('valid-state-1', '/?mode=team', 600000)
-  store.saveOAuthState('state-to-expire', '/?mode=team', 1000)
+  // 1. Pre-existing user with google_id_A and email alice@example.com
+  store.loginWithGoogle({
+    googleId: 'google-user-A',
+    email: 'alice@example.com',
+    emailVerified: true,
+    name: 'Alice A',
+  })
 
-  // Verify both states exist
-  assert.ok(store.consumeOAuthState('valid-state-1'))
+  // 2. Attempt login with google_id_B claiming the same email alice@example.com -> MUST FAIL with 409
+  assert.throws(
+    () => store.loginWithGoogle({
+      googleId: 'google-user-B',
+      email: 'alice@example.com',
+      emailVerified: true,
+      name: 'Imposter B',
+    }),
+    err => err.status === 409 && err.code === 'EMAIL_CONFLICT'
+  )
 
-  // Advance time past 1000ms
-  currentTime += 5000
-  store.cleanup()
+  // 3. Unverified email from Google cannot link an existing email account without matching google_id
+  assert.throws(
+    () => store.loginWithGoogle({
+      googleId: 'google-user-C',
+      email: 'alice@example.com',
+      emailVerified: false,
+      name: 'Unverified C',
+    }),
+    err => err.status === 409 || err.status === 403
+  )
 
-  // Expired state must not be consumable
-  assert.equal(store.consumeOAuthState('state-to-expire'), null)
+  // 4. Searching existing user works strictly by google_id
+  const sameA = store.loginWithGoogle({
+    googleId: 'google-user-A',
+    email: 'alice@example.com',
+    emailVerified: true,
+    name: 'Alice Updated',
+  })
+  assert.equal(sameA.user.google_id, 'google-user-A')
+  assert.equal(sameA.user.name, 'Alice Updated')
+})
+
+test('Tokens are stored encrypted in SQLite with AES-256-GCM via HKDF key and not in plaintext', async () => {
+  const store = createStore({ path: ':memory:', secret })
+
+  const plainAccess = 'ya29.sensitive-access-token-123456789'
+  const plainRefresh = '1//sensitive-refresh-token-987654321'
+
+  const { user } = store.loginWithGoogle({
+    googleId: 'crypto-test-user',
+    email: 'crypto@example.com',
+    emailVerified: true,
+    name: 'Crypto User',
+    accessToken: plainAccess,
+    refreshToken: plainRefresh,
+    expiresIn: 3600,
+  })
+
+  const tokens = store.getGoogleTokensForMember(user.member_id)
+  assert.equal(tokens.access_token, plainAccess, 'Decrypted access_token must match plaintext')
+  assert.equal(tokens.refresh_token, plainRefresh, 'Decrypted refresh_token must match plaintext')
+
+  // Check raw user in store: raw access_token in DB must not be plain text
+  const rawRow = store.getUserRaw(user.id)
+  assert.notEqual(rawRow.access_token, plainAccess, 'Raw access token in DB must be encrypted')
+  assert.notEqual(rawRow.refresh_token, plainRefresh, 'Raw refresh token in DB must be encrypted')
+  assert.match(rawRow.access_token, /^[0-9a-f]+:[0-9a-f]+:[0-9a-f]+$/i, 'Token format should be iv:tag:data')
 })

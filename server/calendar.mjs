@@ -16,10 +16,10 @@ export async function refreshGoogleAccessToken({
       refresh_token: refreshToken,
       grant_type: 'refresh_token',
     }),
+    signal: AbortSignal.timeout(5000),
   })
   if (!res.ok) {
-    const errorText = await res.text()
-    throw new Error(`Failed to refresh Google token (${res.status}): ${errorText}`)
+    throw new Error(`Failed to refresh Google token (${res.status})`)
   }
   return await res.json()
 }
@@ -35,6 +35,7 @@ export async function createGoogleCalendarEvent({
   endDateTime,
   timeZone = 'UTC',
   fetchImpl = globalThis.fetch,
+  now = Date.now,
   onTokenRefreshed,
 }) {
   if (!accessToken && !refreshToken) {
@@ -44,15 +45,17 @@ export async function createGoogleCalendarEvent({
     throw new Error('Calendar event title is required')
   }
 
+  const currentTime = typeof now === 'function' ? now() : (now || Date.now())
+
   const payload = {
     summary: title.startsWith('[Vibee]') ? title : `[Vibee] ${title}`,
     description: description ? `${description}\n\nСоздано автоматически в Vibee` : 'Создано автоматически в Vibee',
     start: {
-      dateTime: startDateTime || new Date(Date.now() + 86400000).toISOString(),
+      dateTime: startDateTime || new Date(currentTime + 86400000).toISOString(),
       timeZone,
     },
     end: {
-      dateTime: endDateTime || new Date(Date.now() + 86400000 + 3600000).toISOString(),
+      dateTime: endDateTime || new Date(currentTime + 86400000 + 3600000).toISOString(),
       timeZone,
     },
   }
@@ -71,6 +74,7 @@ export async function createGoogleCalendarEvent({
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(5000),
   })
 
   // If unauthorized and we have refreshToken, attempt one refresh and retry
@@ -86,12 +90,12 @@ export async function createGoogleCalendarEvent({
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(5000),
     })
   }
 
   if (!res.ok) {
-    const errorText = await res.text()
-    throw new Error(`Failed to create Google Calendar event (${res.status}): ${errorText}`)
+    throw new Error(`Failed to create Google Calendar event (${res.status})`)
   }
 
   return await res.json()

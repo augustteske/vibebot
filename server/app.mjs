@@ -1,7 +1,7 @@
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { AppError, createStore } from './store.mjs'
 
 export function resolveSecureCookies(env = process.env) {
@@ -26,6 +26,23 @@ export function createApp({
   cleanupTimer.unref()
   const cookie = token => 'vibebot_session=' + token + '; Path=/; HttpOnly; SameSite=Strict; Max-Age=' + (token ? 604800 : 0) + (secureCookies ? '; Secure' : '')
   const tokenFrom = req => (req.headers.cookie ?? '').split(';').map(s => s.trim()).find(s => s.startsWith('vibebot_session='))?.slice(16)
+  const oauthCookie = val => 'vibee_oauth=' + val + '; Path=/api/auth/google; HttpOnly; SameSite=Lax; Max-Age=' + (val ? 600 : 0) + (secureCookies ? '; Secure' : '')
+  const oauthStateFrom = req => (req.headers.cookie ?? '').split(';').map(s => s.trim()).find(s => s.startsWith('vibee_oauth='))?.slice(12)
+  const sanitizeReturnTo = value => {
+    if (typeof value !== 'string') return '/?mode=team'
+    const trimmed = value.trim()
+    if (!trimmed.startsWith('/') || trimmed.startsWith('//') || trimmed.startsWith('/\\') || /[\r\n]/.test(trimmed)) {
+      return '/?mode=team'
+    }
+    return trimmed
+  }
+  const safeCompare = (a, b) => {
+    if (typeof a !== 'string' || typeof b !== 'string') return false
+    const bufA = Buffer.from(a)
+    const bufB = Buffer.from(b)
+    if (bufA.length !== bufB.length) return false
+    return timingSafeEqual(bufA, bufB)
+  }
   const json = (res, status, data) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)) }
   const checkBrowser = req => {
     if (req.headers['x-vibee'] !== '1' && req.headers['x-vibebot'] !== '1') throw new AppError(403, 'REQUEST_REJECTED', 'Обновите страницу и повторите действие')
@@ -226,8 +243,9 @@ export function createApp({
           throw new AppError(503, 'UNAVAILABLE', 'Вход через Google не настроен')
         }
         const state = randomBytes(32).toString('hex')
-        const returnTo = url.searchParams.get('returnTo') || '/?mode=team'
+        const returnTo = sanitizeReturnTo(url.searchParams.get('returnTo'))
         store.saveOAuthState(state, returnTo)
+        res.setHeader('Set-Cookie', oauthCookie(state))
         const host = req.headers.host || 'localhost:8787'
         const proto = secureCookies ? 'https' : (req.headers['x-forwarded-proto'] || 'http')
         const redirectUri = googleRedirectUri || `${proto}://${host}/api/auth/google/callback`
@@ -235,7 +253,7 @@ export function createApp({
         authUrl.searchParams.set('client_id', googleClientId)
         authUrl.searchParams.set('redirect_uri', redirectUri)
         authUrl.searchParams.set('response_type', 'code')
-        authUrl.searchParams.set('scope', 'openid email profile https://www.googleapis.com/auth/calendar.events')
+        authUrl.searchParams.set('scope', 'openid email profile')
         authUrl.searchParams.set('access_type', 'offline')
         authUrl.searchParams.set('prompt', 'consent')
         authUrl.searchParams.set('state', state)
@@ -248,15 +266,23 @@ export function createApp({
         }
         const oauthError = url.searchParams.get('error')
         if (oauthError) {
+          res.setHeader('Set-Cookie', oauthCookie(''))
           throw new AppError(400, 'OAUTH_ERROR', 'Ошибка авторизации Google: ' + oauthError)
         }
         const code = url.searchParams.get('code')
         const state = url.searchParams.get('state')
+        const cookieState = oauthStateFrom(req)
         if (!code || !state) {
+          res.setHeader('Set-Cookie', oauthCookie(''))
           throw new AppError(400, 'INVALID_INPUT', 'Отсутствует код подтверждения или state')
+        }
+        if (!cookieState || !safeCompare(cookieState, state)) {
+          res.setHeader('Set-Cookie', oauthCookie(''))
+          throw new AppError(400, 'INVALID_STATE', 'Недействительный или отсутствующий параметр state')
         }
         const stateRow = store.consumeOAuthState(state)
         if (!stateRow) {
+          res.setHeader('Set-Cookie', oauthCookie(''))
           throw new AppError(400, 'INVALID_STATE', 'Недействительный или устаревший параметр state')
         }
         const host = req.headers.host || 'localhost:8787'
@@ -276,10 +302,12 @@ export function createApp({
             }),
           })
           if (!tokenRes.ok) {
+            res.setHeader('Set-Cookie', oauthCookie(''))
             throw new AppError(502, 'OAUTH_TOKEN_ERROR', 'Не удалось получить токен от Google')
           }
           tokenData = await tokenRes.json()
         } catch (err) {
+          res.setHeader('Set-Cookie', oauthCookie(''))
           if (err instanceof AppError) throw err
           throw new AppError(502, 'OAUTH_TOKEN_ERROR', 'Ошибка при обращении к серверу авторизации Google')
         }
@@ -290,36 +318,39 @@ export function createApp({
             headers: { Authorization: `Bearer ${tokenData.access_token}` },
           })
           if (!userRes.ok) {
+            res.setHeader('Set-Cookie', oauthCookie(''))
             throw new AppError(502, 'OAUTH_USERINFO_ERROR', 'Не удалось получить профиль пользователя от Google')
           }
           profile = await userRes.json()
         } catch (err) {
+          res.setHeader('Set-Cookie', oauthCookie(''))
           if (err instanceof AppError) throw err
           throw new AppError(502, 'OAUTH_USERINFO_ERROR', 'Ошибка при получении профиля пользователя от Google')
         }
 
         if (!profile.sub || !profile.email) {
+          res.setHeader('Set-Cookie', oauthCookie(''))
           throw new AppError(502, 'OAUTH_PROFILE_INVALID', 'Неполные данные профиля от Google')
         }
 
-        const currentMember = store.authenticate(tokenFrom(req))
         const { sessionToken, user } = store.loginWithGoogle({
           googleId: profile.sub,
           email: profile.email,
+          emailVerified: profile.email_verified === true || profile.verified_email === true,
           name: profile.name || profile.email,
           avatarUrl: profile.picture,
           accessToken: tokenData.access_token,
           refreshToken: tokenData.refresh_token,
           expiresIn: tokenData.expires_in,
-          existingMemberId: currentMember?.id,
         })
 
-        res.setHeader('Set-Cookie', cookie(sessionToken))
+        res.setHeader('Set-Cookie', [cookie(sessionToken), oauthCookie('')])
+        const returnTo = sanitizeReturnTo(stateRow.return_to)
         const isJson = (req.headers.accept || '').includes('application/json')
         if (isJson) {
           return json(res, 200, { ok: true, user: { id: user.id, email: user.email, name: user.name } })
         }
-        res.writeHead(302, { Location: stateRow.return_to || '/?mode=team' })
+        res.writeHead(302, { Location: returnTo })
         return res.end()
       }
       if (req.method === 'POST') checkBrowser(req)
@@ -363,7 +394,7 @@ export function createApp({
     server,
     close: () => new Promise((resolveClose, reject) => {
       clearInterval(cleanupTimer)
-      server.close(error => { try { store.close(); error ? reject(error) : resolveClose() } catch (failure) { reject(failure) } })
+      server.close(error => { try { store.close(); if (error) reject(error); else resolveClose() } catch (failure) { reject(failure) } })
       server.closeIdleConnections()
     }),
   }
