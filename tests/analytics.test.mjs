@@ -13,6 +13,7 @@ import {
   calculateComparisonTrends,
   calculateTeamHealthScore,
   generateActionPlan,
+  calculateAchievements,
 } from '../server/analytics.mjs'
 
 test('analytics: isQuestionMessage accurately identifies questions', () => {
@@ -325,4 +326,43 @@ test('analytics: generateActionPlan generates targeted action items based on met
   // Test 4: Null/empty metrics still safely returns 3-5 fallback steps
   const planEmpty = generateActionPlan(null)
   assert.ok(planEmpty.length >= 3 && planEmpty.length <= 5)
+})
+
+test('analytics: calculateAchievements evaluates unlock conditions correctly', () => {
+  // Empty metrics -> all achievements locked
+  const empty = calculateAchievements({})
+  assert.equal(empty.length, 6)
+  assert.ok(empty.every(a => a.unlocked === false))
+  assert.ok(empty.every(a => a.id && a.title && a.description && a.emoji))
+
+  // Fully unlocked metrics
+  const full = calculateAchievements({
+    outsideHoursPercent: 10,
+    participationEvenness: 90,
+    positivityIndex: 25,
+    recognitionPercent: 30,
+    responseMedianMinutes: 15,
+    unansweredQuestionsPercent: 2,
+    intensityIndex: 0.5,
+  })
+  assert.equal(full.length, 6)
+  assert.ok(full.every(a => a.unlocked === true))
+
+  // Partial unlock test
+  const partial = calculateAchievements({
+    outsideHoursPercent: 35, // locked (> 20)
+    participationEvenness: 85, // unlocked (> 80)
+    positivityIndex: 5, // locked (<= 20)
+    recognitionPercent: 25, // unlocked (> 20 -> gratitude_culture unlocked!)
+    responseMedianMinutes: 45, // locked (>= 30)
+    unansweredQuestionsPercent: 1, // unlocked (< 5)
+    intensityIndex: 5, // locked (>= 2)
+  })
+  const map = Object.fromEntries(partial.map(a => [a.id, a.unlocked]))
+  assert.equal(map.healthy_rhythm, false)
+  assert.equal(map.balanced_team, true)
+  assert.equal(map.gratitude_culture, true)
+  assert.equal(map.fast_responders, false)
+  assert.equal(map.no_unanswered, true)
+  assert.equal(map.zen_communication, false)
 })

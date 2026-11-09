@@ -429,3 +429,66 @@ export function generateActionPlan(metrics, trends = null) {
 
   return items.slice(0, 5)
 }
+
+/**
+ * Calculates team gamification achievements based on current communication metrics.
+ *
+ * @param {Object} metrics
+ * @param {number} [metrics.outsideHoursPercent]
+ * @param {number} [metrics.participationEvenness]
+ * @param {number} [metrics.positivityIndex]
+ * @param {number} [metrics.recognitionPercent]
+ * @param {number} [metrics.responseMedianMinutes]
+ * @param {number} [metrics.unansweredQuestionsPercent]
+ * @param {number} [metrics.intensityIndex]
+ * @returns {Array<{id: string, title: string, description: string, emoji: string, unlocked: boolean}>}
+ */
+export function calculateAchievements(metrics = {}) {
+  const m = metrics || {}
+  const hasNum = val => typeof val === 'number' && !Number.isNaN(val)
+
+  return [
+    {
+      id: 'healthy_rhythm',
+      title: 'Здоровый ритм',
+      description: 'Менее 20% сообщений отправляются во внерабочее время',
+      emoji: '🌙',
+      unlocked: hasNum(m.outsideHoursPercent) && m.outsideHoursPercent < 20,
+    },
+    {
+      id: 'balanced_team',
+      title: 'Идеальный баланс',
+      description: 'Равномерность участия в командном чате превышает 80%',
+      emoji: '⚖️',
+      unlocked: hasNum(m.participationEvenness) && m.participationEvenness > 80,
+    },
+    {
+      id: 'gratitude_culture',
+      title: 'Культура благодарности',
+      description: 'Высокий уровень позитива и признания заслуг коллег (более 20%)',
+      emoji: '🙏',
+      unlocked: (hasNum(m.positivityIndex) && m.positivityIndex > 20) || (hasNum(m.recognitionPercent) && m.recognitionPercent > 20),
+    },
+    {
+      id: 'fast_responders',
+      title: 'Быстрые ответы',
+      description: 'Медианная скорость ответа на вопросы быстрее 30 минут',
+      emoji: '⚡',
+      unlocked: hasNum(m.responseMedianMinutes) && m.responseMedianMinutes < 30,
+    },
+    {
+      id: 'no_unanswered',
+      title: 'Все услышаны',
+      description: 'Менее 5% вопросов остаются без ответа',
+      emoji: '💬',
+      unlocked: hasNum(m.unansweredQuestionsPercent) && m.unansweredQuestionsPercent < 5,
+    },
+    {
+      id: 'zen_communication',
+      title: 'Дзен-общение',
+      description: 'Минимальный эмоциональный накал (индекс накала ниже 2%)',
+      emoji: '🧘',
+      unlocked: hasNum(m.intensityIndex) && m.intensityIndex < 2,
+    },
+  ]
+}
