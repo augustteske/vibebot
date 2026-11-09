@@ -1,6 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { DatabaseSync } from 'node:sqlite'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { unlinkSync } from 'node:fs'
 import { createApp } from '../server/app.mjs'
+import { createStore } from '../server/store.mjs'
 
 const SECRET = '01234567890123456789012345678901'
 
@@ -34,8 +39,13 @@ function parseCookie(response) {
   return match ? match[1] : null
 }
 
-test('room key rotation: old key is invalidated, new key works, usage counter resets', async (t) => {
-  const app = createApp({ secret: SECRET, dbPath: ':memory:' })
+test('room key is perpetual by default: does not expire over time, manual rotation works', async (t) => {
+  let currentTime = 1700000000000
+  const app = createApp({
+    secret: SECRET,
+    dbPath: ':memory:',
+    now: () => currentTime,
+  })
   await new Promise((resolve) => app.server.listen(0, resolve))
   t.after(async () => {
     await app.close()
@@ -51,9 +61,7 @@ test('room key rotation: old key is invalidated, new key works, usage counter re
   const initialRoomKey = orgCreate.data.workspace.roomKey
   assert.ok(initialRoomKey)
   assert.equal(typeof initialRoomKey, 'string')
-  assert.equal(orgCreate.data.workspace.roomKeyUses, 0)
-  assert.equal(orgCreate.data.workspace.roomKeyMaxUses, 10)
-  assert.ok(orgCreate.data.workspace.roomKeyExpiresAt)
+  assert.equal(orgCreate.data.workspace.roomKeyExpiresAt, null)
 
   // 2. Participant joins with initial room key
   const partJoin1 = await request(app, '/api/join-by-key', {
@@ -64,15 +72,7 @@ test('room key rotation: old key is invalidated, new key works, usage counter re
   const part1Cookie = parseCookie(partJoin1)
   assert.ok(part1Cookie)
 
-  // 3. Check organizer snapshot: uses count is 1
-  const orgSnap1 = await request(app, '/api/session', {
-    method: 'GET',
-    cookie: orgCookie,
-  })
-  assert.equal(orgSnap1.status, 200)
-  assert.equal(orgSnap1.data.workspace.roomKeyUses, 1)
-
-  // 4. Participant cannot rotate key
+  // 3. Participant cannot rotate room key
   const forbiddenRotate = await request(app, '/api/workspaces/rotate-key', {
     method: 'POST',
     cookie: part1Cookie,
@@ -81,7 +81,7 @@ test('room key rotation: old key is invalidated, new key works, usage counter re
   assert.equal(forbiddenRotate.status, 403)
   assert.equal(forbiddenRotate.data.error.code, 'FORBIDDEN')
 
-  // 5. Organizer rotates room key
+  // 4. Organizer rotates room key manually
   const rotateRes = await request(app, '/api/workspaces/rotate-key', {
     method: 'POST',
     cookie: orgCookie,
@@ -91,11 +91,9 @@ test('room key rotation: old key is invalidated, new key works, usage counter re
   const newRoomKey = rotateRes.data.workspace.roomKey
   assert.ok(newRoomKey)
   assert.notEqual(newRoomKey, initialRoomKey)
-  assert.equal(rotateRes.data.workspace.roomKeyUses, 0)
-  assert.equal(rotateRes.data.workspace.roomKeyMaxUses, 10)
-  assert.ok(rotateRes.data.workspace.roomKeyExpiresAt)
+  assert.equal(rotateRes.data.workspace.roomKeyExpiresAt, null)
 
-  // 6. Old room key no longer works
+  // 5. Old room key no longer works after manual rotation
   const oldKeyJoin = await request(app, '/api/join-by-key', {
     method: 'POST',
     body: { roomKey: initialRoomKey, displayName: 'Dev 2' },
@@ -103,119 +101,73 @@ test('room key rotation: old key is invalidated, new key works, usage counter re
   assert.equal(oldKeyJoin.status, 400)
   assert.equal(oldKeyJoin.data.error.code, 'INVALID_ROOM_KEY')
 
-  // 7. New room key works
+  // 6. New room key works
   const newKeyJoin = await request(app, '/api/join-by-key', {
     method: 'POST',
     body: { roomKey: newRoomKey, displayName: 'Dev 2' },
   })
   assert.equal(newKeyJoin.status, 201)
 
-  // 8. Organizer snapshot shows 1 use on new key
-  const orgSnap2 = await request(app, '/api/session', {
-    method: 'GET',
-    cookie: orgCookie,
+  // 7. Advance time by 60 days (well beyond former 7-day TTL)
+  currentTime += 60 * 86400000
+
+  // 8. New room key still works after 60 days without expiring
+  const perpetualJoin = await request(app, '/api/join-by-key', {
+    method: 'POST',
+    body: { roomKey: newRoomKey, displayName: 'Dev 3' },
   })
-  assert.equal(orgSnap2.status, 200)
-  assert.equal(orgSnap2.data.workspace.roomKeyUses, 1)
+  assert.equal(perpetualJoin.status, 201)
+
+  // 9. Leader message by room key also continues to work after 60 days
+  const leaderMsg = await request(app, '/api/messages', {
+    method: 'POST',
+    body: { roomKey: newRoomKey, message: 'Привет команде!' },
+  })
+  assert.equal(leaderMsg.status, 201)
 })
 
-test('room key TTL expiry: rejects join and leader messages after expiration', async (t) => {
+test('room key expiration: store rejects expired room key if room_key_expires_at is configured', () => {
   let currentTime = 1700000000000
-  const app = createApp({
+  const dbPath = join(tmpdir(), `test-room-key-${Date.now()}-${Math.random().toString(36).slice(2)}.db`)
+  const store = createStore({
     secret: SECRET,
-    dbPath: ':memory:',
+    path: dbPath,
     now: () => currentTime,
   })
-  await new Promise((resolve) => app.server.listen(0, resolve))
-  t.after(async () => {
-    await app.close()
-  })
 
   // 1. Create workspace
-  const orgCreate = await request(app, '/api/workspaces', {
-    method: 'POST',
-    body: { name: 'Timekeepers', displayName: 'Lead' },
-  })
-  assert.equal(orgCreate.status, 201)
-  const roomKey = orgCreate.data.workspace.roomKey
+  const sessionToken = store.createWorkspace({ name: 'Timekeepers', displayName: 'Lead' })
+  const organizer = store.authenticate(sessionToken)
+  const roomKey = store.snapshot(organizer).workspace.roomKey
+  assert.ok(roomKey)
 
-  // 2. Join before expiration works
-  const validJoin = await request(app, '/api/join-by-key', {
-    method: 'POST',
-    body: { roomKey, displayName: 'Early Bird' },
-  })
-  assert.equal(validJoin.status, 201)
+  // 2. Default key has no expiration and joins fine
+  const partSession = store.joinByKey({ roomKey, displayName: 'Dev 1' })
+  assert.ok(partSession)
 
-  // 3. Advance time beyond 7 days (7 * 86400000 ms + 1 sec)
-  currentTime += 7 * 86400000 + 1000
+  // 3. Set room_key_expires_at to the past using a direct connection
+  const directDb = new DatabaseSync(dbPath)
+  directDb.prepare('UPDATE workspaces SET room_key_expires_at=? WHERE id=?').run(currentTime - 1000, organizer.workspace_id)
+  directDb.close()
 
-  // 4. Join after expiration fails with clear message
-  const expiredJoin = await request(app, '/api/join-by-key', {
-    method: 'POST',
-    body: { roomKey, displayName: 'Late Bird' },
-  })
-  assert.equal(expiredJoin.status, 400)
-  assert.equal(expiredJoin.data.error.code, 'EXPIRED_ROOM_KEY')
-  assert.equal(expiredJoin.data.error.message, 'Срок действия ключа комнаты истёк. Попросите тимлида сгенерировать новый.')
-
-  // 5. Leader message with expired room key also fails with clear message
-  const expiredLeaderMsg = await request(app, '/api/messages', {
-    method: 'POST',
-    body: { roomKey, message: 'Привет команде!' },
-  })
-  assert.equal(expiredLeaderMsg.status, 400)
-  assert.equal(expiredLeaderMsg.data.error.code, 'EXPIRED_ROOM_KEY')
-  assert.equal(expiredLeaderMsg.data.error.message, 'Срок действия ключа комнаты истёк. Попросите тимлида сгенерировать новый.')
-})
-
-test('room key usage limit: rejects after 10 uses and resets upon rotation', async (t) => {
-  const app = createApp({ secret: SECRET, dbPath: ':memory:' })
-  await new Promise((resolve) => app.server.listen(0, resolve))
-  t.after(async () => {
-    await app.close()
+  // 4. joinByKey throws EXPIRED_ROOM_KEY
+  assert.throws(() => {
+    store.joinByKey({ roomKey, displayName: 'Dev 2' })
+  }, (err) => {
+    assert.equal(err.code, 'EXPIRED_ROOM_KEY')
+    assert.equal(err.message, 'Срок действия ключа комнаты истёк. Попросите тимлида сгенерировать новый.')
+    return true
   })
 
-  // 1. Create workspace
-  const orgCreate = await request(app, '/api/workspaces', {
-    method: 'POST',
-    body: { name: 'Crowded Room', displayName: 'Captain' },
+  // 5. getWorkspaceByRoomKey throws EXPIRED_ROOM_KEY
+  assert.throws(() => {
+    store.getWorkspaceByRoomKey(roomKey)
+  }, (err) => {
+    assert.equal(err.code, 'EXPIRED_ROOM_KEY')
+    assert.equal(err.message, 'Срок действия ключа комнаты истёк. Попросите тимлида сгенерировать новый.')
+    return true
   })
-  assert.equal(orgCreate.status, 201)
-  const orgCookie = parseCookie(orgCreate)
-  const roomKey = orgCreate.data.workspace.roomKey
 
-  // 2. Use key 10 times successfully
-  for (let i = 1; i <= 10; i++) {
-    const res = await request(app, '/api/join-by-key', {
-      method: 'POST',
-      body: { roomKey, displayName: `Member ${i}` },
-    })
-    assert.equal(res.status, 201, `Join ${i} should succeed`)
-  }
-
-  // 3. 11th use fails with ROOM_KEY_LIMIT_EXCEEDED
-  const eleventhJoin = await request(app, '/api/join-by-key', {
-    method: 'POST',
-    body: { roomKey, displayName: 'Member 11' },
-  })
-  assert.equal(eleventhJoin.status, 400)
-  assert.equal(eleventhJoin.data.error.code, 'ROOM_KEY_LIMIT_EXCEEDED')
-  assert.equal(eleventhJoin.data.error.message, 'Лимит использований ключа исчерпан. Попросите тимлида сгенерировать новый.')
-
-  // 4. Organizer rotates room key
-  const rotateRes = await request(app, '/api/workspaces/rotate-key', {
-    method: 'POST',
-    cookie: orgCookie,
-    body: {},
-  })
-  assert.equal(rotateRes.status, 200)
-  const newRoomKey = rotateRes.data.workspace.roomKey
-  assert.equal(rotateRes.data.workspace.roomKeyUses, 0)
-
-  // 5. Member 11 now joins successfully with new key
-  const retryJoin = await request(app, '/api/join-by-key', {
-    method: 'POST',
-    body: { roomKey: newRoomKey, displayName: 'Member 11' },
-  })
-  assert.equal(retryJoin.status, 201)
+  store.close()
+  try { unlinkSync(dbPath) } catch {}
 })

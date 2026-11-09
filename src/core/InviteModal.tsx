@@ -12,7 +12,6 @@ function UserPlusIcon() {
 
 interface InviteModalProps {
   roomKey?: string | null;
-  roomKeyExpiresAt?: string | null;
   roomKeyUses?: number;
   roomKeyMaxUses?: number;
   onRotateKey?: () => Promise<void>;
@@ -23,7 +22,6 @@ interface InviteModalProps {
 
 export function InviteColleagueButton({
   roomKey,
-  roomKeyExpiresAt,
   roomKeyUses,
   roomKeyMaxUses,
   onRotateKey,
@@ -140,9 +138,7 @@ export function InviteColleagueButton({
           </label>
           <div className="invite-modal-key-meta" style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginTop: '6px', fontSize: '0.85rem' }}>
             <span className="muted">
-              {roomKeyExpiresAt ? `Действует до ${new Date(roomKeyExpiresAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}
-              {roomKeyExpiresAt ? ' · ' : ''}
-              {`Использовано: ${roomKeyUses ?? 0}/${roomKeyMaxUses ?? 10}`}
+              {roomKeyMaxUses ? `Использовано: ${roomKeyUses ?? 0}/${roomKeyMaxUses}` : 'Ключ бессрочный'}
             </span>
             {onRotateKey && !confirmingRotate && (
               <button
