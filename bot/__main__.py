@@ -1,3 +1,4 @@
+# Copyright (c) 2026 Vibee Team. MIT License.
 """Telegram polling entry point with optional Vibee HTTP delivery."""
 import asyncio
 from contextlib import suppress

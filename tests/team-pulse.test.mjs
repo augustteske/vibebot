@@ -5,7 +5,17 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { createServer } from 'vite'
 
 test('weekly pulse renders real periods and hides insufficient, calibrating and paused metrics', async t => {
-  const vite = await createServer({ server: { middlewareMode: true, watch: null, hmr: false }, appType: 'custom' })
+  const vite = await createServer({
+    server: { middlewareMode: true, watch: null, hmr: false },
+    appType: 'custom',
+    optimizeDeps: { noDiscovery: true },
+    plugins: [{
+      name: 'ignore-css-ssr',
+      load(id) {
+        if (id.endsWith('.css')) return ''
+      },
+    }],
+  })
   t.after(() => vite.close())
   const { PulseHistory, TeamPulse } = await vite.ssrLoadModule('/src/features/insights/TeamPulse.tsx')
   const period = { id: 'synthetic', start: '2026-11-02T03:00:00.000Z', end: '2026-11-02T04:00:00.000Z' }

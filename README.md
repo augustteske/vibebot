@@ -6,6 +6,10 @@
   <h3>Почувствовать команду. Сделать следующий шаг.</h3>
 
   <p>
+    <strong>Original Authors: August Teske, Ilian, Arina, Alisa, Daniil. The name &quot;Vibee&quot; and the bee mascot are trademarks of the Vibee Team.</strong>
+  </p>
+
+  <p>
     Open-source Telegram-бот для бережной аналитики командной коммуникации. Без слежки и персональных оценок.
   </p>
 
@@ -139,5 +143,12 @@ curl --fail http://127.0.0.1:8787/api/health
   <a href="docs/CONTRACTS.md">Контракты и приватность</a> ·
   <a href="bot/README.md">Telegram-бот</a> ·
   <a href="docs/QA.md">Проверка и деплой</a> ·
-  <a href="LICENSE">Лицензия MIT</a>
+  <a href="LICENSE">Лицензия MIT</a> ·
+  <a href="NOTICE">NOTICE</a>
 </p>
+
+---
+
+## 📄 Лицензия
+
+Проект распространяется по лицензии [MIT](LICENSE). Подробная информация об авторских правах и товарных знаках команды приведена в файле [NOTICE](NOTICE).
