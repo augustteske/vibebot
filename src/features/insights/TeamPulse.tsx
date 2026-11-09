@@ -52,7 +52,14 @@ export function PulseHistory({ history }: { history: CommunicationHistory }) {
           <summary>{pulsePeriodLabel(period)}<span className="team-pulse__values">
             Вне графика: {period.metrics.outsideHoursPercent}% · Участие: {period.metrics.participationEvenness}% · Благодарности: {period.metrics.recognitionPercent}%
           </span></summary>
-          <InsightsWidget state="published" metrics={period.metrics} periodLabel={pulsePeriodLabel(period)} demo={history.demo}/>
+          <InsightsWidget
+            state="published"
+            metrics={period.metrics}
+            extendedMetrics={'extendedMetrics' in period ? period.extendedMetrics : undefined}
+            trends={'extendedMetrics' in period ? period.extendedMetrics?.trends : undefined}
+            periodLabel={pulsePeriodLabel(period)}
+            demo={history.demo}
+          />
           <div className="team-pulse__share-row team-pulse__share-row--end"><ShareCardButton data={shareData(period, history.demo)}/></div>
         </details> : <>
           <h3>{pulsePeriodLabel(period)}</h3>
@@ -127,7 +134,14 @@ export function TeamPulse({ bindingId = null, view, loading, error, onRetry, ret
         <ShareCardButton data={shareData(view, view.demo)}/>
       </div>
       {view.demo && <p className="team-pulse__demo">Демо: вымышленные данные, не реальные сообщения команды.</p>}
-      <InsightsWidget state="published" metrics={view.metrics} periodLabel={pulsePeriodLabel(view)} demo={view.demo}/>
+      <InsightsWidget
+        state="published"
+        metrics={view.metrics}
+        extendedMetrics={view.extendedMetrics}
+        trends={view.extendedMetrics?.trends ?? view.comparison}
+        periodLabel={pulsePeriodLabel(view)}
+        demo={view.demo}
+      />
     </> : view?.status === 'calibrating' ? (
       <div className="team-pulse__calibrating">
         <CuteBeeMagnifier size={80} />
