@@ -1017,6 +1017,77 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
         ? { bindingId: binding.id, view: this.summary(actor, binding.id) }
         : { bindingId: null, view: { status: 'disconnected' } }
     },
+    systemHealth(actor) {
+      unavailable()
+      organizerProfile(actor)
+      return tx(() => {
+        const time = now()
+        const bindings = all('SELECT * FROM telegram_bindings WHERE workspace_id=? ORDER BY rowid DESC', actor.workspace_id)
+        if (!bindings.length || !bindings[0].chat_id) {
+          return {
+            status: 'disconnected',
+            botOnline: false,
+            processed24h: 0,
+            lastEventAt: null,
+            lastError: bindings.length ? 'Чат команды не привязан' : 'Бот не подключён',
+            checkedAt: new Date(time).toISOString(),
+          }
+        }
+        const binding = bindings.find(item => JSON.parse(item.state).phase === 'active')
+          ?? bindings.find(item => JSON.parse(item.state).phase === 'paused')
+          ?? bindings[0]
+        const state = JSON.parse(binding.state)
+
+        const eventsCount = one(
+          'SELECT count(*) AS n FROM telegram_event_ids WHERE binding_id=? AND expires > ?',
+          binding.id, time
+        )?.n ?? 0
+        const checkinsCount = one(
+          'SELECT count(*) AS n FROM telegram_checkins WHERE binding_id=? AND expires > ?',
+          binding.id, time
+        )?.n ?? 0
+        const processed24h = eventsCount + checkinsCount
+
+        const lastText = one('SELECT max(sent_at) AS t FROM telegram_texts WHERE binding_id=?', binding.id)?.t ?? null
+        const lastCheckinTime = one('SELECT max(created_at) AS t FROM telegram_checkins WHERE binding_id=?', binding.id)?.t ?? null
+        const lastCheckin = lastCheckinTime ? new Date(lastCheckinTime).toISOString() : null
+        let lastEventAt = null
+        if (lastText && lastCheckin) {
+          lastEventAt = Date.parse(lastText) > Date.parse(lastCheckin) ? lastText : lastCheckin
+        } else {
+          lastEventAt = lastText || lastCheckin || null
+        }
+
+        let lastError = null
+        if (binding.migration_blocked) {
+          lastError = 'Миграция схемы заблокирована'
+        } else if (binding.evidence_expires !== null && binding.evidence_expires <= time) {
+          lastError = 'Срок действия согласия истёк'
+        } else if (state.phase === 'paused') {
+          const decisions = Object.values(state.decisions || {})
+          const declined = decisions.some(d => d === 'declined' || d === 'withdrawn')
+          if (declined) lastError = 'Участник отклонил или отозвал согласие'
+          else if (!state.companyAccepted) lastError = 'Ожидается согласие компании'
+          else lastError = 'Сбор сообщений приостановлен'
+        } else if (state.phase === 'awaiting_consents') {
+          lastError = 'Ожидаются согласия участников'
+        }
+
+        const isActive = canProcessChat(state) && !lastError
+        const isRecent = lastEventAt ? (time - Date.parse(lastEventAt) <= DAY) : false
+        const botOnline = isActive && (isRecent || processed24h > 0)
+        const status = botOnline ? 'ok' : (lastError ? 'error' : (isActive ? 'idle' : 'offline'))
+
+        return {
+          status,
+          botOnline,
+          processed24h,
+          lastEventAt,
+          lastError,
+          checkedAt: new Date(time).toISOString(),
+        }
+      })
+    },
     async recommendation(actor, id, periodId, reauthenticate) {
       unavailable()
       if (!uuid(periodId)) invalid()

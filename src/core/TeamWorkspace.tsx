@@ -5,6 +5,7 @@ import { RequestError } from './RequestError'
 import type { SessionSnapshot } from './contracts'
 import { SummaryPanels } from './SummaryPanels'
 import { TeamSettings } from './TeamSettings'
+import { SystemHealthPanel } from './SystemHealthPanel'
 import { TelegramCheckinsPanel } from '../features/insights/TelegramCheckinsPanel'
 import { InviteColleagueButton } from './InviteModal'
 import './team.css'
@@ -334,6 +335,7 @@ export function TeamWorkspace({ onOpenGuide }: TeamWorkspaceProps = {}) {
         <p>Личный чек-ин в Telegram — отдельный сценарий: его ответы не попадают в эту командную сводку. Команда <code>/stop</code> отменяет личный сценарий и очищает черновик бота, но не удаляет веб-ответы или сообщения из истории Telegram.</p>
         <a href="/docs.html#privacy">Подробнее об обработке данных</a>
       </details>}
+      {snapshot.member.role === 'organizer' && <SystemHealthPanel key={'health-' + activeWorkspaceId} onLogin={beginLogin}/>}
       {snapshot.member.role === 'organizer' && <SummaryPanels key={snapshot.workspace.id + ':' + snapshot.round.id + ':' + snapshot.round.summary.status} refreshKey={summaryRefreshKey} onLogin={beginLogin}/>}
       {snapshot.member.role === 'organizer' && <TelegramCheckinsPanel key={'checkins-' + activeWorkspaceId} onLogin={beginLogin}/>}
       {snapshot.member.role === 'organizer' && <TeamSettings key={'settings-' + activeWorkspaceId} onLogin={beginLogin}/>}

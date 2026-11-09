@@ -122,6 +122,13 @@ export function createApp({ dbPath = ':memory:', secret, staticDir, secureCookie
         const current = store.telegram.currentSummary(actor)
         return json(res, 200, url.searchParams.get('includeBinding') === '1' ? current : current.view)
       }
+      if (url.pathname === '/api/telegram/system-health') {
+        if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
+        if (req.method !== 'GET') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')
+        const actor = store.authenticate(tokenFrom(req))
+        if (!actor) throw new AppError(401, 'SIGN_IN_REQUIRED', 'Войдите в пространство команды')
+        return json(res, 200, store.telegram.systemHealth(actor))
+      }
       if (url.pathname === '/api/telegram/recommendation') {
         if (!telegramSynthetic) throw new AppError(503, 'UNAVAILABLE', 'Синтетический контур Telegram выключен')
         if (req.method !== 'GET') throw new AppError(404, 'NOT_FOUND', 'Маршрут Telegram не реализован')

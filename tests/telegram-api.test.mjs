@@ -174,6 +174,8 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
     input, { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1' })
   const profile = (input, token = ownerToken) => request('/telegram/profile', input,
     { Cookie: 'vibebot_session=' + token, 'X-Vibee': '1' })
+  const systemHealth = (token = ownerToken) => request('/telegram/system-health', undefined,
+    { Cookie: 'vibebot_session=' + token })
   const setProfile = () => profile({ requestId: randomUUID(), expectedVersion: 0,
     timeZone: 'Asia/Omsk', intervals: demoIntervals })
   const command = (expectedRevision, fields) => ({ requestId: randomUUID(), expectedRevision, ...fields })
@@ -203,7 +205,7 @@ async function fixture(t, { enabled = true, seedLinks = true, seedBindings = tru
     assert.equal(result.body.phase, 'active')
     return result.body
   }
-  return { db, id, otherBindingId, owner, people, tokens, foreignToken, foreignOwner, foreignPeople, request, web, bot, linkToken, link, bindingToken, bind, subscribeNotifications, closePeriod, summary, currentSummary, currentRecommendation, recommendation, confirmAction, chatFeedback, closeChatFeedback, profile, setProfile, command, status,
+  return { db, id, otherBindingId, owner, people, tokens, foreignToken, foreignOwner, foreignPeople, request, web, bot, linkToken, link, bindingToken, bind, subscribeNotifications, closePeriod, summary, currentSummary, currentRecommendation, recommendation, confirmAction, chatFeedback, closeChatFeedback, profile, setProfile, systemHealth, command, status,
     mutate, decision, prepare, activate, time: () => clock, advance: ms => { clock += ms }, setTime: ms => { clock = ms },
     restart: async () => { await app.close(); await launch() } }
 }
@@ -1700,4 +1702,46 @@ test('HTTP/SQLite: transcription routes are absent when the synthetic gate is of
     { Authorization: 'Bearer ' + credential }), 503, 'UNAVAILABLE')
   error(await f.request('/bot/v1/bindings/' + f.id + '/transcription-jobs/' + randomUUID(),
     undefined, { Authorization: 'Bearer ' + credential }), 503, 'UNAVAILABLE')
+})
+
+test('HTTP/SQLite: system health endpoint reports bot status, 24h count and errors for organizers', async t => {
+  const f = await fixture(t)
+  // Before activation / full consent
+  const initial = await f.systemHealth()
+  assert.equal(initial.status, 200)
+  assert.equal(initial.body.botOnline, false)
+  assert.equal(initial.body.processed24h, 0)
+  assert.equal(initial.body.lastError, 'Ожидаются согласия участников')
+
+  // Activate binding
+  await f.activate()
+  const active = await f.systemHealth()
+  assert.equal(active.status, 200)
+  assert.equal(active.body.lastError, null)
+
+  // Submit checkin
+  const checkinRes = await f.bot('checkins', {
+    telegramUserId: '100000001',
+    nonce: 'a1b2c3d4e5f60718',
+    scores: { energy: 4, clarity: 3, support: 5 },
+    submittedAt: new Date(f.time()).toISOString(),
+  })
+  assert.equal(checkinRes.status, 200)
+
+  const withCheckin = await f.systemHealth()
+  assert.equal(withCheckin.status, 200)
+  assert.equal(withCheckin.body.botOnline, true)
+  assert.equal(withCheckin.body.processed24h, 1)
+  assert.ok(withCheckin.body.lastEventAt !== null)
+  assert.equal(withCheckin.body.lastError, null)
+
+  // Participant cannot access
+  const participantRes = await f.systemHealth(f.tokens[1])
+  assert.equal(participantRes.status, 403)
+  assert.equal(participantRes.body.error.code, 'FORBIDDEN')
+
+  // Without auth
+  const unauthorizedRes = await f.systemHealth('')
+  assert.equal(unauthorizedRes.status, 401)
+  assert.equal(unauthorizedRes.body.error.code, 'SIGN_IN_REQUIRED')
 })
