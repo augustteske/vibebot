@@ -30,6 +30,7 @@ export function applyTheme(theme: Theme, animate = false): void {
     } catch {
       // Без localStorage тема работает, но не сохраняется.
     }
+    window.dispatchEvent(new CustomEvent('vibee-theme-change', { detail: { theme } }))
   }
 
   if (!animate || reducedMotion || root.dataset.theme === theme) {
@@ -37,18 +38,20 @@ export function applyTheme(theme: Theme, animate = false): void {
     return
   }
 
-  root.classList.add('theme-transitioning')
-  window.clearTimeout(transitionTimer)
-  transitionTimer = window.setTimeout(() => {
-    root.classList.remove('theme-transitioning')
-  }, 380)
-
   const docWithTransition = document as Document & {
-    startViewTransition?: (callback: () => void) => void
+    startViewTransition?: (callback: () => void) => { finished: Promise<void> }
   }
+
   if (typeof docWithTransition.startViewTransition === 'function') {
-    docWithTransition.startViewTransition(commit)
+    docWithTransition.startViewTransition(() => {
+      commit()
+    })
   } else {
+    root.classList.add('theme-transitioning')
+    window.clearTimeout(transitionTimer)
+    transitionTimer = window.setTimeout(() => {
+      root.classList.remove('theme-transitioning')
+    }, 480)
     commit()
   }
 }

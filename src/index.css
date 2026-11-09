@@ -55,7 +55,7 @@
   --vibee-inverse-solid-hover: linear-gradient(135deg, #3a3420, #171719 72%);
   --vibee-inverse-solid-ink: #ffffff;
 
-  /* Тёмная полоса лендинга и подвал: остаются тёмными в обеих темах. */
+  /* Тёмная полоса лендинга */
   --vibee-band-bg:
     radial-gradient(ellipse at 12% 0%, rgba(255, 214, 56, .12), transparent 34rem),
     linear-gradient(180deg, #242426 0%, #151517 22%, #151517 100%);
@@ -64,9 +64,14 @@
   --vibee-band-line: rgba(255, 255, 255, .13);
   --vibee-band-card: linear-gradient(145deg, rgba(255, 255, 255, .105), rgba(255, 255, 255, .035));
   --vibee-band-card-hover: linear-gradient(145deg, rgba(255, 255, 255, .15), rgba(255, 255, 255, .055));
-  --vibee-footer-bg: #171719;
-  --vibee-footer-ink: #ffffff;
-  --vibee-footer-muted: rgba(255, 255, 255, .62);
+
+  /* Подвал сайта (адаптируется к светлой/тёмной теме) */
+  --vibee-footer-bg: #ffffff;
+  --vibee-footer-ink: var(--vibee-ink);
+  --vibee-footer-muted: var(--vibee-muted);
+  --vibee-footer-border: var(--vibee-line);
+
+  --vibee-bg: var(--vibee-paper);
 
   /* Ошибки */
   --vibee-danger: #751d1d;
@@ -164,9 +169,13 @@
   --vibee-band-line: rgba(255, 255, 255, .16);
   --vibee-band-card: linear-gradient(145deg, rgba(255, 255, 255, .07), rgba(255, 255, 255, .02));
   --vibee-band-card-hover: linear-gradient(145deg, rgba(255, 255, 255, .12), rgba(255, 255, 255, .04));
-  --vibee-footer-bg: #0c0c0e;
-  --vibee-footer-ink: #f4f3ee;
-  --vibee-footer-muted: rgba(244, 243, 238, .62);
+  /* Подвал сайта в тёмной теме */
+  --vibee-footer-bg: #0e0e11;
+  --vibee-footer-ink: var(--vibee-ink);
+  --vibee-footer-muted: var(--vibee-muted);
+  --vibee-footer-border: var(--vibee-line);
+
+  --vibee-bg: var(--vibee-paper);
 
   --vibee-danger: #ffb4ab;
   --vibee-danger-strong: #ff8a80;
@@ -190,7 +199,7 @@ body {
   margin: 0;
   color: var(--vibee-ink);
   background: var(--vibee-paper);
-  transition: background-color .32s cubic-bezier(.22, 1, .36, 1), color .32s cubic-bezier(.22, 1, .36, 1);
+  transition: background-color .45s cubic-bezier(0.16, 1, 0.3, 1), color .45s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 :root.theme-transitioning,
@@ -198,14 +207,35 @@ body {
 :root.theme-transitioning *::before,
 :root.theme-transitioning *::after {
   transition-property: background-color, border-color, color, fill, stroke, box-shadow;
-  transition-duration: .32s;
-  transition-timing-function: cubic-bezier(.22, 1, .36, 1);
+  transition-duration: .45s !important;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
 ::view-transition-old(root),
 ::view-transition-new(root) {
-  animation-duration: .32s;
-  animation-timing-function: cubic-bezier(.22, 1, .36, 1);
+  animation-duration: .45s;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(root) {
+  animation-name: vt-fade-out;
+  z-index: 1;
+}
+
+::view-transition-new(root) {
+  animation-name: vt-fade-in;
+  z-index: 2;
+}
+
+@keyframes vt-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes vt-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 button,

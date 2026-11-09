@@ -64,7 +64,7 @@
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   border-bottom-color: var(--vibee-line);
-  box-shadow: 0 4px 24px rgba(23, 23, 25, .04);
+  box-shadow: var(--vibee-shadow-soft);
 }
 
 .landing-brand,
@@ -1554,9 +1554,14 @@
 }
 
 .landing-footer {
-  padding-block: 25px 30px;
+  padding-block: 28px 34px;
   color: var(--vibee-footer-ink);
   background: var(--vibee-footer-bg);
+  border-top: 1px solid var(--vibee-footer-border, var(--vibee-line));
+  transition:
+    background-color .45s cubic-bezier(0.16, 1, 0.3, 1),
+    color .45s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color .45s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .landing-footer-inner {
@@ -1570,6 +1575,9 @@
   gap: 8px;
   color: var(--vibee-footer-ink);
   font-size: 22px;
+  font-weight: 750;
+  text-decoration: none;
+  transition: color .45s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .landing-footer-brand img {
@@ -1579,7 +1587,8 @@
 
 .landing-footer-note {
   color: var(--vibee-footer-muted);
-  font-size: 12px;
+  font-size: 13px;
+  transition: color .45s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .landing-footer-links {
@@ -1589,11 +1598,13 @@
 
 .landing-footer-links a {
   color: var(--vibee-footer-muted);
-  font-size: 12px;
+  font-size: 13px;
+  text-decoration: none;
+  transition: color .2s ease;
 }
 
 .landing-footer-links a:hover {
-  color: var(--landing-yellow);
+  color: var(--vibee-focus, var(--vibee-yellow-deep));
 }
 
 .landing-reveal {
