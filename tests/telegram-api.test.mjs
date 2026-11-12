@@ -728,6 +728,32 @@ test('HTTP/SQLite: bot summary is limited to a linked organizer of its binding',
     404, 'NOT_FOUND')
 })
 
+test('HTTP/SQLite: bot health returns the team temperature for a linked organizer', async t => {
+  const f = await fixture(t)
+  await publishForRecommendation(f)
+  const expected = (await f.summary()).body
+  assert.equal(expected.status, 'published')
+  const temperature = Math.round((100 - expected.metrics.outsideHoursPercent
+    + expected.metrics.participationEvenness + expected.metrics.recognitionPercent) / 3)
+  assert.deepEqual(await f.bot('health?telegramUserId=100000001'),
+    { status: 200, body: { status: 'published', temperature } })
+
+  error(await f.bot('health?telegramUserId=100000002'), 403, 'ORGANIZER_REQUIRED')
+  error(await f.bot('health?telegramUserId=999999999'), 403, 'ORGANIZER_REQUIRED')
+  error(await f.bot('health?telegramUserId=100000001', undefined, f.id, bootstrapCredential),
+    401, 'BOT_AUTH_REQUIRED')
+  error(await f.bot('health'), 400, 'INVALID_INPUT')
+  error(await f.bot('health?telegramUserId=100000001', undefined, f.otherBindingId, credential),
+    404, 'NOT_FOUND')
+})
+
+test('HTTP/SQLite: bot health has no temperature before data is ready', async t => {
+  const f = await fixture(t)
+  await f.activate()
+  assert.deepEqual(await f.bot('health?telegramUserId=100000001'),
+    { status: 200, body: { status: 'insufficient' } })
+})
+
 test('HTTP/SQLite: bot share card is a PNG for the linked organizer of a published period', async t => {
   const f = await fixture(t)
   await publishForRecommendation(f)

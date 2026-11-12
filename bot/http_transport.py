@@ -230,6 +230,22 @@ class HttpTransport:
             raise OrganizerRequiredError("Only a linked organizer can read the team summary")
         raise TransportError("Vibee rejected the team summary request")
 
+    async def get_team_health(self, telegram_user_id: int) -> dict[str, object]:
+        """Температура команды 0–100 для связанного организатора."""
+        if type(telegram_user_id) is not int or telegram_user_id < 1:
+            raise TransportError("Invalid Telegram user")
+        url = (
+            f"{self._base_url}/api/bot/v1/bindings/{self._binding_id}/health?"
+            + urlencode({"telegramUserId": str(telegram_user_id)})
+        )
+        response = await self._get(url)
+        body = self._response_body(response)
+        if response.status_code == 200 and isinstance(body.get("status"), str):
+            return body
+        if response.status_code == 403 and self._error_code(body) == "ORGANIZER_REQUIRED":
+            raise OrganizerRequiredError("Only a linked organizer can read the team temperature")
+        raise TransportError("Vibee rejected the team temperature request")
+
     async def get_share_card(self, telegram_user_id: int) -> ShareCard:
         """PNG-карточка «Пульс команды» для связанного организатора."""
         if type(telegram_user_id) is not int or telegram_user_id < 1:

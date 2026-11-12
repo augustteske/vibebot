@@ -3,6 +3,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual, randomUUID } from
 import { canProcessChat, initialConsentState, transitionConsent } from '../src/core/telegram.ts'
 import { formatSharePeriod } from '../src/features/insights/shareCard.ts'
 import { templateRecommendationProvider, recommendationProviderContent } from './recommendation-provider.mjs'
+import { teamTemperature } from './team-health.mjs'
 import {
   isQuestionMessage,
   calculateUnansweredQuestionsPercent,
@@ -1109,6 +1110,17 @@ export function createTelegramStore({ db, secret, bootstrapCredential, fail, ena
       unavailable()
       linkedOrganizer(actor, id, telegramUserId)
       return this.summary(actor, id)
+    },
+    healthForOrganizer(actor, id, telegramUserId) {
+      unavailable()
+      linkedOrganizer(actor, id, telegramUserId)
+      const view = this.summary(actor, id)
+      if (view.status !== 'published') {
+        const noData = ['calibrating', 'insufficient', 'open'].includes(view.status)
+        return { status: noData ? 'insufficient' : 'unavailable' }
+      }
+      const temperature = teamTemperature(view.metrics)
+      return temperature === null ? { status: 'insufficient' } : { status: 'published', temperature }
     },
     shareCard(actor, id, telegramUserId) {
       unavailable()

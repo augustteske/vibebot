@@ -45,6 +45,7 @@ BOT_COMMANDS = [
     BotCommand(command="style", description="Режим общения: классик, ми-ми-ми, правдарубка"),
     BotCommand(command="stats", description="Статистика команды (для организатора)"),
     BotCommand(command="achievements", description="Достижения команды (геймификация)"),
+    BotCommand(command="health", description="Общая температура команды (для организатора)"),
     BotCommand(command="share", description="Карточка «Пульс команды» (для организатора)"),
     BotCommand(command="transcribe", description="Согласие на одну голосовую (нужна локальная модель)"),
     BotCommand(command="subscribe", description="Уведомления организатора (если настроены)"),
@@ -66,6 +67,9 @@ ERROR_KEYS = {
 # Сколько держать завершённый чек-ин в памяти для кнопки «Повторить».
 RETRY_TTL_SECONDS = 300
 STATS_BAR_CELLS = 10
+# Пороги полос «температуры команды»: ниже 40 — остывает, 70 и выше — на подъёме.
+HEALTH_STEADY_MIN = 40
+HEALTH_HOT_MIN = 70
 SHARE_CARD_FILE_NAME = "vibee-team-pulse.png"
 # Кнопка на карточке: отправить её же в связанный групповой чат.
 GROUP_SHARE_CALLBACK = "share:group"
@@ -98,6 +102,7 @@ def create_dispatcher(
     checkin_transport: HttpTransport | None = None,
     stats_transport: HttpTransport | None = None,
     share_transport: HttpTransport | None = None,
+    health_transport: HttpTransport | None = None,
     group_chat_id: int | None = None,
     message_log: SentMessageJournal | None = None,
     question_images: QuestionImageCache | None = None,
@@ -363,6 +368,48 @@ def create_dispatcher(
             metrics = {}
         text = achievements_message(language, metrics)
         await message.answer(text)
+
+    def health_message(language: str, style: str, temperature: int) -> str:
+        """Заголовок с температурой команды и расшифровка её полосы."""
+        if temperature >= HEALTH_HOT_MIN:
+            band = "health.band_hot"
+        elif temperature >= HEALTH_STEADY_MIN:
+            band = "health.band_steady"
+        else:
+            band = "health.band_cold"
+        return "\n".join([
+            i18n.styled_text(language, style, "health.header", value=str(temperature)),
+            i18n.text(language, band),
+        ])
+
+    async def deliver_health(message, user_id: int, language: str, style: str) -> None:
+        """Показывает общую температуру команды; при сбое даёт кнопку «Повторить»."""
+        if health_transport is None:
+            await message.answer(i18n.text(language, "health.no_connection"))
+            return
+        try:
+            view = await health_transport.get_team_health(user_id)
+        except OrganizerRequiredError:
+            await message.answer(i18n.styled_text(language, style, "health.organizer_only"))
+            return
+        except TransportError:
+            await message.answer(
+                i18n.text(language, "error.network"),
+                reply_markup=retry_keyboard(language, "health"),
+            )
+            return
+        status = view.get("status")
+        if status == "insufficient":
+            await message.answer(i18n.text(language, "health.insufficient"))
+            return
+        if status != "published":
+            await message.answer(i18n.styled_text(language, style, "health.unavailable"))
+            return
+        value = view.get("temperature")
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 100:
+            await message.answer(i18n.text(language, "health.error"))
+            return
+        await message.answer(health_message(language, style, int(round(value))))
 
     def share_caption(language: str, card, url: str) -> str:
         """Подпись к карточке: название команды, период и ссылка на Vibee."""
@@ -716,6 +763,10 @@ def create_dispatcher(
             await event.answer()
             await deliver_achievements(message, event.from_user.id, language, style)
             return
+        if len(parts) == 2 and parts[1] == "health":
+            await event.answer()
+            await deliver_health(message, event.from_user.id, language, style)
+            return
         if len(parts) == 2 and parts[1] == "share":
             await event.answer()
             await deliver_share(message, event.from_user.id, language)
@@ -1001,6 +1052,17 @@ def create_dispatcher(
             return
         await deliver_achievements(message, message.from_user.id, language, style)
 
+    @dispatcher.message(Command("health"))
+    async def health_command(message: Message, state: FSMContext | None = None):
+        language = await language_of(state)
+        style = chat_style(await style_of(state), message)
+        if message.chat.type != "private":
+            await message.answer(i18n.text(language, "health.private_only"))
+            return
+        if message.from_user is None or message.from_user.is_bot:
+            return
+        await deliver_health(message, message.from_user.id, language, style)
+
     @dispatcher.message(Command("share"))
     async def share_command(message: Message, state: FSMContext | None = None):
         language = await language_of(state)
@@ -1263,6 +1325,7 @@ async def main():
         checkin_transport=transport,
         stats_transport=transport,
         share_transport=transport,
+        health_transport=transport,
         group_chat_id=group_chat_id,
         message_log=message_log,
         question_images=question_image_cache,

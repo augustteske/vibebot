@@ -141,6 +141,7 @@ _TEXTS: dict[str, dict[str, str]] = {
         "help.lang": "/lang ru | en — язык ответов бота",
         "help.style": "/style — режим общения: классик, ми-ми-ми или правдарубка",
         "help.stats": "/stats — статистика команды; только для связанного организатора",
+        "help.health": "/health — общая температура команды; только для организатора",
         "help.share": "/share — карточка «Пульс команды» для организатора",
         "help.transcribe": "/transcribe — запросить расшифровку одной личной голосовой",
         "help.voice_unavailable": (
@@ -246,6 +247,22 @@ _TEXTS: dict[str, dict[str, str]] = {
         "achievements.fast_responders": "Быстрые ответы",
         "achievements.no_unanswered": "Все услышаны",
         "achievements.zen_communication": "Дзен-общение",
+        "health.private_only": "Температура команды доступна только в личном диалоге с ботом.",
+        "health.organizer_only": (
+            "Температуру команды видит только организатор, чей Telegram-аккаунт связан с этой командой."
+        ),
+        "health.no_connection": "Температура команды пока недоступна: бот не подключён к серверу.",
+        "health.insufficient": (
+            "Пока недостаточно данных для температуры команды. Пригласите коллег в чат!"
+        ),
+        "health.unavailable": (
+            "Температура команды пока недоступна: сбор не идёт. Попробуйте позже."
+        ),
+        "health.header": "🌡 Общая температура команды: {value}%",
+        "health.band_cold": "Команда остывает. Самое время написать коллегам и вернуть ритм.",
+        "health.band_steady": "Рабочий ритм. Команда держится ровно.",
+        "health.band_hot": "Команда на подъёме. Так держать!",
+        "health.error": "Не удалось прочитать температуру команды. Попробуйте позже.",
         "share.private_only": "Карточка «Пульс команды» доступна только в личном диалоге с ботом.",
         "share.organizer_only": (
             "Карточку может собрать только организатор, чей Telegram-аккаунт связан с этой командой."
@@ -383,6 +400,23 @@ _TEXTS: dict[str, dict[str, str]] = {
         "straight.stats.organizer_only": (
             "Статистика только для организатора. Остальным тут смотреть нечего."
         ),
+        "cute.health.header": "🌡 Общая температура команды: {value}% 💛",
+        "cute.health.insufficient": (
+            "Пока маловато данных для температуры 🌱 Пригласите коллег в чат — и всё получится!"
+        ),
+        "cute.health.unavailable": (
+            "Температура ещё не меряется 🌸 Загляните чуть позже — я всё покажу."
+        ),
+        "straight.health.header": "🌡 Общая температура команды: {value}%. Без соплей.",
+        "straight.health.insufficient": (
+            "Данных мало. Пригласи коллег в чат — без них температуру не измерить."
+        ),
+        "straight.health.unavailable": (
+            "Температуры пока нет: мерить нечего. Зайди позже."
+        ),
+        "straight.health.organizer_only": (
+            "Температура только для организатора. Остальным тут смотреть нечего."
+        ),
     },
     EN: {
         "start.private": (
@@ -511,6 +545,7 @@ _TEXTS: dict[str, dict[str, str]] = {
         "help.lang": "/lang ru | en — bot reply language",
         "help.style": "/style — communication mode: classic, cute or straight",
         "help.stats": "/stats — team metrics; linked organizer only",
+        "help.health": "/health — overall team temperature; linked organizer only",
         "help.share": "/share — “Team pulse” card for the organizer",
         "help.transcribe": "/transcribe — request transcription of one personal voice message",
         "help.voice_unavailable": (
@@ -616,6 +651,23 @@ _TEXTS: dict[str, dict[str, str]] = {
         "achievements.fast_responders": "Fast Responders",
         "achievements.no_unanswered": "All Heard",
         "achievements.zen_communication": "Zen Communication",
+        "health.private_only": "Team temperature is available only in a private chat with the bot.",
+        "health.organizer_only": (
+            "Team temperature is available only to the organizer whose Telegram account "
+            "is linked to this team."
+        ),
+        "health.no_connection": "Team temperature is unavailable: the bot is not connected to the server.",
+        "health.insufficient": (
+            "Not enough data for the team temperature yet. Invite your colleagues to the chat!"
+        ),
+        "health.unavailable": (
+            "Team temperature is not available yet: collection is not running. Try again later."
+        ),
+        "health.header": "🌡 Overall team temperature: {value}%",
+        "health.band_cold": "The team is cooling down. A good moment to message your colleagues.",
+        "health.band_steady": "A steady working rhythm. The team is holding its pace.",
+        "health.band_hot": "The team is on the rise. Keep it up!",
+        "health.error": "Could not read the team temperature. Try again later.",
         "share.private_only": "The “Team pulse” card is available only in a private chat with the bot.",
         "share.organizer_only": (
             "Only an organizer whose Telegram account is linked to this team can build the card."
@@ -749,6 +801,23 @@ _TEXTS: dict[str, dict[str, str]] = {
         "straight.stats.organizer_only": (
             "Statistics are for the organizer only. Nothing to see here for everyone else."
         ),
+        "cute.health.header": "🌡 Overall team temperature: {value}% 💛",
+        "cute.health.insufficient": (
+            "Not much data for the temperature yet 🌱 Invite your colleagues and it will work!"
+        ),
+        "cute.health.unavailable": (
+            "The temperature is still brewing 🌸 Check back a little later and I'll show you."
+        ),
+        "straight.health.header": "🌡 Overall team temperature: {value}%. No fluff.",
+        "straight.health.insufficient": (
+            "Not enough data. Invite your colleagues — without them there is nothing to measure."
+        ),
+        "straight.health.unavailable": (
+            "No temperature yet: nothing to measure. Come back later."
+        ),
+        "straight.health.organizer_only": (
+            "Temperature is for the organizer only. Nothing to see here for everyone else."
+        ),
     },
 }
 
@@ -812,6 +881,7 @@ def help_text(language: object, voice_available: bool, notifications_available: 
         text(language, "help.lang"),
         text(language, "help.style"),
         text(language, "help.stats"),
+        text(language, "help.health"),
         text(language, "help.share"),
     ]
     if voice_available:
